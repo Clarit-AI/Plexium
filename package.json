@@ -1,0 +1,16 @@
+{
+  "name": "wiki-harness",
+  "version": "1.0.0",
+  "description": "Auto-wiki documentation harness",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}
