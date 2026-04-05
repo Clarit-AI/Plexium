@@ -1,0 +1,66 @@
+# Developer config with profiles and custom providers
+# Place at ~/.codex/config.toml
+
+model = "gpt-5.4"
+model_provider = "openai"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+web_search = "cached"
+personality = "pragmatic"
+file_opener = "vscode"
+model_reasoning_effort = "medium"
+
+[sandbox_workspace_write]
+writable_roots = []
+network_access = true
+
+[shell_environment_policy]
+inherit = "core"
+exclude = ["AWS_*", "AZURE_*", "*SECRET*", "*TOKEN*"]
+set = { EDITOR = "code" }
+
+[history]
+persistence = "save-all"
+max_bytes = 52428800
+
+[tui]
+notifications = ["agent-turn-complete"]
+animations = true
+show_tooltips = false
+
+[features]
+codex_hooks = true
+undo = true
+
+[profiles]
+
+[profiles.deep-review]
+model = "gpt-5-pro"
+model_reasoning_effort = "high"
+approval_policy = "never"
+sandbox_mode = "read-only"
+
+[profiles.fast]
+model = "gpt-5.4"
+approval_policy = "on-request"
+model_reasoning_effort = "low"
+model_verbosity = "low"
+
+[model_providers]
+
+[model_providers.local]
+name = "Local Ollama"
+base_url = "http://localhost:11434/v1"
+
+[mcp_servers]
+
+[mcp_servers.docs]
+enabled = true
+command = "docs-server"
+args = ["--port", "4000"]
+startup_timeout_sec = 15
+
+[mcp_servers.github]
+enabled = true
+url = "https://github-mcp.example.com/mcp"
+bearer_token_env_var = "GITHUB_TOKEN"

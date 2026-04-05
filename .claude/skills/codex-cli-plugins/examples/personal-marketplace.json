@@ -1,0 +1,32 @@
+{
+  "name": "personal-tools",
+  "interface": {
+    "displayName": "My Tools"
+  },
+  "plugins": [
+    {
+      "name": "research-helper",
+      "source": {
+        "source": "local",
+        "path": "./.codex/plugins/research-helper"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Research"
+    },
+    {
+      "name": "code-review-helper",
+      "source": {
+        "source": "local",
+        "path": "./.codex/plugins/code-review-helper"
+      },
+      "policy": {
+        "installation": "INSTALLED_BY_DEFAULT",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

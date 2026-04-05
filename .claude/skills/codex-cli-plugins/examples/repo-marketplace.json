@@ -1,0 +1,20 @@
+{
+  "name": "local-repo",
+  "interface": {
+    "displayName": "Repo Plugins"
+  },
+  "plugins": [
+    {
+      "name": "hello-plugin",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hello-plugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

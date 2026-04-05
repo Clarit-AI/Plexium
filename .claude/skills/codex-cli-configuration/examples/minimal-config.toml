@@ -1,0 +1,7 @@
+# Minimal Codex CLI config
+# Place at ~/.codex/config.toml or .codex/config.toml
+
+model = "gpt-5.4"
+approval_policy = "on-request"
+sandbox_mode = "read-only"
+web_search = "cached"

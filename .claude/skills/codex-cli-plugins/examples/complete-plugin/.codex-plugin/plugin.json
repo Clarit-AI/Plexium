@@ -1,0 +1,34 @@
+{
+  "name": "research-helper",
+  "version": "0.1.0",
+  "description": "Research assistance with web search and summarization.",
+  "author": {
+    "name": "Dev Team",
+    "email": "dev@example.com",
+    "url": "https://example.com"
+  },
+  "homepage": "https://example.com/plugins/research-helper",
+  "repository": "https://github.com/example/research-helper",
+  "license": "MIT",
+  "keywords": ["research", "summarization"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Research Helper",
+    "shortDescription": "Research assistance with web search and summarization",
+    "longDescription": "Bundle research skills for web search, summarization, and note-taking.",
+    "developerName": "Dev Team",
+    "category": "Research",
+    "capabilities": ["Read"],
+    "websiteURL": "https://example.com",
+    "privacyPolicyURL": "https://example.com/privacy",
+    "termsOfServiceURL": "https://example.com/terms",
+    "defaultPrompt": [
+      "Use Research Helper to summarize this topic.",
+      "Use Research Helper to find recent papers on this subject."
+    ],
+    "brandColor": "#6366F1",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "screenshots": ["./assets/screenshot-1.png"]
+  }
+}
