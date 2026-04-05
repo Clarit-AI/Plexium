@@ -126,8 +126,10 @@ export async function normalize(content: string, filePath: string): Promise<Norm
   let ast: Root;
   let frontmatter: Record<string, unknown> | undefined;
   
+  const contentWithoutFrontmatter = content.replace(/^---[\s\S]*?---/, '').trim();
+  
   try {
-    const result = processor.parse(content);
+    const result = processor.parse(contentWithoutFrontmatter);
     ast = result as Root;
     frontmatter = extractFrontmatter(content);
   } catch (error) {

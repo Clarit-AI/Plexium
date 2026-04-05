@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "sourceDir": "./docs",
+  "include": ["**/*.md"],
+  "exclude": ["node_modules/**", ".wiki-harness/**"],
+  "taxonomy": ["Overview", "Architecture", "Features"],
+  "output": ".wiki-harness/output",
+  "wikiRepo": "https://github.com/example/wiki",
+  "auth": {
+    "mode": "token",
+    "token": "test-token-123"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "sourceDir": "./docs",
+  "include": ["**/*.md"],
+  "exclude": ["node_modules/**"],
+  "taxonomy": [],
+  "output": "",
+  "wikiRepo": "https://github.com/example/wiki",
+  "auth": {
+    "mode": "none"
+  }
+}
