@@ -14,11 +14,14 @@ import (
 
 // InitOptions holds options for plexium init
 type InitOptions struct {
-	RepoRoot    string
-	GitHubWiki  bool
-	Obsidian    bool
-	Strictness  string // strict | moderate | advisory
-	DryRun      bool
+	RepoRoot      string
+	GitHubWiki    bool
+	Obsidian      bool
+	Strictness    string // strict | moderate | advisory
+	DryRun        bool
+	WithMemento   bool
+	WithBeads     bool
+	WithPageIndex bool
 }
 
 // InitResult holds the result of plexium init
@@ -200,6 +203,21 @@ func Init(opts InitOptions) (*InitResult, error) {
 		}
 		result.DirsCreated = append(result.DirsCreated, filepath.Join(wikiDir, "templates"))
 		result.FilesCreated = append(result.FilesCreated, filepath.Join(wikiDir, "templates", "dataview-queries.md"))
+	}
+
+	// Set up optional integrations (--with-memento, --with-beads, --with-pageindex)
+	if opts.WithMemento && !opts.DryRun {
+		// Run "git memento init" — ignore error if not installed
+		cmd := exec.Command("git", "memento", "init")
+		cmd.Dir = opts.RepoRoot
+		_ = cmd.Run()
+	}
+
+	if opts.WithBeads && !opts.DryRun {
+		// Run "bd init" — ignore error if not installed
+		cmd := exec.Command("bd", "init")
+		cmd.Dir = opts.RepoRoot
+		_ = cmd.Run()
 	}
 
 	return result, nil
@@ -426,16 +444,16 @@ sync:
 enforcement:
   preCommitHook: false
   ciCheck: false
-  mementoGate: false
+  mementoGate: %t
   strictness: %s
   blockOnDebt: false
   debtThreshold: 0
 
 integrations:
   llmProvider: ""
-  memento: false
-  beads: false
-  pageindex: false
+  memento: %t
+  beads: %t
+  pageindex: %t
   obsidian: %t
 
 reports:
@@ -463,5 +481,5 @@ sensitivity:
     - ".key"
     - ".pem"
     - ".secret"
-`, opts.GitHubWiki, strictness, strictness, opts.Obsidian, opts.GitHubWiki)
+`, opts.GitHubWiki, strictness, opts.WithMemento, strictness, opts.WithMemento, opts.WithBeads, opts.WithPageIndex, opts.Obsidian, opts.GitHubWiki)
 }

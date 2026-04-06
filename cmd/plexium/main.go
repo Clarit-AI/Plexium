@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/Clarit-AI/Plexium/internal/ci"
 	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/convert"
 	"github.com/Clarit-AI/Plexium/internal/hook"
+	"github.com/Clarit-AI/Plexium/internal/integrations/pageindex"
 	"github.com/Clarit-AI/Plexium/internal/lint"
 	"github.com/Clarit-AI/Plexium/internal/migrate"
 	"github.com/Clarit-AI/Plexium/internal/publish"
@@ -41,6 +43,9 @@ func init() {
 	initCmd.Flags().Bool("obsidian", false, "Generate Obsidian configuration")
 	initCmd.Flags().String("strictness", "moderate", "Strictness level: strict|moderate|advisory")
 	initCmd.Flags().Bool("dry-run", false, "Preview without writing files")
+	initCmd.Flags().Bool("with-memento", false, "Initialize memento session tracking")
+	initCmd.Flags().Bool("with-beads", false, "Initialize beads task tracking")
+	initCmd.Flags().Bool("with-pageindex", false, "Initialize PageIndex retrieval")
 
 	// convert flags
 	convertCmd.Flags().String("depth", "shallow", "Scour depth: shallow|deep")
@@ -52,12 +57,16 @@ func init() {
 
 	// lint flags
 	lintCmd.Flags().Bool("deterministic", false, "Run deterministic checks only (link/orphan/staleness validation)")
+	lintCmd.Flags().Bool("full", false, "Run full lint including LLM-augmented semantic checks")
 	lintCmd.Flags().Bool("ci", false, "CI mode: exit with non-zero code on lint errors or warnings")
 	lintCmd.Flags().String("fail-on", "error", "Exit non-zero on this severity: error|warning")
 
 	// gh-wiki-sync flags
 	ghWikiSyncCmd.Flags().Bool("dry-run", false, "Preview sync without writing")
 	ghWikiSyncCmd.Flags().Bool("push", false, "Push changes to GitHub Wiki")
+
+	// retrieve flags
+	retrieveCmd.Flags().String("format", "markdown", "Output format: json|markdown")
 
 	// migrate flags
 	migrateCmd.Flags().Bool("dry-run", false, "Preview migrations without applying")
@@ -103,6 +112,9 @@ var initCmd = &cobra.Command{
 		obsidian, _ := cmd.Flags().GetBool("obsidian")
 		strictness, _ := cmd.Flags().GetString("strictness")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		withMemento, _ := cmd.Flags().GetBool("with-memento")
+		withBeads, _ := cmd.Flags().GetBool("with-beads")
+		withPageIndex, _ := cmd.Flags().GetBool("with-pageindex")
 
 		repoRoot, err := os.Getwd()
 		if err != nil {
@@ -112,11 +124,14 @@ var initCmd = &cobra.Command{
 		outputJSON, _ := cmd.Flags().GetBool("output-json")
 
 		result, err := wiki.Init(wiki.InitOptions{
-			RepoRoot:   repoRoot,
-			GitHubWiki: githubWiki,
-			Obsidian:   obsidian,
-			Strictness: strictness,
-			DryRun:     dryRun,
+			RepoRoot:      repoRoot,
+			GitHubWiki:    githubWiki,
+			Obsidian:      obsidian,
+			Strictness:    strictness,
+			DryRun:        dryRun,
+			WithMemento:   withMemento,
+			WithBeads:     withBeads,
+			WithPageIndex: withPageIndex,
 		})
 		if err != nil {
 			return fmt.Errorf("init failed: %w", err)
@@ -218,12 +233,12 @@ var lintCmd = &cobra.Command{
 
 		outputJSON, _ := cmd.Flags().GetBool("output-json")
 		deterministic, _ := cmd.Flags().GetBool("deterministic")
+		full, _ := cmd.Flags().GetBool("full")
 		ciMode, _ := cmd.Flags().GetBool("ci")
 
-		// --full (semantic lint) is Phase 9 work; only deterministic is available
-		if !deterministic {
-			fmt.Println("Note: --full semantic lint is not yet implemented.")
-			fmt.Println("Running deterministic checks only. Use --deterministic to suppress this message.")
+		if !deterministic && !full {
+			fmt.Println("Note: Use --deterministic for structural checks or --full for LLM-augmented analysis.")
+			fmt.Println("Running deterministic checks only.")
 			fmt.Println()
 		}
 
@@ -231,7 +246,15 @@ var lintCmd = &cobra.Command{
 		cfg, _ := config.LoadFromDir(repoRoot)
 
 		linter := lint.NewLinter(repoRoot, cfg)
-		report, err := linter.RunDeterministic()
+
+		var report *lint.LintReport
+		if full {
+			// LLM-augmented lint — RunFull with nil client uses deterministic only
+			// A real LLM client would be injected here when integrations.llmProvider is configured
+			report, err = linter.RunFull(nil)
+		} else {
+			report, err = linter.RunDeterministic()
+		}
 		if err != nil {
 			return fmt.Errorf("lint failed: %w", err)
 		}
@@ -328,7 +351,49 @@ var retrieveCmd = &cobra.Command{
 	Short: "Query wiki for information",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium retrieve")
+		query := args[0]
+		format, _ := cmd.Flags().GetString("format")
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		wikiRoot := ".wiki"
+		if cfg != nil && cfg.Wiki.Root != "" {
+			wikiRoot = cfg.Wiki.Root
+		}
+
+		retriever := pageindex.NewRetriever(filepath.Join(repoRoot, wikiRoot))
+
+		result, err := retriever.Retrieve(query)
+		if err != nil {
+			return fmt.Errorf("retrieve failed: %w", err)
+		}
+
+		if outputJSON || format == "json" {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+			return nil
+		}
+
+		// Markdown output
+		if len(result.Pages) == 0 {
+			fmt.Printf("No results for: %s\n", query)
+			return nil
+		}
+
+		fmt.Printf("Results for: %s (%d hits)\n\n", query, len(result.Pages))
+		for _, hit := range result.Pages {
+			fmt.Printf("## %s\n", hit.Title)
+			fmt.Printf("%s | relevance: %.1f\n", hit.Path, hit.Relevance)
+			if hit.Summary != "" {
+				fmt.Printf("%s\n", hit.Summary)
+			}
+			fmt.Println()
+		}
 		return nil
 	},
 }

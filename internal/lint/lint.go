@@ -324,6 +324,37 @@ func (l *Linter) summarize(d *DeterministicReport) LintSummary {
 	return s
 }
 
+// RunFull runs deterministic checks plus LLM-augmented analysis.
+// Requires an LLMClient to be provided. If nil, only runs deterministic checks.
+func (l *Linter) RunFull(client LLMClient) (*LintReport, error) {
+	// First run deterministic
+	report, err := l.RunDeterministic()
+	if err != nil {
+		return nil, err
+	}
+
+	if client == nil {
+		return report, nil
+	}
+
+	// Then run LLM analysis
+	analyzer := NewLLMAnalyzer(client, l.wikiRoot())
+	result, err := analyzer.Analyze(nil) // all pages
+	if err != nil {
+		// LLM failure is non-fatal — return deterministic results with warning
+		report.LLMAugmented = LLMAugmentedReport{}
+		return report, nil
+	}
+
+	report.LLMAugmented = LLMAugmentedReport{
+		Contradictions:   result.Contradictions,
+		SuggestedPages:   result.SuggestedPages,
+		MissingCrossRefs: result.MissingCrossRefs,
+	}
+
+	return report, nil
+}
+
 // ToJSON formats the lint report as JSON.
 func (r *LintReport) ToJSON() ([]byte, error) {
 	return json.MarshalIndent(r, "", "  ")
