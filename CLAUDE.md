@@ -41,16 +41,25 @@ Track all milestone work as bd epics:
 ```bash
 bd stats           # See all milestone epics and status
 bd ready           # See next actionable tasks
+bd dolt push       # Push beads data to remote (REQUIRED before git push)
 ```
+
+**Important:** Run `bd dolt push` BEFORE `git push` to sync issue data to remote.
 
 **Epics:** `plexium-p0` (Phase 0) through `plexium-m10` (Milestone 10)
 
 ### memento — Session Provenance
 
-Every commit is captured as a git note:
+Use `git memento commit <session-id>` instead of `git commit` to capture session context on commits.
+
+**When to use:**
+- End of each phase completion
+- Branched off functions or components
+- Troubleshooting sessions
+- Any significant implementation milestone
 
 ```bash
-git memento check    # Verify memento is working
+git memento commit <session-id> -m "commit message"
 ```
 
 ---
