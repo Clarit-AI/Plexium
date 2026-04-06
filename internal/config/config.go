@@ -8,7 +8,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config represents the Plexium configuration
+// Config represents the Plexium configuration.
+// See docs/architecture/core-architecture.md §7 for the full schema.
 type Config struct {
 	Version      int           `yaml:"version"`
 	Repo         Repo          `yaml:"repo"`
@@ -42,31 +43,42 @@ type Agents struct {
 
 type Wiki struct {
 	Root    string `yaml:"root"`
-	Title   string `yaml:"title"`
 	Home    string `yaml:"home"`
-	NavFile string `yaml:"navFile"`
+	Sidebar string `yaml:"sidebar"`
+	Footer  string `yaml:"footer"`
+	Log     string `yaml:"log"`
+	Index   string `yaml:"index"`
+	Schema  string `yaml:"schema"`
 }
 
 type Taxonomy struct {
-	Modules   []string `yaml:"modules"`
-	Decisions []string `yaml:"decisions"`
-	Concepts  []string `yaml:"concepts"`
+	Sections    []string `yaml:"sections"`
+	AutoClassify bool    `yaml:"autoClassify"`
 }
 
 type Publish struct {
-	Branch   string `yaml:"branch"`
-	Message  string `yaml:"message"`
-	AutoPush bool   `yaml:"autoPush"`
+	Branch                string `yaml:"branch"`
+	Message               string `yaml:"message"`
+	AutoPush              bool   `yaml:"autoPush"`
+	PreserveUnmanagedPages bool  `yaml:"preserveUnmanagedPages"`
+	ManagedMarkerComment  bool   `yaml:"managedMarkerComment"`
 }
 
 type Sync struct {
-	AutoSync  bool     `yaml:"autoSync"`
-	OnCommit  bool     `yaml:"onCommit"`
-	OnPush    bool     `yaml:"onPush"`
-	Exclude   []string `yaml:"exclude"`
+	Mode              string   `yaml:"mode"` // incremental | full
+	AutoSync          bool     `yaml:"autoSync"`
+	OnCommit          bool     `yaml:"onCommit"`
+	OnPush            bool     `yaml:"onPush"`
+	RewriteHomeOnSync bool     `yaml:"rewriteHomeOnSync"`
+	RewriteSidebarOnSync bool  `yaml:"rewriteSidebarOnSync"`
+	Idempotent        bool     `yaml:"idempotent"`
+	Exclude           []string `yaml:"exclude"`
 }
 
 type Enforcement struct {
+	PreCommitHook bool   `yaml:"preCommitHook"`
+	CICheck       bool   `yaml:"ciCheck"`
+	MementoGate   bool   `yaml:"mementoGate"`
 	Strictness    string `yaml:"strictness"` // strict | moderate | advisory
 	BlockOnDebt   bool   `yaml:"blockOnDebt"`
 	DebtThreshold int    `yaml:"debtThreshold"`
@@ -76,22 +88,50 @@ type Integrations struct {
 	LLMProvider string `yaml:"llmProvider"`
 	Memento     bool   `yaml:"memento"`
 	Beads       bool   `yaml:"beads"`
+	PageIndex   bool   `yaml:"pageindex"`
+	Obsidian    bool   `yaml:"obsidian"`
 }
 
 type Reports struct {
 	Bootstrap []string `yaml:"bootstrap"` // markdown, json
 	Sync      []string `yaml:"sync"`
 	Lint      []string `yaml:"lint"`
+	Format    string   `yaml:"format"` // json | markdown | both
+	OutputDir string   `yaml:"outputDir"`
 }
 
 type GitHubWiki struct {
-	Enabled bool   `yaml:"enabled"`
-	Subtree string `yaml:"subtree"`
+	Enabled   bool     `yaml:"enabled"`
+	Submodule bool     `yaml:"submodule"`
+	Publish   []string `yaml:"publish"`
+	Exclude   []string `yaml:"exclude"`
 }
 
 type Sensitivity struct {
-	MaxFileSize int64  `yaml:"maxFileSize"`
+	Rules       string   `yaml:"rules"`
+	NeverPublish []string `yaml:"neverPublish"`
+	MaxFileSize int64    `yaml:"maxFileSize"`
 	ExcludeExts []string `yaml:"excludeExtensions"`
+}
+
+// envBindings maps config keys to their environment variable overrides.
+// Viper's AutomaticEnv only works with explicit Bind calls when using Unmarshal.
+var envBindings = map[string]string{
+	"wiki.root":        "PLEXIUM_WIKI_ROOT",
+	"wiki.home":        "PLEXIUM_WIKI_HOME",
+	"wiki.sidebar":     "PLEXIUM_WIKI_SIDEBAR",
+	"wiki.footer":      "PLEXIUM_WIKI_FOOTER",
+	"wiki.log":         "PLEXIUM_WIKI_LOG",
+	"wiki.index":       "PLEXIUM_WIKI_INDEX",
+	"wiki.schema":      "PLEXIUM_WIKI_SCHEMA",
+	"repo.defaultBranch": "PLEXIUM_REPO_DEFAULT_BRANCH",
+	"repo.wikiEnabled":   "PLEXIUM_REPO_WIKI_ENABLED",
+	"sources.include":    "PLEXIUM_SOURCES_INCLUDE",
+	"sources.exclude":    "PLEXIUM_SOURCES_EXCLUDE",
+	"agents.strictness":  "PLEXIUM_AGENTS_STRICTNESS",
+	"sync.mode":          "PLEXIUM_SYNC_MODE",
+	"enforcement.strictness": "PLEXIUM_ENFORCEMENT_STRICTNESS",
+	"githubWiki.enabled":     "PLEXIUM_GITHUB_WIKI_ENABLED",
 }
 
 // Load reads configuration from .plexium/config.yml with environment variable overrides
@@ -109,6 +149,11 @@ func Load(configPath string) (*Config, error) {
 	// Enable environment variable overrides
 	v.AutomaticEnv()
 	v.SetEnvPrefix("PLEXIUM")
+
+	// Bind specific env vars so they work with Unmarshal
+	for key, envVar := range envBindings {
+		_ = v.BindEnv(key, envVar)
+	}
 
 	// Read config file
 	if err := v.ReadInConfig(); err != nil {

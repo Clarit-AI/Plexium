@@ -47,8 +47,9 @@ func TestScanner_Scan(t *testing.T) {
 	results, err := s.Scan(tmpDir)
 	require.NoError(t, err)
 
-	// Should find .go files and docs/*.md
-	assert.Len(t, results, 4)
+	// Should find .go files, docs/*.md, AND README.md at root
+	// (root-level files now match because **/*.md is augmented with *.md)
+	assert.Len(t, results, 5)
 	paths := make([]string, len(results))
 	for i, f := range results {
 		paths[i] = f.Path
@@ -57,7 +58,27 @@ func TestScanner_Scan(t *testing.T) {
 	assert.Contains(t, paths, "src/auth/login.go")
 	assert.Contains(t, paths, "docs/guide.md")
 	assert.Contains(t, paths, "docs/guides/api.md")
-	assert.NotContains(t, paths, "README.md")
+	assert.Contains(t, paths, "README.md")
+}
+
+func TestScanner_Scan_RootLevelOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+	err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# Readme"), 0644)
+	require.NoError(t, err)
+	err = os.MkdirAll(filepath.Join(tmpDir, "docs"), 0755)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(tmpDir, "docs", "guide.md"), []byte("# Guide"), 0644)
+	require.NoError(t, err)
+
+	s, err := New([]string{"**/*.md"}, nil)
+	require.NoError(t, err)
+
+	results, err := s.Scan(tmpDir)
+	require.NoError(t, err)
+
+	paths := filepaths(results)
+	assert.Contains(t, paths, "README.md")
+	assert.Contains(t, paths, "docs/guide.md")
 }
 
 func TestScanner_Scan_Exclude(t *testing.T) {
@@ -104,7 +125,7 @@ func TestScanner_Scan_DeterministicOrder(t *testing.T) {
 	require.NoError(t, err)
 
 	// Should be sorted alphabetically
-	assert.Equal(t, []string{"src/a-file.go", "src/m-file.go", "src/z-file.go"}, paths(results))
+	assert.Equal(t, []string{"src/a-file.go", "src/m-file.go", "src/z-file.go"}, filepaths(results))
 }
 
 func TestExpandHome(t *testing.T) {
@@ -113,7 +134,7 @@ func TestExpandHome(t *testing.T) {
 	assert.Equal(t, filepath.Join(home, "test/path"), result)
 }
 
-func paths(files []File) []string {
+func filepaths(files []File) []string {
 	p := make([]string, len(files))
 	for i, f := range files {
 		p[i] = f.Path

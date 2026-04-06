@@ -4,17 +4,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Clarit-AI/Plexium/internal/config"
-	"github.com/Clarit-AI/Plexium/internal/scanner"
-	"github.com/Clarit-AI/Plexium/internal/markdown"
-	"github.com/Clarit-AI/Plexium/internal/template"
 	"github.com/spf13/cobra"
 )
 
 var (
 	version = "0.1.0"
 	cfgFile string
-	cfg     *config.Config
 )
 
 var rootCmd = &cobra.Command{
@@ -227,11 +222,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-
-// Expose internal packages for testing
-var (
-	_ = scanner.New
-	_ = markdown.Parse
-	_ = template.New
-	_ = config.Load
-)

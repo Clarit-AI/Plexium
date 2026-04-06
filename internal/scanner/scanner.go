@@ -18,20 +18,22 @@ type Scanner struct {
 
 // File represents a scanned file
 type File struct {
-	Path    string
-	AbsPath string
-	Content string
-	IsDir   bool
+	Path      string
+	AbsPath   string
+	Content   string
+	IsDir     bool
 	IsSymlink bool
-	Mode    os.FileMode
-	ModTime time.Time
+	Mode      os.FileMode
+	ModTime   time.Time
 }
 
-// New creates a new Scanner with the given include and exclude patterns
+// New creates a new Scanner with the given include and exclude patterns.
+// Patterns like "**/*.md" are augmented with a root-level variant ("*.md")
+// so that files at the repo root are also matched.
 func New(include, exclude []string) (*Scanner, error) {
 	s := &Scanner{
-		include: make([]glob.Glob, 0, len(include)),
-		exclude: make([]glob.Glob, 0, len(exclude)),
+		include: make([]glob.Glob, 0, len(include)*2),
+		exclude: make([]glob.Glob, 0, len(exclude)*2),
 	}
 
 	for _, pattern := range include {
@@ -40,6 +42,16 @@ func New(include, exclude []string) (*Scanner, error) {
 			return nil, err
 		}
 		s.include = append(s.include, g)
+
+		// For recursive patterns like "**/*.md", also compile the root-level
+		// variant "*.md" so files at the repo root match.
+		if rootPat := rootLevelPattern(pattern); rootPat != "" && rootPat != pattern {
+			rg, err := glob.Compile(rootPat, '/')
+			if err != nil {
+				return nil, err
+			}
+			s.include = append(s.include, rg)
+		}
 	}
 
 	for _, pattern := range exclude {
@@ -48,9 +60,26 @@ func New(include, exclude []string) (*Scanner, error) {
 			return nil, err
 		}
 		s.exclude = append(s.exclude, g)
+
+		if rootPat := rootLevelPattern(pattern); rootPat != "" && rootPat != pattern {
+			rg, err := glob.Compile(rootPat, '/')
+			if err != nil {
+				return nil, err
+			}
+			s.exclude = append(s.exclude, rg)
+		}
 	}
 
 	return s, nil
+}
+
+// rootLevelPattern converts a recursive glob like "**/*.md" into its
+// root-level equivalent "*.md". Returns "" if the pattern is not recursive.
+func rootLevelPattern(pattern string) string {
+	if !strings.HasPrefix(pattern, "**/") {
+		return ""
+	}
+	return strings.TrimPrefix(pattern, "**/")
 }
 
 // Scan traverses the root directory and returns files matching include patterns
@@ -81,7 +110,7 @@ func (s *Scanner) Scan(root string) ([]File, error) {
 			isSymlink = true
 		}
 
-		// Check exclude patterns first
+		// Check exclude patterns first (exclude takes precedence)
 		if s.matches(relPath, s.exclude) {
 			if info.IsDir() {
 				return filepath.SkipDir
@@ -110,13 +139,13 @@ func (s *Scanner) Scan(root string) ([]File, error) {
 		}
 
 		files = append(files, File{
-			Path:     relPath,
-			AbsPath:  path,
-			Content:  content,
-			IsDir:    info.IsDir(),
+			Path:      relPath,
+			AbsPath:   path,
+			Content:   content,
+			IsDir:     info.IsDir(),
 			IsSymlink: isSymlink,
-			Mode:     info.Mode(),
-			ModTime:  info.ModTime(),
+			Mode:      info.Mode(),
+			ModTime:   info.ModTime(),
 		})
 
 		return nil

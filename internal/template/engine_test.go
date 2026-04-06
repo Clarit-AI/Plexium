@@ -27,20 +27,8 @@ func TestEngine_Render_NotFound(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestModuleData(t *testing.T) {
-	data := ModuleData{
-		Title:         "Auth Module",
-		LastUpdated:   "2024-01-01",
-		UpdatedBy:     "agent-1",
-		RelatedModules: []string{"UserModule", "SessionModule"},
-		SourceFiles:   []string{"src/auth/*.go"},
-		Confidence:    "high",
-		ReviewStatus:  "unreviewed",
-		Tags:          []string{"auth", "security"},
-		Body:          "Authentication module content",
-	}
-
-	assert.Equal(t, "Auth Module", data.Title)
-	assert.Len(t, data.RelatedModules, 2)
-	assert.Contains(t, data.Tags, "auth")
+func TestDefaultEngine(t *testing.T) {
+	e, err := DefaultEngine()
+	require.NoError(t, err)
+	assert.NotNil(t, e)
 }

@@ -77,39 +77,6 @@ func DefaultEngine() (*Engine, error) {
 	return New("")
 }
 
-// ModuleData represents data for module page templates
-type ModuleData struct {
-	Title         string
-	LastUpdated   string
-	UpdatedBy     string
-	RelatedModules []string
-	SourceFiles   []string
-	Confidence    string
-	ReviewStatus  string
-	Tags          []string
-	Body          string
-}
-
-// DecisionData represents data for ADR templates
-type DecisionData struct {
-	Title       string
-	Date        string
-	Deciders    []string
-	Context     string
-	Decision    string
-	Consequences string
-	Status      string
-}
-
-// ConceptData represents data for concept page templates
-type ConceptData struct {
-	Title       string
-	Description string
-	Related     []string
-	Examples    []string
-	Tags        []string
-}
-
 // Ensure template directory exists
 func EnsureDir(dir string) error {
 	return os.MkdirAll(dir, 0755)

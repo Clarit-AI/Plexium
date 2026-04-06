@@ -20,10 +20,35 @@ func TestLoad(t *testing.T) {
 version: 1
 wiki:
   root: .wiki
+  home: Home.md
+  sidebar: _Sidebar.md
+  footer: _Footer.md
+  log: _log.md
+  index: _index.md
+  schema: _schema.md
 sources:
   include:
     - "**/*.go"
     - "docs/**/*.md"
+taxonomy:
+  sections:
+    - Architecture
+    - Modules
+    - Decisions
+  autoClassify: true
+sync:
+  mode: incremental
+  idempotent: true
+enforcement:
+  preCommitHook: true
+  ciCheck: true
+  strictness: moderate
+reports:
+  format: both
+  outputDir: .plexium/reports/
+githubWiki:
+  enabled: true
+  submodule: true
 `
 	err = os.WriteFile(configPath, []byte(validConfig), 0644)
 	require.NoError(t, err)
@@ -32,7 +57,18 @@ sources:
 	require.NoError(t, err)
 	assert.Equal(t, 1, cfg.Version)
 	assert.Equal(t, ".wiki", cfg.Wiki.Root)
+	assert.Equal(t, "Home.md", cfg.Wiki.Home)
+	assert.Equal(t, "_Sidebar.md", cfg.Wiki.Sidebar)
+	assert.Equal(t, "_log.md", cfg.Wiki.Log)
+	assert.Equal(t, "_index.md", cfg.Wiki.Index)
+	assert.Equal(t, "_schema.md", cfg.Wiki.Schema)
 	assert.Contains(t, cfg.Sources.Include, "**/*.go")
+	assert.True(t, cfg.Taxonomy.AutoClassify)
+	assert.Equal(t, "incremental", cfg.Sync.Mode)
+	assert.True(t, cfg.Sync.Idempotent)
+	assert.True(t, cfg.Enforcement.PreCommitHook)
+	assert.True(t, cfg.GitHubWiki.Enabled)
+	assert.True(t, cfg.GitHubWiki.Submodule)
 }
 
 func TestLoad_MissingFile(t *testing.T) {
