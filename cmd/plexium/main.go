@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Clarit-AI/Plexium/internal/ci"
 	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/convert"
 	"github.com/Clarit-AI/Plexium/internal/hook"
+	"github.com/Clarit-AI/Plexium/internal/integrations/beads"
 	"github.com/Clarit-AI/Plexium/internal/integrations/pageindex"
 	"github.com/Clarit-AI/Plexium/internal/lint"
 	"github.com/Clarit-AI/Plexium/internal/migrate"
@@ -83,6 +85,12 @@ func init() {
 	ciCmd.AddCommand(ciiCheckCmd)
 	hookCmd.AddCommand(hookPreCommitCmd)
 	hookCmd.AddCommand(hookPostCommitCmd)
+	pageidxCmd.AddCommand(pageidxServeCmd)
+	beadsCmd.AddCommand(beadsLinkCmd)
+	beadsCmd.AddCommand(beadsUnlinkCmd)
+	beadsCmd.AddCommand(beadsPagesCmd)
+	beadsCmd.AddCommand(beadsTasksCmd)
+	beadsCmd.AddCommand(beadsScanCmd)
 
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(convertCmd)
@@ -97,6 +105,8 @@ func init() {
 	rootCmd.AddCommand(pluginCmd)
 	rootCmd.AddCommand(hookCmd)
 	rootCmd.AddCommand(ciCmd)
+	rootCmd.AddCommand(pageidxCmd)
+	rootCmd.AddCommand(beadsCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(compileCmd)
 	rootCmd.AddCommand(agentCmd)
@@ -769,6 +779,230 @@ var orchestrateCmd = &cobra.Command{
 	Short: "Run orchestrated wiki-update for issue",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println(" plexium orchestrate")
+		return nil
+	},
+}
+
+// pageindex command — parent for subcommands
+var pageidxCmd = &cobra.Command{
+	Use:   "pageindex",
+	Short: "PageIndex MCP server management",
+}
+
+// pageindex serve subcommand
+var pageidxServeCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Start PageIndex MCP server (stdio mode)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		wikiRoot := ".wiki"
+		if cfg != nil && cfg.Wiki.Root != "" {
+			wikiRoot = cfg.Wiki.Root
+		}
+
+		server := pageindex.NewServer(filepath.Join(repoRoot, wikiRoot))
+		fmt.Fprintf(os.Stderr, "PageIndex MCP server running (stdio mode)\n")
+		return server.Start()
+	},
+}
+
+// beads command — parent for subcommands
+var beadsCmd = &cobra.Command{
+	Use:   "beads",
+	Short: "Manage beads task ↔ wiki page links",
+}
+
+// beads link subcommand
+var beadsLinkCmd = &cobra.Command{
+	Use:   "link <task-id> <wiki-path>",
+	Short: "Link a task ID to a wiki page",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		wikiRoot := ".wiki"
+		if cfg != nil && cfg.Wiki.Root != "" {
+			wikiRoot = cfg.Wiki.Root
+		}
+
+		linker := beads.NewLinker(filepath.Join(repoRoot, wikiRoot))
+		result, err := linker.LinkTaskToPage(args[0], args[1])
+		if err != nil {
+			return fmt.Errorf("link failed: %w", err)
+		}
+
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+		if outputJSON {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("%s: %s ↔ %s\n", result.Action, result.TaskID, result.WikiPath)
+		}
+		return nil
+	},
+}
+
+// beads unlink subcommand
+var beadsUnlinkCmd = &cobra.Command{
+	Use:   "unlink <task-id> <wiki-path>",
+	Short: "Remove a task ID from a wiki page",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		wikiRoot := ".wiki"
+		if cfg != nil && cfg.Wiki.Root != "" {
+			wikiRoot = cfg.Wiki.Root
+		}
+
+		linker := beads.NewLinker(filepath.Join(repoRoot, wikiRoot))
+		result, err := linker.UnlinkTaskFromPage(args[0], args[1])
+		if err != nil {
+			return fmt.Errorf("unlink failed: %w", err)
+		}
+
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+		if outputJSON {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("%s: %s ↔ %s\n", result.Action, result.TaskID, result.WikiPath)
+		}
+		return nil
+	},
+}
+
+// beads pages subcommand
+var beadsPagesCmd = &cobra.Command{
+	Use:   "pages <task-id>",
+	Short: "Show wiki pages linked to a task",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		wikiRoot := ".wiki"
+		if cfg != nil && cfg.Wiki.Root != "" {
+			wikiRoot = cfg.Wiki.Root
+		}
+
+		linker := beads.NewLinker(filepath.Join(repoRoot, wikiRoot))
+		mapping, err := linker.GetTaskPages(args[0])
+		if err != nil {
+			return fmt.Errorf("lookup failed: %w", err)
+		}
+
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+		if outputJSON {
+			data, _ := json.MarshalIndent(mapping, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			if len(mapping.WikiPaths) == 0 {
+				fmt.Printf("No wiki pages linked to task %s\n", args[0])
+			} else {
+				fmt.Printf("Task %s → %d page(s):\n", mapping.TaskID, len(mapping.WikiPaths))
+				for _, p := range mapping.WikiPaths {
+					fmt.Printf("  %s\n", p)
+				}
+			}
+		}
+		return nil
+	},
+}
+
+// beads tasks subcommand
+var beadsTasksCmd = &cobra.Command{
+	Use:   "tasks <wiki-path>",
+	Short: "Show task IDs linked to a wiki page",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		wikiRoot := ".wiki"
+		if cfg != nil && cfg.Wiki.Root != "" {
+			wikiRoot = cfg.Wiki.Root
+		}
+
+		linker := beads.NewLinker(filepath.Join(repoRoot, wikiRoot))
+		mapping, err := linker.GetPageTasks(args[0])
+		if err != nil {
+			return fmt.Errorf("lookup failed: %w", err)
+		}
+
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+		if outputJSON {
+			data, _ := json.MarshalIndent(mapping, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			if len(mapping.TaskIDs) == 0 {
+				fmt.Printf("No tasks linked to %s\n", args[0])
+			} else {
+				fmt.Printf("%s → %d task(s):\n", mapping.WikiPath, len(mapping.TaskIDs))
+				for _, id := range mapping.TaskIDs {
+					fmt.Printf("  %s\n", id)
+				}
+			}
+		}
+		return nil
+	},
+}
+
+// beads scan subcommand
+var beadsScanCmd = &cobra.Command{
+	Use:   "scan",
+	Short: "Scan all wiki pages for beads task links",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		wikiRoot := ".wiki"
+		if cfg != nil && cfg.Wiki.Root != "" {
+			wikiRoot = cfg.Wiki.Root
+		}
+
+		linker := beads.NewLinker(filepath.Join(repoRoot, wikiRoot))
+		mappings, err := linker.ScanAllLinks()
+		if err != nil {
+			return fmt.Errorf("scan failed: %w", err)
+		}
+
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+		if outputJSON {
+			data, _ := json.MarshalIndent(mappings, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			if len(mappings) == 0 {
+				fmt.Println("No beads task links found in wiki.")
+			} else {
+				fmt.Printf("Found %d task(s) with wiki links:\n", len(mappings))
+				for _, m := range mappings {
+					fmt.Printf("  %s → %s\n", m.TaskID, strings.Join(m.WikiPaths, ", "))
+				}
+			}
+		}
 		return nil
 	},
 }

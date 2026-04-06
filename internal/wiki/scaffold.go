@@ -207,17 +207,36 @@ func Init(opts InitOptions) (*InitResult, error) {
 
 	// Set up optional integrations (--with-memento, --with-beads, --with-pageindex)
 	if opts.WithMemento && !opts.DryRun {
-		// Run "git memento init" — ignore error if not installed
 		cmd := exec.Command("git", "memento", "init")
 		cmd.Dir = opts.RepoRoot
-		_ = cmd.Run()
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: git memento init failed: %v\n", err)
+		}
 	}
 
 	if opts.WithBeads && !opts.DryRun {
-		// Run "bd init" — ignore error if not installed
 		cmd := exec.Command("bd", "init")
 		cmd.Dir = opts.RepoRoot
-		_ = cmd.Run()
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: bd init failed: %v\n", err)
+		}
+	}
+
+	if opts.WithPageIndex && !opts.DryRun {
+		// Generate MCP config for PageIndex server
+		mcpConfig := `{
+  "server": "plexium-pageindex",
+  "command": "plexium",
+  "args": ["pageindex", "serve"],
+  "transport": "stdio"
+}
+`
+		mcpPath := filepath.Join(opts.RepoRoot, ".plexium", "pageindex-mcp.json")
+		if err := os.WriteFile(mcpPath, []byte(mcpConfig), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to write PageIndex MCP config: %v\n", err)
+		} else {
+			result.FilesCreated = append(result.FilesCreated, mcpPath)
+		}
 	}
 
 	return result, nil
