@@ -11,19 +11,76 @@ import (
 // Config represents the Plexium configuration.
 // See docs/architecture/core-architecture.md §7 for the full schema.
 type Config struct {
-	Version      int           `yaml:"version"`
-	Repo         Repo          `yaml:"repo"`
-	Sources      Sources       `yaml:"sources"`
-	Agents       Agents        `yaml:"agents"`
-	Wiki         Wiki          `yaml:"wiki"`
-	Taxonomy     Taxonomy      `yaml:"taxonomy"`
-	Publish      Publish       `yaml:"publish"`
-	Sync         Sync          `yaml:"sync"`
-	Enforcement  Enforcement   `yaml:"enforcement"`
-	Integrations Integrations  `yaml:"integrations"`
-	Reports      Reports       `yaml:"reports"`
-	GitHubWiki   GitHubWiki    `yaml:"githubWiki"`
-	Sensitivity  Sensitivity   `yaml:"sensitivity"`
+	Version        int            `yaml:"version"`
+	Repo           Repo           `yaml:"repo"`
+	Sources        Sources        `yaml:"sources"`
+	Agents         Agents         `yaml:"agents"`
+	Wiki           Wiki           `yaml:"wiki"`
+	Taxonomy       Taxonomy       `yaml:"taxonomy"`
+	Publish        Publish        `yaml:"publish"`
+	Sync           Sync           `yaml:"sync"`
+	Enforcement    Enforcement    `yaml:"enforcement"`
+	Integrations   Integrations   `yaml:"integrations"`
+	Reports        Reports        `yaml:"reports"`
+	GitHubWiki     GitHubWiki     `yaml:"githubWiki"`
+	Sensitivity    Sensitivity    `yaml:"sensitivity"`
+	AssistiveAgent AssistiveAgent `yaml:"assistiveAgent"`
+	Daemon         DaemonConfig   `yaml:"daemon"`
+	Retry          RetryConfig    `yaml:"retry"`
+}
+
+// AssistiveAgent configures the LLM provider cascade for wiki maintenance tasks.
+type AssistiveAgent struct {
+	Enabled   bool               `yaml:"enabled"`
+	Providers []ProviderConfig   `yaml:"providers"`
+	Budget    BudgetConfig       `yaml:"budget"`
+}
+
+type ProviderConfig struct {
+	Name      string `yaml:"name"`
+	Enabled   bool   `yaml:"enabled"`
+	Type      string `yaml:"type"`      // ollama | openai-compatible | inherit
+	Endpoint  string `yaml:"endpoint"`
+	Model     string `yaml:"model"`
+	APIKeyEnv string `yaml:"apiKeyEnv"`
+	RPM       int    `yaml:"requestsPerMinute"`
+	RPD       int    `yaml:"requestsPerDay"`
+}
+
+type BudgetConfig struct {
+	DailyUSD float64 `yaml:"dailyUSD"`
+}
+
+// DaemonConfig configures the autonomous maintenance loop.
+type DaemonConfig struct {
+	Enabled       bool         `yaml:"enabled"`
+	PollInterval  int          `yaml:"pollInterval"` // seconds
+	MaxConcurrent int          `yaml:"maxConcurrent"`
+	Watches       WatchConfig  `yaml:"watches"`
+}
+
+type WatchConfig struct {
+	Staleness WatchEntry `yaml:"staleness"`
+	Lint      WatchEntry `yaml:"lint"`
+	Ingest    WatchEntry `yaml:"ingest"`
+	Debt      WatchEntry `yaml:"debt"`
+}
+
+type WatchEntry struct {
+	Enabled   bool   `yaml:"enabled"`
+	Threshold string `yaml:"threshold"`
+	Interval  string `yaml:"interval"`
+	WatchDir  string `yaml:"watchDir"`
+	MaxDebt   int    `yaml:"maxDebt"`
+	Action    string `yaml:"action"` // auto-sync | auto-fix | auto-ingest | create-issue | log-only
+}
+
+// RetryConfig configures exponential backoff for transient failures.
+type RetryConfig struct {
+	MaxAttempts       int     `yaml:"maxAttempts"`
+	InitialDelayMs    int     `yaml:"initialDelayMs"`
+	BackoffMultiplier float64 `yaml:"backoffMultiplier"`
+	MaxDelayMs        int     `yaml:"maxDelayMs"`
 }
 
 type Repo struct {

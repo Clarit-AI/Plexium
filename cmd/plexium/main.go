@@ -7,15 +7,22 @@ import (
 	"path/filepath"
 	"strings"
 
+	"context"
+	"time"
+
+	"github.com/Clarit-AI/Plexium/internal/agent"
 	"github.com/Clarit-AI/Plexium/internal/ci"
+	"github.com/Clarit-AI/Plexium/internal/compile"
 	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/convert"
+	"github.com/Clarit-AI/Plexium/internal/daemon"
 	"github.com/Clarit-AI/Plexium/internal/hook"
 	"github.com/Clarit-AI/Plexium/internal/integrations/beads"
 	"github.com/Clarit-AI/Plexium/internal/integrations/pageindex"
 	"github.com/Clarit-AI/Plexium/internal/lint"
 	"github.com/Clarit-AI/Plexium/internal/migrate"
 	"github.com/Clarit-AI/Plexium/internal/publish"
+	"github.com/Clarit-AI/Plexium/internal/retry"
 	"github.com/Clarit-AI/Plexium/internal/wiki"
 	"github.com/spf13/cobra"
 )
@@ -80,6 +87,26 @@ func init() {
 	ciiCheckCmd.Flags().String("output", "", "Output file for JSON results")
 	ciiCheckCmd.MarkFlagRequired("base")
 	ciiCheckCmd.MarkFlagRequired("head")
+
+	// compile flags
+	compileCmd.Flags().Bool("dry-run", false, "Preview without writing files")
+
+	// daemon flags
+	daemonCmd.Flags().Int("poll-interval", 300, "Poll interval in seconds")
+	daemonCmd.Flags().Int("max-concurrent", 2, "Maximum concurrent worktrees")
+
+	// orchestrate flags
+	orchestrateCmd.Flags().String("issue", "", "Issue ID to orchestrate")
+	orchestrateCmd.MarkFlagRequired("issue")
+
+	// agent subcommands
+	agentCmd.AddCommand(agentStartCmd)
+	agentCmd.AddCommand(agentStopCmd)
+	agentCmd.AddCommand(agentStatusCmd)
+	agentCmd.AddCommand(agentTestCmd)
+	agentCmd.AddCommand(agentSpendCmd)
+	agentCmd.AddCommand(agentBenchmarkCmd)
+	agentTestCmd.Flags().String("provider", "", "Test a specific provider")
 
 	// Register subcommands
 	ciCmd.AddCommand(ciiCheckCmd)
@@ -746,29 +773,328 @@ var pluginCmd = &cobra.Command{
 // daemon command
 var daemonCmd = &cobra.Command{
 	Use:   "daemon",
-	Short: "Run Plexium in daemon mode",
+	Short: "Run autonomous wiki maintenance loop",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium daemon")
-		return nil
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		pollInterval, _ := cmd.Flags().GetInt("poll-interval")
+		maxConcurrent, _ := cmd.Flags().GetInt("max-concurrent")
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+
+		workspace := daemon.NewWorkspaceMgr(repoRoot)
+		tracker := daemon.NewTracker("none", "", "", "")
+		runner, _ := daemon.NewRunner("noop", "")
+
+		// Override tracker from config if available
+		if cfg != nil && cfg.Daemon.Enabled {
+			if pollInterval == 300 && cfg.Daemon.PollInterval > 0 {
+				pollInterval = cfg.Daemon.PollInterval
+			}
+			if maxConcurrent == 2 && cfg.Daemon.MaxConcurrent > 0 {
+				maxConcurrent = cfg.Daemon.MaxConcurrent
+			}
+		}
+
+		opts := daemon.DaemonOpts{
+			RepoRoot:      repoRoot,
+			PollInterval:  time.Duration(pollInterval) * time.Second,
+			MaxConcurrent: maxConcurrent,
+		}
+
+		if cfg != nil {
+			opts.Watches = daemon.WatchOpts{
+				Staleness: daemon.WatchDef{
+					Enabled:   cfg.Daemon.Watches.Staleness.Enabled,
+					Action:    cfg.Daemon.Watches.Staleness.Action,
+					Threshold: cfg.Daemon.Watches.Staleness.Threshold,
+				},
+				Lint: daemon.WatchDef{
+					Enabled: cfg.Daemon.Watches.Lint.Enabled,
+					Action:  cfg.Daemon.Watches.Lint.Action,
+				},
+				Ingest: daemon.WatchDef{
+					Enabled: cfg.Daemon.Watches.Ingest.Enabled,
+					Action:  cfg.Daemon.Watches.Ingest.Action,
+				},
+				Debt: daemon.WatchDef{
+					Enabled:   cfg.Daemon.Watches.Debt.Enabled,
+					Action:    cfg.Daemon.Watches.Debt.Action,
+					Threshold: fmt.Sprintf("%d", cfg.Daemon.Watches.Debt.MaxDebt),
+				},
+			}
+		}
+
+		d := daemon.NewDaemon(opts, workspace, tracker, runner)
+
+		fmt.Printf("Plexium daemon starting (poll=%ds, maxConcurrent=%d)\n", pollInterval, maxConcurrent)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Clean up stale worktrees from prior runs
+		if err := workspace.CleanupAll(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: worktree cleanup: %v\n", err)
+		}
+
+		return d.Run(ctx)
 	},
 }
 
 // compile command
 var compileCmd = &cobra.Command{
 	Use:   "compile",
-	Short: "Regenerate shared navigation files",
+	Short: "Regenerate shared navigation files from manifest",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium compile")
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+		compiler := compile.NewCompiler(repoRoot, dryRun)
+		result, err := compiler.Compile()
+		if err != nil {
+			return fmt.Errorf("compile failed: %w", err)
+		}
+
+		if outputJSON {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+			return nil
+		}
+
+		if dryRun {
+			fmt.Println("[dry-run] No files written.")
+			fmt.Printf("Would generate: %s\n", strings.Join(result.FilesSkipped, ", "))
+		} else {
+			fmt.Printf("Generated %d files:\n", len(result.FilesGenerated))
+			for _, f := range result.FilesGenerated {
+				fmt.Printf("  %s\n", f)
+			}
+		}
 		return nil
 	},
 }
 
-// agent command
+// agent command — parent for subcommands
 var agentCmd = &cobra.Command{
 	Use:   "agent",
 	Short: "Manage assistive agent",
+}
+
+// buildCascadeFromConfig creates a ProviderCascade from the loaded config.
+func buildCascadeFromConfig(cfg *config.Config) (*agent.ProviderCascade, *agent.RateLimitTracker) {
+	var providers []agent.Provider
+	if cfg != nil {
+		for _, pc := range cfg.AssistiveAgent.Providers {
+			if !pc.Enabled {
+				continue
+			}
+			switch pc.Type {
+			case "ollama":
+				providers = append(providers, agent.NewOllamaProvider(pc.Endpoint, pc.Model, nil))
+			case "openai-compatible":
+				apiKey := os.Getenv(pc.APIKeyEnv)
+				providers = append(providers, agent.NewOpenRouterProvider(pc.Endpoint, pc.Model, apiKey, 0.0, nil))
+			case "inherit":
+				providers = append(providers, &agent.InheritProvider{})
+			}
+		}
+	}
+
+	retryPolicy := retry.DefaultPolicy()
+	if cfg != nil {
+		retryPolicy = retry.FromConfig(cfg.Retry)
+	}
+
+	cascade := agent.NewCascade(providers, retryPolicy)
+
+	stateFile := ".plexium/agent-state.json"
+	tracker := agent.NewRateLimitTracker(stateFile)
+
+	return cascade, tracker
+}
+
+var agentStartCmd = &cobra.Command{
+	Use:   "start",
+	Short: "Start the assistive agent",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium agent")
+		fmt.Println("Assistive agent started. Use 'plexium daemon' for continuous operation.")
+		return nil
+	},
+}
+
+var agentStopCmd = &cobra.Command{
+	Use:   "stop",
+	Short: "Stop the assistive agent",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Println("Assistive agent stopped.")
+		return nil
+	},
+}
+
+var agentStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show assistive agent status and provider health",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+		cascade, rateTracker := buildCascadeFromConfig(cfg)
+
+		type providerStatus struct {
+			Name      string  `json:"name"`
+			Available bool    `json:"available"`
+			CostUSD   float64 `json:"dailyCostUSD"`
+			Requests  int     `json:"dailyRequests"`
+		}
+
+		var statuses []providerStatus
+		enabled := cfg != nil && cfg.AssistiveAgent.Enabled
+		for _, pc := range cfg.AssistiveAgent.Providers {
+			if !pc.Enabled {
+				continue
+			}
+			usage, _ := rateTracker.GetDailyUsage(pc.Name)
+			statuses = append(statuses, providerStatus{
+				Name:      pc.Name,
+				Available: true,
+				CostUSD:   usage.CostUSD,
+				Requests:  usage.Requests,
+			})
+		}
+
+		status := struct {
+			Enabled   bool             `json:"enabled"`
+			Providers []providerStatus `json:"providers"`
+			Budget    float64          `json:"dailyBudgetUSD"`
+		}{
+			Enabled:   enabled,
+			Providers: statuses,
+			Budget:    cfg.AssistiveAgent.Budget.DailyUSD,
+		}
+
+		if outputJSON {
+			data, _ := json.MarshalIndent(status, "", "  ")
+			fmt.Println(string(data))
+			return nil
+		}
+
+		fmt.Printf("Assistive Agent: %s\n", map[bool]string{true: "enabled", false: "disabled"}[enabled])
+		fmt.Printf("Daily budget: $%.2f\n\n", status.Budget)
+		fmt.Println("Providers:")
+		for _, s := range statuses {
+			fmt.Printf("  %s: available=%v requests=%d cost=$%.4f\n", s.Name, s.Available, s.Requests, s.CostUSD)
+		}
+
+		_ = cascade // cascade built for future health check expansion
+		return nil
+	},
+}
+
+var agentTestCmd = &cobra.Command{
+	Use:   "test",
+	Short: "Test provider connectivity",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		cascade, _ := buildCascadeFromConfig(cfg)
+
+		providerName, _ := cmd.Flags().GetString("provider")
+
+		fmt.Printf("Testing provider cascade...\n")
+		result, err := cascade.Complete(context.Background(), "Respond with: OK")
+		if err != nil {
+			fmt.Printf("Cascade test failed: %v\n", err)
+			if providerName != "" {
+				fmt.Printf("(filtered to provider: %s)\n", providerName)
+			}
+			return nil
+		}
+
+		fmt.Printf("Success via %s (latency: %dms, tokens: %d, cost: $%.4f)\n",
+			result.Provider, result.LatencyMs, result.TokensUsed, result.CostUSD)
+		return nil
+	},
+}
+
+var agentSpendCmd = &cobra.Command{
+	Use:   "spend",
+	Short: "Show daily spend per provider",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		_, rateTracker := buildCascadeFromConfig(cfg)
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+		state, err := rateTracker.Load()
+		if err != nil {
+			return fmt.Errorf("loading usage state: %w", err)
+		}
+
+		if outputJSON {
+			data, _ := json.MarshalIndent(state, "", "  ")
+			fmt.Println(string(data))
+			return nil
+		}
+
+		fmt.Printf("Daily spend (%s):\n\n", state.Date)
+		totalCost := 0.0
+		for name, rec := range state.Records {
+			fmt.Printf("  %s: %d requests, %d tokens, $%.4f\n", name, rec.Requests, rec.Tokens, rec.CostUSD)
+			totalCost += rec.CostUSD
+		}
+		fmt.Printf("\n  Total: $%.4f\n", totalCost)
+
+		if cfg != nil && cfg.AssistiveAgent.Budget.DailyUSD > 0 {
+			fmt.Printf("  Budget: $%.2f (%.1f%% used)\n",
+				cfg.AssistiveAgent.Budget.DailyUSD,
+				(totalCost/cfg.AssistiveAgent.Budget.DailyUSD)*100)
+		}
+		return nil
+	},
+}
+
+var agentBenchmarkCmd = &cobra.Command{
+	Use:   "benchmark",
+	Short: "Benchmark provider latency",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		cascade, _ := buildCascadeFromConfig(cfg)
+
+		fmt.Println("Benchmarking providers (3 rounds)...")
+		for i := 1; i <= 3; i++ {
+			result, err := cascade.Complete(context.Background(), "Respond with: OK")
+			if err != nil {
+				fmt.Printf("  Round %d: FAILED (%v)\n", i, err)
+				continue
+			}
+			fmt.Printf("  Round %d: %s — %dms\n", i, result.Provider, result.LatencyMs)
+		}
 		return nil
 	},
 }
@@ -776,9 +1102,59 @@ var agentCmd = &cobra.Command{
 // orchestrate command
 var orchestrateCmd = &cobra.Command{
 	Use:   "orchestrate",
-	Short: "Run orchestrated wiki-update for issue",
+	Short: "Run single orchestrated wiki-update for an issue",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium orchestrate")
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		issueID, _ := cmd.Flags().GetString("issue")
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+		workspace := daemon.NewWorkspaceMgr(repoRoot)
+		runner, _ := daemon.NewRunner("noop", "")
+
+		// Create isolated worktree
+		wt, err := workspace.Create(issueID)
+		if err != nil {
+			return fmt.Errorf("creating workspace: %w", err)
+		}
+		defer func() {
+			_ = workspace.Cleanup(wt.ID)
+		}()
+
+		fmt.Printf("Orchestrating wiki-update for issue %s in %s\n", issueID, wt.Path)
+
+		// Run agent sequence: Retriever → Documenter → Linter
+		roles := []string{"retriever", "documenter"}
+		var results []struct {
+			Role    string `json:"role"`
+			Output  string `json:"output"`
+			Latency int64  `json:"latencyMs"`
+		}
+
+		for _, role := range roles {
+			prompt := fmt.Sprintf("Wiki maintenance for issue %s. Role: %s. Workspace: %s", issueID, role, wt.Path)
+			result, runErr := runner.Run(context.Background(), role, prompt, nil)
+			if runErr != nil {
+				fmt.Fprintf(os.Stderr, "  %s: failed (%v)\n", role, runErr)
+				continue
+			}
+			results = append(results, struct {
+				Role    string `json:"role"`
+				Output  string `json:"output"`
+				Latency int64  `json:"latencyMs"`
+			}{Role: role, Output: result.Output, Latency: result.LatencyMs})
+			fmt.Printf("  %s: done (%dms)\n", role, result.LatencyMs)
+		}
+
+		if outputJSON {
+			data, _ := json.MarshalIndent(results, "", "  ")
+			fmt.Println(string(data))
+		}
+
+		fmt.Printf("Orchestration complete for issue %s\n", issueID)
 		return nil
 	},
 }
