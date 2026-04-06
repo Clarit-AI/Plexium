@@ -48,6 +48,7 @@ func init() {
 	publishCmd.Flags().Bool("dry-run", false, "Preview without pushing")
 
 	// lint flags
+	lintCmd.Flags().Bool("deterministic", false, "Run deterministic checks only (link/orphan/staleness validation)")
 	lintCmd.Flags().Bool("ci", false, "CI mode: exit with non-zero code on lint errors or warnings")
 	lintCmd.Flags().String("fail-on", "error", "Exit non-zero on this severity: error|warning")
 
@@ -193,7 +194,15 @@ var lintCmd = &cobra.Command{
 		}
 
 		outputJSON, _ := cmd.Flags().GetBool("output-json")
+		deterministic, _ := cmd.Flags().GetBool("deterministic")
 		ciMode, _ := cmd.Flags().GetBool("ci")
+
+		// --full (semantic lint) is Phase 9 work; only deterministic is available
+		if !deterministic {
+			fmt.Println("Note: --full semantic lint is not yet implemented.")
+			fmt.Println("Running deterministic checks only. Use --deterministic to suppress this message.")
+			fmt.Println()
+		}
 
 		// Load config
 		cfg, _ := config.LoadFromDir(repoRoot)
