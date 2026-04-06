@@ -15,7 +15,29 @@ type LintReport struct {
 	Type          string                 `json:"type"`
 	Timestamp     string                 `json:"timestamp"`
 	Deterministic DeterministicReport    `json:"deterministic"`
+	LLMAugmented  LLMAugmentedReport     `json:"llmAugmented,omitempty"`
 	Summary       LintSummary            `json:"summary"`
+}
+
+// LLMAugmentedReport contains LLM-augmented lint results (Phase 9).
+// In Phase 7, this section is empty but the structure is defined for forward compatibility.
+type LLMAugmentedReport struct {
+	Contradictions    []ContradictionReport    `json:"contradictions"`
+	SuggestedPages    []string                 `json:"suggestedPages"`
+	MissingCrossRefs  []MissingCrossRefReport  `json:"missingCrossRefs"`
+}
+
+// ContradictionReport represents a contradiction between wiki pages.
+type ContradictionReport struct {
+	Pages       []string `json:"pages"`
+	Description string   `json:"description"`
+}
+
+// MissingCrossRefReport represents a missing cross-reference between pages.
+type MissingCrossRefReport struct {
+	From         string   `json:"from"`
+	ShouldLinkTo string   `json:"shouldLinkTo"`
+	Reason       string   `json:"reason,omitempty"`
 }
 
 // DeterministicReport contains all deterministic lint results.

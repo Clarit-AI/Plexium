@@ -52,6 +52,10 @@ func init() {
 	lintCmd.Flags().Bool("ci", false, "CI mode: exit with non-zero code on lint errors or warnings")
 	lintCmd.Flags().String("fail-on", "error", "Exit non-zero on this severity: error|warning")
 
+	// gh-wiki-sync flags
+	ghWikiSyncCmd.Flags().Bool("dry-run", false, "Preview sync without writing")
+	ghWikiSyncCmd.Flags().Bool("push", false, "Push changes to GitHub Wiki")
+
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(convertCmd)
 	rootCmd.AddCommand(syncCmd)
@@ -352,9 +356,43 @@ var publishCmd = &cobra.Command{
 // gh-wiki-sync command
 var ghWikiSyncCmd = &cobra.Command{
 	Use:   "gh-wiki-sync",
-	Short: "Sync wiki to GitHub Wiki",
+	Short: "Sync wiki to GitHub Wiki with publish/exclude filtering",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium gh-wiki-sync")
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		push, _ := cmd.Flags().GetBool("push")
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+		result, err := publish.GHWikiSync(publish.SyncOptions{
+			RepoRoot: repoRoot,
+			DryRun:   dryRun,
+			Push:     push,
+		})
+		if err != nil {
+			return fmt.Errorf("gh-wiki-sync failed: %w", err)
+		}
+
+		if outputJSON {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			if dryRun {
+				// Dry run summary is printed by the syncer
+			} else {
+				fmt.Printf("Synced %d pages to GitHub Wiki\n", len(result.PagesIncluded))
+				if result.Commit != "" {
+					fmt.Printf("Commit: %s\n", result.Commit)
+				}
+				if result.Pushed {
+					fmt.Println("Pushed to remote.")
+				}
+			}
+		}
+
 		return nil
 	},
 }
