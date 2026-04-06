@@ -1,9 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
+	"github.com/Clarit-AI/Plexium/internal/config"
+	"github.com/Clarit-AI/Plexium/internal/convert"
+	"github.com/Clarit-AI/Plexium/internal/lint"
+	"github.com/Clarit-AI/Plexium/internal/publish"
+	"github.com/Clarit-AI/Plexium/internal/wiki"
 	"github.com/spf13/cobra"
 )
 
@@ -26,6 +32,20 @@ every commit, every conversation, and every ingested source.`,
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", ".plexium/config.yml", "config file path")
 	rootCmd.PersistentFlags().Bool("output-json", false, "Emit JSON output")
+
+	// init flags
+	initCmd.Flags().Bool("github-wiki", false, "Enable GitHub Wiki integration")
+	initCmd.Flags().Bool("obsidian", false, "Generate Obsidian configuration")
+	initCmd.Flags().String("strictness", "moderate", "Strictness level: strict|moderate|advisory")
+	initCmd.Flags().Bool("dry-run", false, "Preview without writing files")
+
+	// convert flags
+	convertCmd.Flags().String("depth", "shallow", "Scour depth: shallow|deep")
+	convertCmd.Flags().Bool("dry-run", false, "Preview without writing to .wiki/")
+	convertCmd.Flags().String("agent", "", "Run specified agent adapter after conversion")
+
+	// publish flags
+	publishCmd.Flags().Bool("dry-run", false, "Preview without pushing")
 
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(convertCmd)
@@ -51,7 +71,43 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize Plexium in a repository",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium init")
+		githubWiki, _ := cmd.Flags().GetBool("github-wiki")
+		obsidian, _ := cmd.Flags().GetBool("obsidian")
+		strictness, _ := cmd.Flags().GetString("strictness")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+		result, err := wiki.Init(wiki.InitOptions{
+			RepoRoot:   repoRoot,
+			GitHubWiki: githubWiki,
+			Obsidian:   obsidian,
+			Strictness: strictness,
+			DryRun:     dryRun,
+		})
+		if err != nil {
+			return fmt.Errorf("init failed: %w", err)
+		}
+
+		if outputJSON {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+			return nil
+		}
+
+		if dryRun {
+			fmt.Println("[dry-run] No files were created.")
+			fmt.Printf("Would create %d directories and %d files:\n", len(result.DirsCreated), len(result.FilesCreated))
+		} else {
+			fmt.Printf("Initialized Plexium wiki in %s\n", result.WikiDir)
+			fmt.Printf("Created %d directories and %d files\n", len(result.DirsCreated), len(result.FilesCreated))
+		}
+
 		return nil
 	},
 }
@@ -61,7 +117,53 @@ var convertCmd = &cobra.Command{
 	Use:   "convert",
 	Short: "Bootstrap wiki from existing repository",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium convert")
+		depth, _ := cmd.Flags().GetString("depth")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		agent, _ := cmd.Flags().GetString("agent")
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		// Load config (optional for convert — may not exist yet)
+		var cfg *config.Config
+		cfg, _ = config.LoadFromDir(repoRoot)
+
+		pipeline := convert.NewPipeline(convert.PipelineOptions{
+			RepoRoot: repoRoot,
+			Config:   cfg,
+			DryRun:   dryRun,
+			Depth:    depth,
+			Agent:    agent,
+		})
+
+		result, err := pipeline.Run()
+		if err != nil {
+			return fmt.Errorf("convert failed: %w", err)
+		}
+
+		if outputJSON {
+			data, _ := json.MarshalIndent(result.Report, "", "  ")
+			fmt.Println(string(data))
+			return nil
+		}
+
+		if dryRun {
+			fmt.Println("[dry-run] No files were written to .wiki/")
+			fmt.Printf("Would create %d pages\n", len(result.Pages))
+		} else {
+			fmt.Printf("Converted %d pages\n", len(result.Pages))
+			fmt.Printf("Stubs: %d\n", result.Report.Pages.Stubs)
+			fmt.Printf("Gap score: %.0f%%\n", result.Report.GapScore*100)
+		}
+
+		if result.AdapterRan != "" {
+			fmt.Printf("Ran agent adapter: %s\n", result.AdapterRan)
+		}
+
+		fmt.Printf("Report: %s\n", result.ReportPath)
 		return nil
 	},
 }
@@ -79,9 +181,97 @@ var syncCmd = &cobra.Command{
 // lint command
 var lintCmd = &cobra.Command{
 	Use:   "lint",
-	Short: "Check wiki health",
+	Short: "Check wiki health (deterministic checks)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium lint")
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+		ciMode, _ := cmd.Flags().GetBool("ci")
+
+		// Load config
+		cfg, _ := config.LoadFromDir(repoRoot)
+
+		linter := lint.NewLinter(repoRoot, cfg)
+		report, err := linter.RunDeterministic()
+		if err != nil {
+			return fmt.Errorf("lint failed: %w", err)
+		}
+
+		if outputJSON {
+			data, _ := report.ToJSON()
+			fmt.Println(string(data))
+		} else {
+			// Human-readable output
+			fmt.Printf("Lint Report - %s\n", report.Timestamp)
+			fmt.Printf("========================\n\n")
+
+			if len(report.Deterministic.BrokenLinks) > 0 {
+				fmt.Printf("❌ Broken Links (%d):\n", len(report.Deterministic.BrokenLinks))
+				for _, l := range report.Deterministic.BrokenLinks {
+					fmt.Printf("   %s:%d → [[%s]] (target: %s)\n", l.PagePath, l.LineNum, l.RawLink, l.Target)
+				}
+				fmt.Println()
+			}
+
+			if len(report.Deterministic.OrphanPages) > 0 {
+				fmt.Printf("⚠️  Orphan Pages (%d):\n", len(report.Deterministic.OrphanPages))
+				for _, o := range report.Deterministic.OrphanPages {
+					fmt.Printf("   %s (%s) - %s\n", o.WikiPath, o.Severity, o.Reason)
+				}
+				fmt.Println()
+			}
+
+			if len(report.Deterministic.StaleCandidates) > 0 {
+				fmt.Printf("⚠️  Stale Pages (%d):\n", len(report.Deterministic.StaleCandidates))
+				for _, s := range report.Deterministic.StaleCandidates {
+					fmt.Printf("   %s - %d days since update\n", s.WikiPath, s.DaysSinceUpdate)
+				}
+				fmt.Println()
+			}
+
+			if len(report.Deterministic.ManifestDrift) > 0 {
+				fmt.Printf("❌ Manifest Issues (%d):\n", len(report.Deterministic.ManifestDrift))
+				for _, m := range report.Deterministic.ManifestDrift {
+					fmt.Printf("   %s: %s\n", m.Path, m.Message)
+				}
+				fmt.Println()
+			}
+
+			if len(report.Deterministic.SidebarIssues) > 0 {
+				fmt.Printf("⚠️  Sidebar Issues (%d):\n", len(report.Deterministic.SidebarIssues))
+				for _, s := range report.Deterministic.SidebarIssues {
+					fmt.Printf("   Line %d: [[%s]] → %s\n", s.LineNum, s.LinkText, s.Target)
+				}
+				fmt.Println()
+			}
+
+			if len(report.Deterministic.FrontmatterIssues) > 0 {
+				fmt.Printf("❌ Frontmatter Issues (%d):\n", len(report.Deterministic.FrontmatterIssues))
+				for _, f := range report.Deterministic.FrontmatterIssues {
+					fmt.Printf("   %s: %s (%s)\n", f.WikiPath, f.Field, f.Message)
+				}
+				fmt.Println()
+			}
+
+			// Summary
+			if report.Summary.Errors == 0 && report.Summary.Warnings == 0 {
+				fmt.Println("✅ All checks passed!")
+			} else {
+				fmt.Printf("Summary: %d errors, %d warnings\n", report.Summary.Errors, report.Summary.Warnings)
+			}
+		}
+
+		// Exit code
+		if ciMode {
+			os.Exit(report.ExitCode())
+		}
+		// Default: exit 1 only on errors
+		if report.Summary.Errors > 0 {
+			os.Exit(1)
+		}
 		return nil
 	},
 }
@@ -112,7 +302,36 @@ var publishCmd = &cobra.Command{
 	Use:   "publish",
 	Short: "Push wiki to remote",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium publish")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+		result, err := publish.Publish(publish.PublishOptions{
+			RepoRoot: repoRoot,
+			DryRun:   dryRun,
+		})
+		if err != nil {
+			return fmt.Errorf("publish failed: %w", err)
+		}
+
+		if outputJSON {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+			return nil
+		}
+
+		if dryRun {
+			fmt.Println("[dry-run] No files were pushed.")
+			fmt.Printf("Would push %d files:\n", len(result.FilesPushed))
+		} else {
+			fmt.Printf("Published %d files\n", len(result.FilesPushed))
+		}
+
 		return nil
 	},
 }
@@ -130,9 +349,52 @@ var ghWikiSyncCmd = &cobra.Command{
 // doctor command
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Validate Plexium configuration",
+	Short: "Validate Plexium configuration and setup",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium doctor")
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+		doctor := lint.NewDoctor(repoRoot)
+		report, err := doctor.Run()
+		if err != nil {
+			return fmt.Errorf("doctor failed: %w", err)
+		}
+
+		if outputJSON {
+			data, _ := report.ToJSON()
+			fmt.Println(string(data))
+		} else {
+			fmt.Println("Plexium Doctor - Health Check")
+			fmt.Println("==============================")
+
+			for _, c := range report.Checks {
+				icon := "✅"
+				switch c.Status {
+				case "pass":
+					icon = "✅"
+				case "fail":
+					icon = "❌"
+				case "warning":
+					icon = "⚠️"
+				case "skip":
+					icon = "⏭️"
+				}
+				fmt.Printf("%s %s: %s\n", icon, c.Name, c.Message)
+				if c.Remediation != "" {
+					fmt.Printf("   → %s\n", c.Remediation)
+				}
+			}
+
+			fmt.Println()
+			passed, failed, warnings, skipped := report.Summary()
+			fmt.Printf("Summary: %d passed, %d failed, %d warnings, %d skipped\n",
+				passed, failed, warnings, skipped)
+		}
+
 		return nil
 	},
 }
