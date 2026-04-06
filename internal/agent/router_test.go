@@ -102,7 +102,8 @@ func TestRoute_MediumComplexity(t *testing.T) {
 	assert.Equal(t, "summary", result.Response)
 }
 
-func TestRoute_HighComplexity(t *testing.T) {
+func TestRoute_HighComplexity_FallsBackToAssistiveWhenNoPrimary(t *testing.T) {
+	// When no primary cascade is set, high complexity falls back to the assistive cascade.
 	p := &mockProvider{name: "test", available: true, cost: 0.01, response: "synthesis", tokens: 200}
 	r := newTestRouter(p)
 
@@ -114,18 +115,43 @@ func TestRoute_HighComplexity(t *testing.T) {
 	assert.Equal(t, "synthesis", result.Response)
 }
 
-func TestRoute_DeterministicRejected(t *testing.T) {
-	p := &mockProvider{name: "test", available: true, cost: 0.0, response: "should not reach"}
-	r := newTestRouter(p)
+func TestRoute_HighComplexity_UsesPrimaryCascade(t *testing.T) {
+	// High complexity should route to primary cascade when one is configured.
+	assistive := &mockProvider{name: "assistive", available: true, cost: 0.001, response: "assistive", tokens: 10}
+	primary := &mockProvider{name: "primary", available: true, cost: 0.1, response: "primary-response", tokens: 100}
+
+	assistiveCascade := NewCascade([]Provider{assistive}, noRetryPolicy())
+	primaryCascade := NewCascade([]Provider{primary}, noRetryPolicy())
+
+	r := NewRouter(assistiveCascade)
+	r.SetPrimaryCascade(primaryCascade)
 
 	result, err := r.Route(context.Background(), WikiTask{
-		Type:   "hash-computation",
-		Prompt: "compute hash",
+		Type:   "architecture-synthesis",
+		Prompt: "synthesize architecture",
 	})
-	assert.Nil(t, result)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrDeterministicTask))
-	assert.Equal(t, 0, p.callCount, "provider should not be called for deterministic tasks")
+	require.NoError(t, err)
+	assert.Equal(t, "primary-response", result.Response)
+	assert.Equal(t, 0, assistive.callCount, "assistive provider should not be called")
+	assert.Equal(t, 1, primary.callCount, "primary provider should be called")
+}
+
+func TestRoute_Context_PrependedToPrompt(t *testing.T) {
+	p := &mockProvider{name: "test", available: true, cost: 0.001, response: "ok", tokens: 10}
+	r := newTestRouter(p)
+
+	_, err := r.Route(context.Background(), WikiTask{
+		Type:    "frontmatter-update",
+		Prompt:  "update frontmatter",
+		Context: []string{"modules/auth.md", "modules/token.md"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, p.callCount)
+	// Provider receives the prompt with context prepended.
+	assert.Contains(t, p.lastPrompt, "Context pages:")
+	assert.Contains(t, p.lastPrompt, "modules/auth.md")
+	assert.Contains(t, p.lastPrompt, "modules/token.md")
+	assert.Contains(t, p.lastPrompt, "update frontmatter")
 }
 
 func TestRoute_ExplicitComplexityOverridesClassification(t *testing.T) {

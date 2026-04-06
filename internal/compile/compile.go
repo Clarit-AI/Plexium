@@ -6,18 +6,23 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/Clarit-AI/Plexium/internal/manifest"
 )
 
 // Compiler regenerates shared navigation files (_index.md, _Sidebar.md)
 // from the current manifest state. All operations are deterministic — no LLM calls.
+// Compile is safe for concurrent use: a sync.Mutex serialises write operations.
 type Compiler struct {
 	repoRoot     string
 	wikiPath     string // absolute path to .wiki/
 	manifestPath string // absolute path to .plexium/manifest.json
 	dryRun       bool
 }
+
+// compileMu serialises writes to .wiki/ to prevent concurrent compile races.
+var compileMu sync.Mutex
 
 // CompileResult captures what the compile pass produced.
 type CompileResult struct {
@@ -67,6 +72,9 @@ func (c *Compiler) Compile() (*CompileResult, error) {
 	if err := os.MkdirAll(c.wikiPath, 0755); err != nil {
 		return nil, fmt.Errorf("creating wiki directory: %w", err)
 	}
+
+	compileMu.Lock()
+	defer compileMu.Unlock()
 
 	if err := os.WriteFile(indexPath, []byte(indexContent), 0644); err != nil {
 		return nil, fmt.Errorf("writing _index.md: %w", err)

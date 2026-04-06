@@ -18,12 +18,13 @@ import (
 
 type mockProvider struct {
 	name        string
-	available   bool
-	cost        float64
-	response    string
-	tokens      int
-	err         error
-	callCount   int
+	available  bool
+	cost       float64
+	response   string
+	tokens     int
+	err        error
+	callCount  int
+	lastPrompt string
 }
 
 func (m *mockProvider) Name() string          { return m.name }
@@ -31,8 +32,9 @@ func (m *mockProvider) IsAvailable() bool     { return m.available }
 func (m *mockProvider) HealthCheck() error     { return nil }
 func (m *mockProvider) CostPerToken() float64 { return m.cost }
 
-func (m *mockProvider) Complete(_ context.Context, _ string) (*CompletionResult, error) {
+func (m *mockProvider) Complete(_ context.Context, prompt string) (*CompletionResult, error) {
 	m.callCount++
+	m.lastPrompt = prompt
 	if m.err != nil {
 		return nil, m.err
 	}

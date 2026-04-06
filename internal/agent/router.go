@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ErrDeterministicTask is returned when a deterministic task is routed to the
@@ -30,13 +31,23 @@ type WikiTask struct {
 
 // TaskRouter selects the appropriate provider cascade path based on task
 // complexity. Deterministic tasks are rejected — they should never hit an LLM.
+// The router has two cascade paths:
+//   - assistive cascade: low/medium complexity tasks (cost-optimised providers)
+//   - primary cascade: high complexity tasks (the coding agent's own LLM)
 type TaskRouter struct {
-	cascade *ProviderCascade
+	assistiveCascade *ProviderCascade
+	primaryCascade   *ProviderCascade
 }
 
-// NewRouter creates a TaskRouter backed by the given cascade.
+// NewRouter creates a TaskRouter backed by the given assistive cascade.
 func NewRouter(cascade *ProviderCascade) *TaskRouter {
-	return &TaskRouter{cascade: cascade}
+	return &TaskRouter{assistiveCascade: cascade}
+}
+
+// SetPrimaryCascade sets the cascade used for high-complexity tasks.
+// Typically this is the InheritProvider pointing to the coding agent's own LLM.
+func (r *TaskRouter) SetPrimaryCascade(cascade *ProviderCascade) {
+	r.primaryCascade = cascade
 }
 
 // ClassifyTask returns the complexity level for a known task type.
@@ -78,7 +89,9 @@ func ClassifyTask(taskType string) TaskComplexity {
 	}
 }
 
-// Route sends a WikiTask through the provider cascade based on its complexity.
+// Route sends a WikiTask through the appropriate provider cascade based on its
+// complexity. High-complexity tasks skip to the primary cascade (the coding
+// agent's own LLM); low/medium tasks use the assistive cascade.
 // Deterministic tasks return ErrDeterministicTask — they must be handled by
 // deterministic code paths (e.g. the compile engine), not an LLM.
 func (r *TaskRouter) Route(ctx context.Context, task WikiTask) (*CompletionResult, error) {
@@ -91,5 +104,36 @@ func (r *TaskRouter) Route(ctx context.Context, task WikiTask) (*CompletionResul
 		return nil, fmt.Errorf("%w: task type %q", ErrDeterministicTask, task.Type)
 	}
 
-	return r.cascade.Complete(ctx, task.Prompt)
+	prompt := task.Prompt
+	if len(task.Context) > 0 {
+		prompt = buildPromptWithContext(task.Prompt, task.Context)
+	}
+
+	// High-complexity tasks route to the primary cascade (coding agent's own LLM).
+	// Without a primary cascade, fall back to the assistive cascade.
+	if complexity == ComplexityHigh {
+		if r.primaryCascade != nil {
+			return r.primaryCascade.Complete(ctx, prompt)
+		}
+		// Fall through to assistive cascade if no primary configured.
+	}
+
+	return r.assistiveCascade.Complete(ctx, prompt)
+}
+
+// buildPromptWithContext prepends context page references to the prompt.
+func buildPromptWithContext(prompt string, context []string) string {
+	if len(context) == 0 {
+		return prompt
+	}
+	var b strings.Builder
+	b.WriteString("Context pages:\n")
+	for _, p := range context {
+		b.WriteString("- ")
+		b.WriteString(p)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(prompt)
+	return b.String()
 }

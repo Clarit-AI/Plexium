@@ -95,6 +95,42 @@ func (r *RateLimitTracker) CanMakeRequest(provider string, budgetUSD float64) (b
 	return rec.CostUSD < budgetUSD, nil
 }
 
+// GetBatchingDelay returns how long to wait before making the next request to
+// the given provider, based on how close today's usage is to the budget.
+// Logic:
+//   - Under 80% of budget → 0 (no delay needed)
+//   - 80–95% of budget → 2–8 seconds (linearly scaled)
+//   - Above 95% of budget → 30 seconds (max delay to avoid hitting the limit)
+//   - No recorded usage today → 0
+//
+// This enables adaptive batching: the daemon can pause before a rate limit is
+// hit rather than failing and relying on retry backoff.
+func (r *RateLimitTracker) GetBatchingDelay(provider string, budgetUSD float64) time.Duration {
+	if budgetUSD <= 0 {
+		return 0
+	}
+
+	rec, err := r.GetDailyUsage(provider)
+	if err != nil || rec.CostUSD == 0 {
+		return 0
+	}
+
+	usagePct := rec.CostUSD / budgetUSD
+
+	switch {
+	case usagePct < 0.80:
+		return 0
+	case usagePct <= 0.95:
+		// Linear scale: 80% → 2s, 95% → 8s
+		// delay = 2 + (pct-0.80) * (8-2)/(0.95-0.80) = 2 + (pct-0.80) * 40
+		// At pct=0.80 → 2s. At pct=0.95 → 8s.
+		delaySeconds := 2 + (usagePct-0.80)*40.0
+		return time.Duration(delaySeconds*float64(time.Second))
+	default:
+		return 30 * time.Second
+	}
+}
+
 // Load reads the state file from disk. Returns a fresh state if the file
 // does not exist or is unreadable.
 func (r *RateLimitTracker) Load() (*UsageState, error) {

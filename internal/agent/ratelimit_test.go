@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -225,4 +226,76 @@ func TestRateLimitTracker_Record_DailyReset(t *testing.T) {
 func TestNewRateLimitTracker(t *testing.T) {
 	tracker := NewRateLimitTracker("/path/to/state.json")
 	assert.Equal(t, "/path/to/state.json", tracker.stateFile)
+}
+
+// ---------------------------------------------------------------------------
+// GetBatchingDelay
+// ---------------------------------------------------------------------------
+
+func TestGetBatchingDelay_UnlimitedBudget(t *testing.T) {
+	tracker := newTestTracker(t)
+	delay := tracker.GetBatchingDelay("ollama", 0)
+	assert.Equal(t, time.Duration(0), delay)
+}
+
+func TestGetBatchingDelay_NoUsage(t *testing.T) {
+	tracker := newTestTracker(t)
+	delay := tracker.GetBatchingDelay("ollama", 10.0)
+	assert.Equal(t, time.Duration(0), delay, "no usage → no delay")
+}
+
+func TestGetBatchingDelay_Under80Pct(t *testing.T) {
+	tracker := newTestTracker(t)
+	require.NoError(t, tracker.Record("ollama", 100, 3.0)) // $3 of $10 budget (30%)
+
+	delay := tracker.GetBatchingDelay("ollama", 10.0)
+	assert.Equal(t, time.Duration(0), delay, "under 80% → no delay")
+}
+
+func TestGetBatchingDelay_80to95Pct(t *testing.T) {
+	tracker := newTestTracker(t)
+	require.NoError(t, tracker.Record("ollama", 1000, 8.5)) // $8.5 of $10 budget (85%)
+
+	delay := tracker.GetBatchingDelay("ollama", 10.0)
+	// 85% is between 80% (2s) and 95% (8s); expect roughly 4.7s (allow 3-6s range for floating point)
+	assert.True(t, delay >= 3*time.Second && delay <= 6*time.Second,
+		"expected ~4-5s delay at 85%% usage, got %v", delay)
+}
+
+func TestGetBatchingDelay_Above95Pct(t *testing.T) {
+	tracker := newTestTracker(t)
+	require.NoError(t, tracker.Record("ollama", 1000, 9.8)) // $9.8 of $10 budget (98%)
+
+	delay := tracker.GetBatchingDelay("ollama", 10.0)
+	assert.Equal(t, 30*time.Second, delay, "above 95%% → max 30s delay")
+}
+
+func TestGetBatchingDelay_AtExactly80Pct(t *testing.T) {
+	tracker := newTestTracker(t)
+	require.NoError(t, tracker.Record("ollama", 100, 8.0)) // 80% of $10
+
+	delay := tracker.GetBatchingDelay("ollama", 10.0)
+	assert.True(t, delay >= 1*time.Second && delay <= 3*time.Second,
+		"at 80%% → expected ~2s, got %v", delay)
+}
+
+func TestGetBatchingDelay_AtExactly95Pct(t *testing.T) {
+	tracker := newTestTracker(t)
+	require.NoError(t, tracker.Record("ollama", 100, 9.5)) // 95% of $10
+
+	delay := tracker.GetBatchingDelay("ollama", 10.0)
+	assert.True(t, delay >= 7*time.Second && delay <= 9*time.Second,
+		"at 95%% → expected ~8s, got %v", delay)
+}
+
+func TestGetBatchingDelay_DifferentProvider(t *testing.T) {
+	tracker := newTestTracker(t)
+	require.NoError(t, tracker.Record("openrouter", 500, 8.0)) // openrouter is at 80%
+
+	// ollama has no usage → 0 delay; openrouter at 80% → 2s
+	ollamaDelay := tracker.GetBatchingDelay("ollama", 10.0)
+	openrouterDelay := tracker.GetBatchingDelay("openrouter", 10.0)
+
+	assert.Equal(t, time.Duration(0), ollamaDelay)
+	assert.Equal(t, 2*time.Second, openrouterDelay)
 }

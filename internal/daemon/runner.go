@@ -65,6 +65,13 @@ func buildPrompt(role, prompt string, contextPages []string) string {
 // ClaudeRunner
 // ---------------------------------------------------------------------------
 
+// TokensUsed and CostUSD are -1 to indicate that the underlying CLI tools
+// (claude/codex/gemini) do not expose structured per-call token or cost
+// telemetry in their stdout output. A follow-up issue should track adding
+// structured output parsing or --json flag support to these runners.
+const tokensUnknown = -1
+const costUnknown = -1
+
 // ClaudeRunner shells out to the `claude` CLI.
 type ClaudeRunner struct {
 	modelFlag string
@@ -77,7 +84,8 @@ func NewClaudeRunner(model string) *ClaudeRunner {
 }
 
 // Run executes `claude --print [--model <model>] <prompt>` and returns the
-// captured stdout along with wall-clock latency.
+// captured stdout along with wall-clock latency. TokensUsed and CostUSD are
+// -1 (unknown) as the CLI does not emit structured usage data.
 func (r *ClaudeRunner) Run(ctx context.Context, role, prompt string, contextPages []string) (*RunResult, error) {
 	start := time.Now()
 	fullPrompt := buildPrompt(role, prompt, contextPages)
@@ -92,8 +100,10 @@ func (r *ClaudeRunner) Run(ctx context.Context, role, prompt string, contextPage
 	out, err := cmd.Output()
 
 	return &RunResult{
-		Output:    string(out),
-		LatencyMs: time.Since(start).Milliseconds(),
+		Output:     string(out),
+		TokensUsed: tokensUnknown,
+		CostUSD:    costUnknown,
+		LatencyMs:  time.Since(start).Milliseconds(),
 	}, err
 }
 
@@ -113,6 +123,7 @@ func NewCodexRunner(model string) *CodexRunner {
 }
 
 // Run executes `codex --quiet [--model <model>] <prompt>`.
+// TokensUsed and CostUSD are -1 (unknown).
 func (r *CodexRunner) Run(ctx context.Context, role, prompt string, contextPages []string) (*RunResult, error) {
 	start := time.Now()
 	fullPrompt := buildPrompt(role, prompt, contextPages)
@@ -127,8 +138,10 @@ func (r *CodexRunner) Run(ctx context.Context, role, prompt string, contextPages
 	out, err := cmd.Output()
 
 	return &RunResult{
-		Output:    string(out),
-		LatencyMs: time.Since(start).Milliseconds(),
+		Output:     string(out),
+		TokensUsed: tokensUnknown,
+		CostUSD:    costUnknown,
+		LatencyMs:  time.Since(start).Milliseconds(),
 	}, err
 }
 
@@ -148,6 +161,7 @@ func NewGeminiRunner(model string) *GeminiRunner {
 }
 
 // Run executes `gemini [--model <model>] <prompt>`.
+// TokensUsed and CostUSD are -1 (unknown).
 func (r *GeminiRunner) Run(ctx context.Context, role, prompt string, contextPages []string) (*RunResult, error) {
 	start := time.Now()
 	fullPrompt := buildPrompt(role, prompt, contextPages)
@@ -162,8 +176,10 @@ func (r *GeminiRunner) Run(ctx context.Context, role, prompt string, contextPage
 	out, err := cmd.Output()
 
 	return &RunResult{
-		Output:    string(out),
-		LatencyMs: time.Since(start).Milliseconds(),
+		Output:     string(out),
+		TokensUsed: tokensUnknown,
+		CostUSD:    costUnknown,
+		LatencyMs:  time.Since(start).Milliseconds(),
 	}, err
 }
 

@@ -45,6 +45,7 @@ type ProviderConfig struct {
 	APIKeyEnv string `yaml:"apiKeyEnv"`
 	RPM       int    `yaml:"requestsPerMinute"`
 	RPD       int    `yaml:"requestsPerDay"`
+	Tier      string `yaml:"tier"` // free | budget — only for openai-compatible type
 }
 
 type BudgetConfig struct {
