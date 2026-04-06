@@ -148,10 +148,10 @@ Phase 4 (Convert) ◄──────────┐    Phase 5 (Agent Adapter
 
 | Phase | Milestone | Status | bd Epic | Key Deliverables |
 |-------|-----------|--------|---------|-----------------|
-| 0 | Project Setup | `pending` | `plexium-p0` | Repo initialized, toolchain chosen, bd + memento configured |
-| 1 | CLI Foundation | `pending` | `plexium-m1` | CLI binary with routing, config loader, file scanner, normalizer, templates |
-| 2 | Page Generation | `pending` | `plexium-m2` | Taxonomy classifier, module/decision/concept generators, nav file generation |
-| 3 | State & Publishing | `pending` | `plexium-m3` | Manifest CRUD, hash computation, publish, init scaffolding, dry-run |
+| 0 | Project Setup | `complete` | `plexium-p0` | Repo initialized, toolchain chosen, bd + memento configured |
+| 1 | CLI Foundation | `complete` | `plexium-m1` | CLI binary with routing, config loader, file scanner, normalizer, templates |
+| 2 | Page Generation | `complete` | `plexium-m2` | Taxonomy classifier, module/decision/concept generators, nav file generation |
+| 3 | State & Publishing | `in-progress` | `plexium-m3` | Manifest CRUD, hash computation, publish, init scaffolding, dry-run |
 | 4 | Convert (Brownfield) | `pending` | `plexium-m4` | Multi-phase ingestion pipeline, conversion report |
 | 5 | Agent Adapters | `pending` | `plexium-m5` | Plugin architecture, schema generation, 4 agent adapters |
 | 6 | Deterministic Lint | `pending` | `plexium-m6` | Link/orphan/staleness detection, manifest validation, doctor command |
@@ -268,6 +268,15 @@ For detailed architectural context, see `docs/architecture/core-architecture.md`
 3. **Reference architecture docs, don't duplicate.** When implementing, link to relevant sections of `core-architecture.md` rather than copying context into your implementation notes.
 4. **Phase docs are the living spec.** The archived original (`docs/reference/plexium-spec-full.md`) is reference only. Implementation decisions live in the phase docs.
 5. **Resolve open design questions before the blocking phase.** Check the prerequisite table above before starting a new phase.
+
+---
+
+## Build Log
+
+| Date | Phase(s) | Agent | Summary |
+|------|---------|-------|---------|
+| 2026-04-05 | P0, M1, M2 | Claude Code | Phase 0 project setup (Go toolchain, bd, memento). Phase 1 CLI foundation (18 Cobra commands, config loader, scanner, markdown parser, template engine). Phase 2 page generation (taxonomy classifier, module/decision/concept generators, slug dedup, nav generators). |
+| 2026-04-05 | M1, M2 | Kilo (zai-coding/glm-5.1) | Code review of M1+M2. Fixed 3 bugs (Deduplicate overwrite, extractTags header matching, scanner root-level glob), 7 design issues (config spec alignment, Viper env binding, JSON/JSON generation, template type consolidation, YAML safety). 38 tests passing. |
 
 ---
 
