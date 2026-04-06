@@ -465,17 +465,3 @@ sensitivity:
     - ".secret"
 `, opts.GitHubWiki, strictness, strictness, opts.Obsidian, opts.GitHubWiki)
 }
-
-func generateObsidianConfig() string {
-	return `{
-  "legacyEditor": false,
-  "livePreview": true,
-  "readableLineLength": true,
-  "showLineNumber": false,
-  "spellcheck": false,
-  "strictLineBreaks": true,
-  "useMarkdownLinks": false,
-  "newLinkFormat": "shortest"
-}
-`
-}
