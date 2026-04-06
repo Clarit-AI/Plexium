@@ -47,6 +47,10 @@ func init() {
 	// publish flags
 	publishCmd.Flags().Bool("dry-run", false, "Preview without pushing")
 
+	// lint flags
+	lintCmd.Flags().Bool("ci", false, "CI mode: exit with non-zero code on lint errors or warnings")
+	lintCmd.Flags().String("fail-on", "error", "Exit non-zero on this severity: error|warning")
+
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(convertCmd)
 	rootCmd.AddCommand(syncCmd)

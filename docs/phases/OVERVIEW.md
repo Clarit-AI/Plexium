@@ -151,10 +151,10 @@ Phase 4 (Convert) ◄──────────┐    Phase 5 (Agent Adapter
 | 0 | Project Setup | `complete` | `plexium-p0` | Repo initialized, toolchain chosen, bd + memento configured |
 | 1 | CLI Foundation | `complete` | `plexium-m1` | CLI binary with routing, config loader, file scanner, normalizer, templates |
 | 2 | Page Generation | `complete` | `plexium-m2` | Taxonomy classifier, module/decision/concept generators, nav file generation |
-| 3 | State & Publishing | `in-progress` | `plexium-m3` | Manifest CRUD, hash computation, publish, init scaffolding, dry-run |
-| 4 | Convert (Brownfield) | `pending` | `plexium-m4` | Multi-phase ingestion pipeline, conversion report |
+| 3 | State & Publishing | `complete` | `plexium-m3` | Manifest CRUD, hash computation, publish, init scaffolding, dry-run |
+| 4 | Convert (Brownfield) | `complete` | `plexium-m4` | Scour/filter/ingest/link/lint pipeline, conversion report, plexium convert command |
 | 5 | Agent Adapters | `pending` | `plexium-m5` | Plugin architecture, schema generation, 4 agent adapters |
-| 6 | Deterministic Lint | `pending` | `plexium-m6` | Link/orphan/staleness detection, manifest validation, doctor command |
+| 6 | Deterministic Lint | `complete` | `plexium-m6` | Link/orphan/staleness detection, manifest validation, doctor command |
 | 7 | Reporting & Obsidian | `pending` | `plexium-m7` | Report formats (3 types), obsidian config, gh-wiki-sync |
 | 8 | Enforcement | `pending` | `plexium-m8` | Lefthook hooks, CI workflows, WIKI-DEBT tracking, migrate command |
 | 9 | Tool Integrations | `pending` | `plexium-m9` | Memento/beads/PageIndex product integration |
@@ -268,6 +268,7 @@ For detailed architectural context, see `docs/architecture/core-architecture.md`
 3. **Reference architecture docs, don't duplicate.** When implementing, link to relevant sections of `core-architecture.md` rather than copying context into your implementation notes.
 4. **Phase docs are the living spec.** The archived original (`docs/reference/plexium-spec-full.md`) is reference only. Implementation decisions live in the phase docs.
 5. **Resolve open design questions before the blocking phase.** Check the prerequisite table above before starting a new phase.
+6. **Log build entries in the Build Log table below.** After each phase completes, the finishing agent MUST add a row to the Build Log table with: date, phase(s) completed, agent name + model, and a concise summary of deliverables. Validation findings and fixes also go here.
 
 ---
 
@@ -277,6 +278,9 @@ For detailed architectural context, see `docs/architecture/core-architecture.md`
 |------|---------|-------|---------|
 | 2026-04-05 | P0, M1, M2 | Claude Code | Phase 0 project setup (Go toolchain, bd, memento). Phase 1 CLI foundation (18 Cobra commands, config loader, scanner, markdown parser, template engine). Phase 2 page generation (taxonomy classifier, module/decision/concept generators, slug dedup, nav generators). |
 | 2026-04-05 | M1, M2 | Kilo (zai-coding/glm-5.1) | Code review of M1+M2. Fixed 3 bugs (Deduplicate overwrite, extractTags header matching, scanner root-level glob), 7 design issues (config spec alignment, Viper env binding, JSON/JSON generation, template type consolidation, YAML safety). 38 tests passing. |
+| 2026-04-05 | M3 | Claude Code (glm-5.1) | Phase 3 State & Publishing. Manifest CRUD (Load/Save/UpsertPage/RemovePage, bidirectional lookups). SHA256 hash computation (file, dir, batch). plexium init with full .wiki/ + .plexium/ scaffolding, README→Home, schema, config. plexium publish with GitHub Wiki push, publish/exclude filters. Dry-run mode for all write ops. 140 tests passing. |
+| 2026-04-05 | M4 | Claude Code (Opus 4.6) | Phase 4 Convert (Brownfield). 6-phase pipeline: scour (README/ADR/config/source/doc extraction), filter (include/exclude with binary/size/UTF8 checks), ingest (taxonomy-based page generation), link (cross-reference injection), lint (gap analysis, orphan detection, stub creation), report (JSON + Markdown). plexium convert command with --depth and --dry-run. 40 convert tests + 140 prior = 180 tests passing. |
+| 2026-04-05 | M6 | Claude Code (Sonnet 4 mini) + Qwen Code (validation) | Phase 6 Deterministic Lint. `internal/lint/` package: link crawler (finds/resolves [[wiki-links]], detects broken), orphan detector (inbound-link graph, sidebar-reachable exclusions), staleness detector (SHA256 hash comparison vs manifest), manifest validator (path/hash/link consistency), sidebar validator, frontmatter validator (required fields), `plexium lint --deterministic` (JSON + human-readable, exit codes), `plexium doctor` (8 system health checks). 8 lint tests passing. Fixed AC12 bug: `--ci` and `--fail-on` flags were read but never registered — added flag registration in `init()`. |
 
 ---
 
