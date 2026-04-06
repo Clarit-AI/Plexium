@@ -3,6 +3,7 @@ module github.com/Clarit-AI/Plexium
 go 1.25.1
 
 require (
+	github.com/bmatcuk/doublestar/v2 v2.0.4
 	github.com/gobwas/glob v0.2.3
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/viper v1.18.2

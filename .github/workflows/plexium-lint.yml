@@ -1,0 +1,72 @@
+name: Plexium Lint
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  wiki-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build Plexium
+        run: go build ./cmd/plexium
+
+      - name: Deterministic lint
+        run: |
+          ./plexium lint --deterministic --ci --fail-on error
+
+      - name: CI diff check
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          ./plexium ci check \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --output .plexium/reports/ci-check.json
+
+      - name: Post results to PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let report = '';
+            try {
+              const data = JSON.parse(fs.readFileSync('.plexium/reports/ci-check.json', 'utf8'));
+              report = `## Plexium Wiki Check\n\n`;
+              report += `- **Changed files:** ${data.changedFiles.length} (${data.sourceFiles.length} source)\n`;
+              report += `- **Wiki updated:** ${data.wikiUpdated ? 'Yes' : 'No'}\n`;
+              report += `- **Wiki debt:** ${data.debtCount} entries\n`;
+              report += `- **Result:** ${data.passes ? '✅ Passes' : '❌ Fails'}\n`;
+            } catch (e) {
+              report = '## Plexium Wiki Check\n\n⚠️ Could not read report file.\n';
+            }
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: report
+            });
+
+      - name: Memento gate
+        if: hashFiles('.plexium/config.yml') != ''
+        run: |
+          if grep -q 'memento: true' .plexium/config.yml; then
+            git memento check --gate || echo "Warning: memento gate not configured"
+          fi

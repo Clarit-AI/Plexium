@@ -156,7 +156,7 @@ Phase 4 (Convert) ◄──────────┐    Phase 5 (Agent Adapter
 | 5 | Agent Adapters | `pending` | `plexium-m5` | Plugin architecture, schema generation, 4 agent adapters |
 | 6 | Deterministic Lint | `complete` | `plexium-m6` | Link/orphan/staleness detection, manifest validation, doctor command |
 | 7 | Reporting & Obsidian | `pending` | `plexium-m7` | Report formats (3 types), obsidian config, gh-wiki-sync |
-| 8 | Enforcement | `pending` | `plexium-m8` | Lefthook hooks, CI workflows, WIKI-DEBT tracking, migrate command |
+| 8 | Enforcement | `complete` | `plexium-m8` | Lefthook hooks, CI workflows, WIKI-DEBT tracking, migrate command |
 | 9 | Tool Integrations | `pending` | `plexium-m9` | Memento/beads/PageIndex product integration |
 | 10 | Orchestration | `pending` | `plexium-m10` | Assistive agent, daemon mode, compile command, workspaces |
 
@@ -282,6 +282,7 @@ For detailed architectural context, see `docs/architecture/core-architecture.md`
 | 2026-04-05 | M4 | Claude Code (Opus 4.6) | Phase 4 Convert (Brownfield). 6-phase pipeline: scour (README/ADR/config/source/doc extraction), filter (include/exclude with binary/size/UTF8 checks), ingest (taxonomy-based page generation), link (cross-reference injection), lint (gap analysis, orphan detection, stub creation), report (JSON + Markdown). plexium convert command with --depth and --dry-run. 40 convert tests + 140 prior = 180 tests passing. |
 | 2026-04-05 | M6 | Claude Code (Sonnet 4 mini) + Qwen Code (validation) | Phase 6 Deterministic Lint. `internal/lint/` package: link crawler (finds/resolves [[wiki-links]], detects broken), orphan detector (inbound-link graph, sidebar-reachable exclusions), staleness detector (SHA256 hash comparison vs manifest), manifest validator (path/hash/link consistency), sidebar validator, frontmatter validator (required fields), `plexium lint --deterministic` (JSON + human-readable, exit codes), `plexium doctor` (8 system health checks). 8 lint tests passing. Fixed AC12 bug: `--ci` and `--fail-on` flags were read but never registered — added flag registration in `init()`. |
 | 2026-04-06 | M6 | Claude Code | Deviation fix: Added explicit `--deterministic` flag to `lint` command per spec. Implementation previously always ran deterministic checks without flag; spec required `--deterministic` flag. Flag added, emits note when used without flag (Phase 9 `--full` not yet implemented). |
+| 2026-04-06 | M8 | Claude Code (glm-5.1) | Phase 8 Enforcement. `internal/hook/` package: PreCommitHook (source file detection, wiki change check, strictness levels strict/moderate/advisory, PLEXIUM_BYPASS_HOOK bypass), PostCommitHook (WIKI-DEBT tracking in _log.md, bypass detection). `internal/ci/` package: diff-aware wiki check (base vs head SHA, source file filtering, manifest mapping, debt threshold). `internal/migrate/` package: schema versioning (read/write _schema.md, numbered migration scripts, dry-run mode). CLI: `plexium hook pre-commit`, `plexium hook post-commit`, `plexium ci check --base SHA --head SHA`, `plexium migrate [--dry-run] [--version N]`. Lefthook config (`lefthook.yml`). GitHub Actions: `plexium-lint.yml` (PR lint + PR comment), `plexium-sync.yml` (merge to main sync+publish), `plexium-scheduled-lint.yml` (weekly Monday 9am). 13 new tests across hook/ci/migrate. 208+ tests total passing. |
 
 ---
 

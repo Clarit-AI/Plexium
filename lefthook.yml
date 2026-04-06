@@ -1,0 +1,18 @@
+# Lefthook configuration for Plexium
+# Install: lefthook install
+# Docs: https://github.com/evilmartians/lefthook/blob/master/docs/configuration.md
+
+pre-commit:
+  commands:
+    plexium-check:
+      run: plexium hook pre-commit {staged_files}
+      fail_text: |
+        ⚠️  Code files changed but .wiki/ was not updated.
+        Ask your coding agent to document the changes, or run:
+          plexium sync
+        To bypass (with audit trail): git commit --no-verify
+
+post-commit:
+  commands:
+    plexium-audit:
+      run: plexium hook post-commit

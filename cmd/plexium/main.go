@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/Clarit-AI/Plexium/internal/ci"
 	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/convert"
+	"github.com/Clarit-AI/Plexium/internal/hook"
 	"github.com/Clarit-AI/Plexium/internal/lint"
+	"github.com/Clarit-AI/Plexium/internal/migrate"
 	"github.com/Clarit-AI/Plexium/internal/publish"
 	"github.com/Clarit-AI/Plexium/internal/wiki"
 	"github.com/spf13/cobra"
@@ -55,6 +58,22 @@ func init() {
 	// gh-wiki-sync flags
 	ghWikiSyncCmd.Flags().Bool("dry-run", false, "Preview sync without writing")
 	ghWikiSyncCmd.Flags().Bool("push", false, "Push changes to GitHub Wiki")
+
+	// migrate flags
+	migrateCmd.Flags().Bool("dry-run", false, "Preview migrations without applying")
+	migrateCmd.Flags().Int("version", 0, "Target schema version (default: latest)")
+
+	// ci check flags
+	ciiCheckCmd.Flags().String("base", "", "Base commit SHA")
+	ciiCheckCmd.Flags().String("head", "", "Head commit SHA")
+	ciiCheckCmd.Flags().String("output", "", "Output file for JSON results")
+	ciiCheckCmd.MarkFlagRequired("base")
+	ciiCheckCmd.MarkFlagRequired("head")
+
+	// Register subcommands
+	ciCmd.AddCommand(ciiCheckCmd)
+	hookCmd.AddCommand(hookPreCommitCmd)
+	hookCmd.AddCommand(hookPostCommitCmd)
 
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(convertCmd)
@@ -450,12 +469,192 @@ var doctorCmd = &cobra.Command{
 	},
 }
 
+// hook command — parent for subcommands
+var hookCmd = &cobra.Command{
+	Use:   "hook",
+	Short: "Git hook entry points",
+}
+
+// hook pre-commit subcommand
+var hookPreCommitCmd = &cobra.Command{
+	Use:   "pre-commit",
+	Short: "Pre-commit hook: check wiki updated with source changes",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		h := hook.NewPreCommitHook(repoRoot, cfg)
+
+		result, err := h.Run(args) // args = staged files from lefthook
+		if err != nil {
+			return fmt.Errorf("pre-commit hook failed: %w", err)
+		}
+
+		if result.Skipped {
+			if result.SkipReason != "" {
+				fmt.Fprintf(os.Stderr, "plexium: skipped (%s)\n", result.SkipReason)
+			}
+			return nil
+		}
+
+		if result.Allowed {
+			return nil
+		}
+
+		// Blocked
+		fmt.Fprintf(os.Stderr, "\n⚠️  Code files changed but .wiki/ was not updated.\n")
+		fmt.Fprintf(os.Stderr, "Ask your coding agent to document the changes, or run:\n")
+		fmt.Fprintf(os.Stderr, "  plexium sync\n")
+		fmt.Fprintf(os.Stderr, "To bypass (with audit trail): git commit --no-verify\n\n")
+		fmt.Fprintf(os.Stderr, "Strictness: %s\n", result.Strictness)
+
+		os.Exit(1)
+		return nil
+	},
+}
+
+// hook post-commit subcommand
+var hookPostCommitCmd = &cobra.Command{
+	Use:   "post-commit",
+	Short: "Post-commit hook: track WIKI-DEBT on --no-verify bypass",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		wikiRoot := ".wiki"
+		if cfg != nil && cfg.Wiki.Root != "" {
+			wikiRoot = cfg.Wiki.Root
+		}
+
+		h := hook.NewPostCommitHook(repoRoot, wikiRoot)
+		if err := h.Run(); err != nil {
+			return fmt.Errorf("post-commit hook failed: %w", err)
+		}
+
+		return nil
+	},
+}
+
+// ci command — parent for subcommands
+var ciCmd = &cobra.Command{
+	Use:   "ci",
+	Short: "CI integration commands",
+}
+
+// ci check subcommand
+var ciiCheckCmd = &cobra.Command{
+	Use:   "check",
+	Short: "Diff-aware wiki check for CI pipelines",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		baseSHA, _ := cmd.Flags().GetString("base")
+		headSHA, _ := cmd.Flags().GetString("head")
+		outputFile, _ := cmd.Flags().GetString("output")
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		checker := ci.NewCICheck(repoRoot, cfg)
+
+		result, err := checker.Run(baseSHA, headSHA)
+		if err != nil {
+			return fmt.Errorf("CI check failed: %w", err)
+		}
+
+		if outputJSON || outputFile != "" {
+			data, err := result.ToJSON()
+			if err != nil {
+				return fmt.Errorf("marshaling result: %w", err)
+			}
+			if outputFile != "" {
+				if err := os.WriteFile(outputFile, data, 0644); err != nil {
+					return fmt.Errorf("writing output: %w", err)
+				}
+				fmt.Printf("Results written to %s\n", outputFile)
+			} else {
+				fmt.Println(string(data))
+			}
+		} else {
+			// Human-readable
+			fmt.Printf("CI Wiki Check: %s..%s\n", baseSHA[:7], headSHA[:7])
+			fmt.Printf("Changed files: %d (source: %d)\n", len(result.ChangedFiles), len(result.SourceFiles))
+			fmt.Printf("Wiki updated: %v\n", result.WikiUpdated)
+			fmt.Printf("Wiki debt: %d entries\n", result.DebtCount)
+			if len(result.UntrackedChanges) > 0 {
+				fmt.Printf("Untracked source files:\n")
+				for _, f := range result.UntrackedChanges {
+					fmt.Printf("  - %s\n", f)
+				}
+			}
+			if result.Passes {
+				fmt.Println("✅ Passes")
+			} else {
+				fmt.Println("❌ Fails — wiki updates required")
+			}
+		}
+
+		if !result.Passes {
+			os.Exit(1)
+		}
+		return nil
+	},
+}
+
 // migrate command
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Run schema migrations",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium migrate")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		targetVersion, _ := cmd.Flags().GetInt("version")
+
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		cfg, _ := config.LoadFromDir(repoRoot)
+		wikiRoot := ".wiki"
+		if cfg != nil && cfg.Wiki.Root != "" {
+			wikiRoot = cfg.Wiki.Root
+		}
+
+		m := migrate.NewMigrator(repoRoot, wikiRoot)
+		result, err := m.Migrate(targetVersion, dryRun)
+		if err != nil {
+			return fmt.Errorf("migration failed: %w", err)
+		}
+
+		fmt.Printf("Schema version: %d → %d\n", result.CurrentVersion, result.TargetVersion)
+
+		if len(result.Applied) > 0 {
+			fmt.Printf("Applied %d migration(s):\n", len(result.Applied))
+			for _, mg := range result.Applied {
+				fmt.Printf("  %d: %s\n", mg.Number, mg.Name)
+			}
+		} else if dryRun {
+			fmt.Println("No pending migrations.")
+		} else {
+			fmt.Println("No pending migrations.")
+		}
+
+		if len(result.Errors) > 0 {
+			fmt.Fprintf(os.Stderr, "\nErrors:\n")
+			for _, e := range result.Errors {
+				fmt.Fprintf(os.Stderr, "  - %s\n", e)
+			}
+			os.Exit(1)
+		}
+
 		return nil
 	},
 }
@@ -466,26 +665,6 @@ var pluginCmd = &cobra.Command{
 	Short: "Manage Plexium plugins",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("use: plexium plugin add <name>")
-	},
-}
-
-// hook command
-var hookCmd = &cobra.Command{
-	Use:   "hook",
-	Short: "Git hook entry points",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium hook")
-		return nil
-	},
-}
-
-// ci command
-var ciCmd = &cobra.Command{
-	Use:   "ci",
-	Short: "CI integration commands",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("use: plexium ci check --base SHA --head SHA")
 	},
 }
 
