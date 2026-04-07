@@ -128,7 +128,11 @@ func (g *SchemaGenerator) getStackExamples() string {
 }
 
 // baseSchemaContent is the universal Plexium schema
-const baseSchemaContent = `# PLEXIUM SCHEMA v1 — MANDATORY AGENT DIRECTIVES
+const baseSchemaContent = `---
+schema-version: "1.0"
+---
+
+# PLEXIUM SCHEMA v1 — MANDATORY AGENT DIRECTIVES
 
 You are the custodian of the .wiki/ vault in this repository. Your memory
 does not persist between sessions, but this vault does. It is the compiled,
