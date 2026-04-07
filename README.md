@@ -99,6 +99,11 @@ daemon:
 
 ## Quick Start
 
+**Prerequisites:**
+- [Go 1.25+](https://go.dev/dl/)
+- Git
+- A GitHub repo (local or remote)
+
 ```bash
 # Install
 go install github.com/Clarit-AI/Plexium/cmd/plexium@latest
