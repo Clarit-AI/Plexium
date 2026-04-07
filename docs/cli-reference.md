@@ -236,7 +236,9 @@ Query the wiki for information using PageIndex search with fallback.
 plexium retrieve "<query>" [flags]
 ```
 
-Searches the wiki using BM25-scored PageIndex (title, content, link, and section matching). Falls back to `_index.md` parsing and content grep when PageIndex returns no results.
+Searches the wiki using the built-in PageIndex engine with BM25-scored matching across titles, section headings, summaries, content, and wiki-links. Falls back to `_index.md` parsing and content grep when PageIndex returns no results. This command works immediately after `plexium init` with no additional setup.
+
+The same search engine is available over MCP via [`plexium pageindex serve`](#plexium-pageindex-serve-stable). See [User Guide: Wiki Retrieval](user-guide.md#wiki-retrieval) for details on both interfaces.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
@@ -448,7 +450,9 @@ Start a PageIndex MCP server for agent-accessible wiki search.
 plexium pageindex serve
 ```
 
-Runs in stdio mode using JSON-RPC 2.0. Exposes `tools/list` and `tools/call` endpoints for PageIndex operations. Agents connect via MCP to query the wiki index.
+Runs in stdio mode using JSON-RPC 2.0. Exposes the same search engine used by [`plexium retrieve`](#plexium-retrieve-stable) over the Model Context Protocol. Agents connect via MCP and gain access to three tools: `pageindex_search`, `pageindex_get_page`, and `pageindex_list_pages`.
+
+For agent configuration instructions (Claude Code, Cursor, Claude Desktop), see [User Guide: MCP Server](user-guide.md#mcp-server-optional).
 
 No flags.
 

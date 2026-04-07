@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 
 	"context"
 	"time"
@@ -110,6 +113,7 @@ func init() {
 	agentCmd.AddCommand(agentTestCmd)
 	agentCmd.AddCommand(agentSpendCmd)
 	agentCmd.AddCommand(agentBenchmarkCmd)
+	agentCmd.AddCommand(agentSetupCmd)
 	agentTestCmd.Flags().String("provider", "", "Test a specific provider")
 
 	// Register subcommands
@@ -190,6 +194,24 @@ var initCmd = &cobra.Command{
 		} else {
 			fmt.Printf("Initialized Plexium wiki in %s\n", result.WikiDir)
 			fmt.Printf("Created %d directories and %d files\n", len(result.DirsCreated), len(result.FilesCreated))
+
+			fmt.Println("\nNext steps:")
+			fmt.Println("  1. Run 'plexium doctor' to validate the setup")
+			fmt.Println("  2. Run 'plexium convert' to bootstrap wiki from existing code")
+			fmt.Println("  3. Run 'plexium lint --deterministic' to check wiki health")
+
+			if withPageIndex {
+				fmt.Println("\nPageIndex MCP server ready. Add to your agent's MCP config:")
+				fmt.Println(`  {`)
+				fmt.Println(`    "mcpServers": {`)
+				fmt.Println(`      "plexium-wiki": {`)
+				fmt.Println(`        "command": "plexium",`)
+				fmt.Println(`        "args": ["pageindex", "serve"]`)
+				fmt.Println(`      }`)
+				fmt.Println(`    }`)
+				fmt.Println(`  }`)
+				fmt.Println("  Or query directly: plexium retrieve \"<query>\"")
+			}
 		}
 
 		return nil
@@ -330,9 +352,13 @@ var lintCmd = &cobra.Command{
 
 		var report *lint.LintReport
 		if full {
-			// LLM-augmented lint — RunFull with nil client uses deterministic only
-			// A real LLM client would be injected here when integrations.llmProvider is configured
-			report, err = linter.RunFull(nil)
+			// Wire assistive agent cascade as LLM client when available
+			var llmClient lint.LLMClient
+			if cfg != nil && cfg.AssistiveAgent.Enabled {
+				cascade, _ := buildCascadeFromConfig(cfg)
+				llmClient = &agent.CascadeLLMClient{Cascade: cascade}
+			}
+			report, err = linter.RunFull(llmClient)
 		} else {
 			report, err = linter.RunDeterministic()
 		}
@@ -830,15 +856,43 @@ var daemonCmd = &cobra.Command{
 		cfg, _ := config.LoadFromDir(repoRoot)
 
 		workspace := daemon.NewWorkspaceMgr(repoRoot)
-		tracker := daemon.NewTracker("none", "", "", "")
-		runner, _ := daemon.NewRunner("noop", "")
 
-		// Override tracker from config if available
+		// Read runner/tracker from config, default to noop/none
+		runnerType := "noop"
+		runnerModel := ""
+		trackerType := "none"
+		if cfg != nil {
+			if cfg.Daemon.Runner != "" {
+				runnerType = cfg.Daemon.Runner
+			}
+			runnerModel = cfg.Daemon.RunnerModel
+			if cfg.Daemon.Tracker != "" {
+				trackerType = cfg.Daemon.Tracker
+			}
+		}
+
+		// Derive owner/repo from git remote for GitHub tracker
+		owner, repo := "", ""
+		if trackerType == "github" {
+			if remoteURL, gitErr := exec.Command("git", "-C", repoRoot, "remote", "get-url", "origin").Output(); gitErr == nil {
+				owner, repo = parseGitRemote(strings.TrimSpace(string(remoteURL)))
+			}
+			if owner == "" || repo == "" {
+				return fmt.Errorf("tracker %q requires owner/repo but could not derive from git remote origin", trackerType)
+			}
+		}
+		tracker := daemon.NewTracker(trackerType, owner, repo, os.Getenv("GITHUB_TOKEN"))
+		runner, err := daemon.NewRunner(runnerType, runnerModel)
+		if err != nil {
+			return fmt.Errorf("creating runner %q: %w", runnerType, err)
+		}
+
+		// Use config values as defaults when flags weren't explicitly set
 		if cfg != nil && cfg.Daemon.Enabled {
-			if pollInterval == 300 && cfg.Daemon.PollInterval > 0 {
+			if !cmd.Flags().Changed("poll-interval") && cfg.Daemon.PollInterval > 0 {
 				pollInterval = cfg.Daemon.PollInterval
 			}
-			if maxConcurrent == 2 && cfg.Daemon.MaxConcurrent > 0 {
+			if !cmd.Flags().Changed("max-concurrent") && cfg.Daemon.MaxConcurrent > 0 {
 				maxConcurrent = cfg.Daemon.MaxConcurrent
 			}
 		}
@@ -942,10 +996,10 @@ func buildCascadeFromConfig(cfg *config.Config) (*agent.ProviderCascade, *agent.
 			}
 			switch pc.Type {
 			case "ollama":
-				providers = append(providers, agent.NewOllamaProvider(pc.Endpoint, pc.Model, nil))
+				providers = append(providers, agent.NewOllamaProvider(pc.Endpoint, pc.Model, agent.DefaultOllamaHTTPPost))
 			case "openai-compatible":
-				apiKey := os.Getenv(pc.APIKeyEnv)
-				providers = append(providers, agent.NewOpenRouterProvider(pc.Endpoint, pc.Model, apiKey, 0.0, nil))
+				apiKey := loadAPIKey(pc.APIKeyEnv)
+				providers = append(providers, agent.NewOpenRouterProvider(pc.Endpoint, pc.Model, apiKey, 0.0, agent.DefaultOpenRouterHTTPPost))
 			case "inherit":
 				providers = append(providers, &agent.InheritProvider{})
 			}
@@ -967,20 +1021,152 @@ func buildCascadeFromConfig(cfg *config.Config) (*agent.ProviderCascade, *agent.
 
 var agentStartCmd = &cobra.Command{
 	Use:   "start",
-	Short: "Start the assistive agent",
+	Short: "Start the assistive agent daemon in the background",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("Assistive agent started. Use 'plexium daemon' for continuous operation.")
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		pidFile := filepath.Join(repoRoot, ".plexium", "daemon.pid")
+
+		// Check if already running
+		if pid, err := readPIDFile(pidFile); err == nil {
+			if processAlive(pid) {
+				fmt.Printf("Daemon already running (PID %d)\n", pid)
+				return nil
+			}
+			_ = os.Remove(pidFile)
+		}
+
+		// Launch plexium daemon as a background process
+		exe, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("finding executable: %w", err)
+		}
+
+		proc := exec.Command(exe, "daemon")
+		proc.Dir = repoRoot
+		proc.Stdout = nil
+		proc.Stderr = nil
+
+		if err := proc.Start(); err != nil {
+			return fmt.Errorf("starting daemon: %w", err)
+		}
+
+		pid := proc.Process.Pid
+
+		// Brief liveness check — verify process survived init
+		time.Sleep(100 * time.Millisecond)
+		if !processAlive(pid) {
+			return fmt.Errorf("daemon exited immediately after start (PID %d)", pid)
+		}
+
+		if err := os.MkdirAll(filepath.Dir(pidFile), 0o755); err != nil {
+			_ = proc.Process.Kill()
+			return fmt.Errorf("creating PID directory: %w", err)
+		}
+		if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0o644); err != nil {
+			_ = proc.Process.Kill()
+			return fmt.Errorf("writing PID file: %w", err)
+		}
+
+		fmt.Printf("Daemon started (PID %d)\n", pid)
+		fmt.Println("Use 'plexium agent stop' to stop, 'plexium agent status' to check.")
+
+		_ = proc.Process.Release()
 		return nil
 	},
 }
 
 var agentStopCmd = &cobra.Command{
 	Use:   "stop",
-	Short: "Stop the assistive agent",
+	Short: "Stop the assistive agent daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("Assistive agent stopped.")
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		pidFile := filepath.Join(repoRoot, ".plexium", "daemon.pid")
+		pid, err := readPIDFile(pidFile)
+		if err != nil {
+			fmt.Println("No daemon running (PID file not found)")
+			return nil
+		}
+
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			_ = os.Remove(pidFile)
+			fmt.Println("No daemon running (process not found)")
+			return nil
+		}
+
+		if err := process.Signal(syscall.SIGTERM); err != nil {
+			_ = os.Remove(pidFile)
+			fmt.Printf("Daemon process %d not responding, cleaned up PID file\n", pid)
+			return nil
+		}
+
+		_ = os.Remove(pidFile)
+		fmt.Printf("Daemon stopped (PID %d)\n", pid)
 		return nil
 	},
+}
+
+func readPIDFile(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(string(data)))
+}
+
+func processAlive(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return process.Signal(syscall.Signal(0)) == nil
+}
+
+// parseGitRemote extracts owner/repo from a git remote URL.
+// Supports HTTPS (https://github.com/owner/repo.git) and SSH (git@github.com:owner/repo.git).
+func parseGitRemote(remoteURL string) (string, string) {
+	// HTTPS: https://github.com/owner/repo.git
+	if strings.Contains(remoteURL, "://") {
+		remoteURL = strings.TrimSuffix(remoteURL, ".git")
+		parts := strings.Split(remoteURL, "/")
+		if len(parts) >= 2 {
+			return parts[len(parts)-2], parts[len(parts)-1]
+		}
+	}
+	// SSH: git@github.com:owner/repo.git
+	if strings.Contains(remoteURL, ":") {
+		after := remoteURL[strings.Index(remoteURL, ":")+1:]
+		after = strings.TrimSuffix(after, ".git")
+		parts := strings.Split(after, "/")
+		if len(parts) == 2 {
+			return parts[0], parts[1]
+		}
+	}
+	return "", ""
+}
+
+// loadAPIKey tries .plexium/credentials.json first, then falls back to environment variable.
+func loadAPIKey(envName string) string {
+	if cwd, err := os.Getwd(); err == nil {
+		credPath := filepath.Join(cwd, ".plexium", "credentials.json")
+		if data, err := os.ReadFile(credPath); err == nil {
+			var creds map[string]string
+			if err := json.Unmarshal(data, &creds); err == nil {
+				if key := creds["openrouter_api_key"]; key != "" {
+					return key
+				}
+			}
+		}
+	}
+	return os.Getenv(envName)
 }
 
 var agentStatusCmd = &cobra.Command{
@@ -1036,6 +1222,15 @@ var agentStatusCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Assistive Agent: %s\n", map[bool]string{true: "enabled", false: "disabled"}[enabled])
+
+		// Show daemon status
+		pidFile := filepath.Join(repoRoot, ".plexium", "daemon.pid")
+		if pid, pidErr := readPIDFile(pidFile); pidErr == nil && processAlive(pid) {
+			fmt.Printf("Daemon: running (PID %d)\n", pid)
+		} else {
+			fmt.Println("Daemon: stopped")
+		}
+
 		fmt.Printf("Daily budget: $%.2f\n\n", status.Budget)
 		fmt.Println("Providers:")
 		for _, s := range statuses {
@@ -1156,8 +1351,19 @@ var orchestrateCmd = &cobra.Command{
 		issueID, _ := cmd.Flags().GetString("issue")
 		outputJSON, _ := cmd.Flags().GetBool("output-json")
 
+		cfg, _ := config.LoadFromDir(repoRoot)
+		runnerType := "noop"
+		runnerModel := ""
+		if cfg != nil && cfg.Daemon.Runner != "" {
+			runnerType = cfg.Daemon.Runner
+			runnerModel = cfg.Daemon.RunnerModel
+		}
+
 		workspace := daemon.NewWorkspaceMgr(repoRoot)
-		runner, _ := daemon.NewRunner("noop", "")
+		runner, err := daemon.NewRunner(runnerType, runnerModel)
+		if err != nil {
+			return fmt.Errorf("creating runner %q: %w", runnerType, err)
+		}
 
 		// Create isolated worktree
 		wt, err := workspace.Create(issueID)
@@ -1422,6 +1628,36 @@ var beadsScanCmd = &cobra.Command{
 					fmt.Printf("  %s → %s\n", m.TaskID, strings.Join(m.WikiPaths, ", "))
 				}
 			}
+		}
+		return nil
+	},
+}
+
+var agentSetupCmd = &cobra.Command{
+	Use:   "setup",
+	Short: "Interactive provider setup (Ollama, OpenRouter)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		result, err := agent.RunInteractiveSetup(repoRoot)
+		if err != nil {
+			return fmt.Errorf("setup failed: %w", err)
+		}
+
+		fmt.Println()
+		if len(result.ProvidersConfigured) == 0 {
+			fmt.Println("No providers configured. Run 'plexium agent setup' again when ready.")
+		} else {
+			fmt.Printf("Configured: %s\n", strings.Join(result.ProvidersConfigured, ", "))
+			if result.ConfigUpdated {
+				fmt.Println("Config updated in .plexium/config.yml")
+			}
+			fmt.Println("\nNext steps:")
+			fmt.Println("  plexium agent test     — verify connectivity")
+			fmt.Println("  plexium agent status   — check provider health")
 		}
 		return nil
 	},

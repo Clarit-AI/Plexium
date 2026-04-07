@@ -6,6 +6,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8.svg" alt="Go 1.25+" /></a>
   <a href="docs/status.md"><img src="https://img.shields.io/badge/Tests-540%2B_passing-brightgreen.svg" alt="Tests: 540+" /></a>
+  <a href="https://deepwiki.com/Clarit-AI/Plexium"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" /></a>
+  <img src="https://img.shields.io/coderabbit/prs/github/Clarit-AI/PlexiumEngram?logo=CodeRabbit&logoColor=%23FFFFFF&color=%23FF570A" alt="CodeRabbit Pull Request Reviews" />
 </p>
 
 <p align="center">
@@ -36,23 +38,62 @@ Agents read the wiki before working on a task, gaining accumulated project conte
 
 The wiki is browsable as an [Obsidian](https://obsidian.md) vault, publishable as a [GitHub Wiki](https://docs.github.com/en/communities/documenting-your-project-with-wikis), and queryable via [MCP](https://modelcontextprotocol.io) by any coding agent. A governance schema (`_schema.md`) instructs agents on the read-execute-document-validate loop, ownership rules, and page generation conventions.
 
----
+### Retrieval
 
-## Proof
+Plexium includes a built-in search engine queryable via CLI (`plexium retrieve "query"`) or MCP (`plexium pageindex serve`). The engine uses BM25-style scoring across page titles, sections, summaries, content, and wiki-links. CLI retrieval works immediately after `plexium init`. The MCP server exposes the same engine over JSON-RPC 2.0 stdio for agents that support the Model Context Protocol.
 
-Plexium has completed all 11 build phases and passed a comprehensive validation suite.
+### Assistive Agent
 
-| Metric | Value |
-|--------|-------|
-| Test functions | 540+ across 25 packages |
-| Safety invariants proven | 7 (source immutability, dry-run isolation, ownership protection, init non-destructiveness, compile scope, manifest preservation) |
-| Determinism guarantees | 6 (manifest sort stability, hash consistency, compile idempotency, lint stability, empty-manifest stability, JSON shape stability) |
-| Cross-phase contracts | 10 verified (struct fields, ownership values, exit codes, config validation) |
-| CLI commands | 22 commands and subcommands |
-| Go packages | 26 |
-| Blocking issues | 0 |
+Plexium includes an assistive agent that automates wiki maintenance using a provider cascade. The cascade tries providers in cost order (cheapest first), falling through on failure:
 
-Full details: [Implementation Status](docs/status.md)
+- **Ollama** -- local LLM via llama.cpp, zero cost, handles low-complexity tasks (frontmatter updates, index regeneration, log entries)
+- **OpenRouter / OpenAI-compatible** -- remote API with daily budget caps, handles medium-complexity tasks (module summaries, cross-reference suggestions)
+- **Inherit** -- delegates to the primary coding agent for high-complexity tasks (architecture synthesis, contradiction detection)
+
+A **task router** classifies each wiki maintenance task by complexity and routes it to the appropriate cascade tier. A **rate limiter** tracks daily spend per provider and applies adaptive batching delays as usage approaches the budget cap.
+
+The **daemon** (`plexium daemon` or `plexium agent start`) runs a background poll loop that detects stale pages, lint issues, ingest candidates, and wiki-debt, then takes the configured action (log, create issue, or auto-fix in an isolated worktree).
+
+```yaml
+# .plexium/config.yml
+assistiveAgent:
+  enabled: true
+  providers:
+    - name: local-ollama
+      enabled: true
+      type: ollama
+      endpoint: http://localhost:11434
+      model: llama3
+    - name: openrouter
+      enabled: true
+      type: openai-compatible
+      endpoint: https://openrouter.ai/api
+      model: meta-llama/llama-3.1-8b-instruct:free
+      apiKeyEnv: OPENROUTER_API_KEY
+  budget:
+    dailyUSD: 1.00
+
+daemon:
+  enabled: true
+  runner: claude
+  tracker: github
+  pollInterval: 300
+  watches:
+    staleness:
+      enabled: true
+      action: create-issue
+      threshold: "7d"
+```
+
+| Command | Purpose |
+|---------|---------|
+| `plexium agent setup` | Interactive provider configuration |
+| `plexium agent start` | Launch daemon in background |
+| `plexium agent stop` | Stop background daemon |
+| `plexium agent status` | Show provider health, daemon state, daily spend |
+| `plexium agent test` | Test provider connectivity |
+| `plexium agent spend` | Show daily cost breakdown |
+| `plexium daemon` | Run daemon in foreground |
 
 ---
 
@@ -120,6 +161,22 @@ Enforcement
   raw/                    # Unprocessed sources (meeting notes, transcripts)
 ```
 
+### Proof
+
+Plexium has completed all 11 build phases and passed a comprehensive validation suite.
+
+| Metric | Value |
+|--------|-------|
+| Test functions | 540+ across 25 packages |
+| Safety invariants proven | 7 (source immutability, dry-run isolation, ownership protection, init non-destructiveness, compile scope, manifest preservation) |
+| Determinism guarantees | 6 (manifest sort stability, hash consistency, compile idempotency, lint stability, empty-manifest stability, JSON shape stability) |
+| Cross-phase contracts | 10 verified (struct fields, ownership values, exit codes, config validation) |
+| CLI commands | 22 commands and subcommands |
+| Go packages | 26 |
+| Blocking issues | 0 |
+
+Full details: [Implementation Status](docs/status.md)
+
 ### Ownership Model
 
 | Mode | Meaning |
@@ -139,7 +196,7 @@ Enforcement
 | `plexium compile` | Regenerate navigation files |
 | `plexium publish` | Push wiki to GitHub Wiki |
 | `plexium doctor` | Validate setup and config |
-| `plexium retrieve` | Query the wiki |
+| `plexium retrieve` | Query the wiki (built-in search engine) |
 
 Full reference: [CLI Reference](docs/cli-reference.md)
 

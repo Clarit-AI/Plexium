@@ -57,6 +57,9 @@ type DaemonConfig struct {
 	Enabled       bool         `yaml:"enabled"`
 	PollInterval  int          `yaml:"pollInterval"` // seconds
 	MaxConcurrent int          `yaml:"maxConcurrent"`
+	Runner        string       `yaml:"runner"`      // claude | codex | gemini | noop
+	RunnerModel   string       `yaml:"runnerModel"` // optional model override for runner
+	Tracker       string       `yaml:"tracker"`     // github | linear | none
 	Watches       WatchConfig  `yaml:"watches"`
 }
 

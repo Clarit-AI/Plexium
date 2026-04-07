@@ -2,7 +2,7 @@
 
 > **Model:** Mid-tier — Sonnet 4 (primary), GPT 4.1, Gemini 2.5 Flash acceptable
 > **Execution:** Solo Agent
-> **Status:** Pending  
+> **Status:** Complete (implemented 2026-04-06)  
 > **bd Epic:** `plexium-m8`  
 > **Prerequisites:** Phase 7 complete
 
@@ -198,7 +198,7 @@ jobs:
         if: hashFiles('.plexium/config.yml') != ''
         run: |
           if grep -q 'memento: true' .plexium/config.yml; then
-            git memento check --gate
+            git memento doctor --gate
           fi
 ```
 

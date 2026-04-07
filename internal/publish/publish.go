@@ -143,6 +143,19 @@ func (p *Publisher) collectFiles(mf *manifest.Manifest) ([]string, []string, err
 			}
 		}
 
+		// Check sensitivity neverPublish patterns
+		for _, np := range p.config.Sensitivity.NeverPublish {
+			if matched, mErr := doublestar.Match(np, relPath); mErr == nil && matched {
+				skipped = append(skipped, relPath)
+				return nil
+			}
+			// Also match against just the filename for bare patterns like "credentials.json"
+			if matched, mErr := doublestar.Match(np, filepath.Base(relPath)); mErr == nil && matched {
+				skipped = append(skipped, relPath)
+				return nil
+			}
+		}
+
 		// Check exclude patterns (applies to all file types, not just markdown)
 		if p.isExcluded(relPath) {
 			return nil

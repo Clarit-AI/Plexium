@@ -255,6 +255,10 @@ Exit codes: 0 (clean), 1 (errors), 2 (warnings with `--fail-on warning`).
 
 ## Wiki Retrieval
 
+Plexium includes a built-in search engine that works immediately after `plexium init`. No additional setup or configuration is required.
+
+### CLI Search
+
 Query the wiki from the command line:
 
 ```bash
@@ -262,17 +266,68 @@ plexium retrieve "authentication flow"
 plexium retrieve "database schema" --format json
 ```
 
-Retrieve searches the wiki using BM25-scored PageIndex. It matches against page titles, content, wiki-links, and section names. When PageIndex returns no results, it falls back to `_index.md` parsing and content grep.
+The search engine uses BM25-style scoring across five dimensions: page titles, section headings, summaries, content bodies, and `[[wiki-links]]`. Results are ranked by relevance. When the PageIndex returns no results, it falls back to `_index.md` parsing combined with content grep to ensure queries always return something useful.
 
-### MCP Server Mode
+### MCP Server (Optional)
 
-For agents that support MCP (Model Context Protocol):
+The MCP server exposes the same PageIndex search engine over JSON-RPC 2.0 stdio, making the wiki queryable by any agent that supports the [Model Context Protocol](https://modelcontextprotocol.io). This is not a separate system -- it is the same engine that powers `plexium retrieve`, accessed through a different interface.
 
 ```bash
 plexium pageindex serve
 ```
 
-This starts a JSON-RPC 2.0 server in stdio mode. Agents connect via MCP to query the wiki index programmatically.
+The server exposes three tools:
+
+| Tool | Description |
+|------|-------------|
+| `pageindex_search` | Search wiki pages by query string |
+| `pageindex_get_page` | Retrieve a specific page by path |
+| `pageindex_list_pages` | List all indexed pages |
+
+#### Wiring the MCP server to your agent
+
+Add the server to your agent's MCP configuration. The command is the same for all agents:
+
+**Claude Code** (`.claude/settings.local.json` in the project root):
+
+```json
+{
+  "mcpServers": {
+    "plexium-wiki": {
+      "command": "plexium",
+      "args": ["pageindex", "serve"]
+    }
+  }
+}
+```
+
+**Cursor** (`.cursor/mcp.json` in the project root):
+
+```json
+{
+  "mcpServers": {
+    "plexium-wiki": {
+      "command": "plexium",
+      "args": ["pageindex", "serve"]
+    }
+  }
+}
+```
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "plexium-wiki": {
+      "command": "plexium",
+      "args": ["pageindex", "serve"]
+    }
+  }
+}
+```
+
+Once configured, your agent can call `pageindex_search`, `pageindex_get_page`, and `pageindex_list_pages` as MCP tools during its sessions.
 
 ---
 
@@ -374,17 +429,203 @@ Environment variables override config values. See [CLI Reference: Environment Va
 
 ---
 
-## Experimental Features
+## Assistive Agent Setup
 
-The following features have functional scaffolding but incomplete integration points. See [Status](status.md) for details.
+Plexium includes an assistive agent that automates wiki maintenance using a provider cascade. Providers are tried in cost order (cheapest first), falling through on failure. Setup is optional -- Plexium works without it, but the daemon, LLM lint, and autonomous maintenance features require at least one provider.
 
-### Daemon [Experimental]
+### Option A: Ollama (Local, Free)
+
+Best for: local development, air-gapped environments, zero-cost operation.
+
+1. Install Ollama: https://ollama.ai
+
+2. Pull a model:
 
 ```bash
+ollama pull llama3.2
+```
+
+3. Add to `.plexium/config.yml`:
+
+```yaml
+assistiveAgent:
+  enabled: true
+  providers:
+    - name: local-ollama
+      enabled: true
+      type: ollama
+      endpoint: http://localhost:11434
+      model: llama3.2
+  budget:
+    dailyUSD: 0
+```
+
+4. Verify:
+
+```bash
+plexium agent test
+```
+
+### Option B: OpenRouter (Remote, Free Tier Available)
+
+Best for: higher-quality models, teams without local GPU, free-tier models for light usage.
+
+1. Create an account at https://openrouter.ai and get an API key.
+
+2. Set the API key:
+
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-..."
+```
+
+3. Add to `.plexium/config.yml`:
+
+```yaml
+assistiveAgent:
+  enabled: true
+  providers:
+    - name: openrouter
+      enabled: true
+      type: openai-compatible
+      endpoint: https://openrouter.ai/api
+      model: meta-llama/llama-3.1-8b-instruct:free
+      apiKeyEnv: OPENROUTER_API_KEY
+  budget:
+    dailyUSD: 0.50
+```
+
+4. Verify:
+
+```bash
+plexium agent test
+```
+
+**Free models on OpenRouter** (no API spend): `meta-llama/llama-3.1-8b-instruct:free`, `google/gemma-2-9b-it:free`, `mistralai/mistral-7b-instruct:free`. Check https://openrouter.ai/models for current availability.
+
+### Option C: Both (Cascade)
+
+Use Ollama for cheap tasks and OpenRouter as fallback:
+
+```yaml
+assistiveAgent:
+  enabled: true
+  providers:
+    - name: local-ollama
+      enabled: true
+      type: ollama
+      endpoint: http://localhost:11434
+      model: llama3.2
+    - name: openrouter-fallback
+      enabled: true
+      type: openai-compatible
+      endpoint: https://openrouter.ai/api
+      model: meta-llama/llama-3.1-8b-instruct:free
+      apiKeyEnv: OPENROUTER_API_KEY
+  budget:
+    dailyUSD: 1.00
+```
+
+The cascade sorts providers by cost (Ollama = $0, so it always goes first). If Ollama is down or fails, the request falls through to OpenRouter.
+
+### Any OpenAI-Compatible API
+
+The `openai-compatible` type works with any API that speaks the OpenAI `/v1/chat/completions` format: OpenRouter, Together AI, Groq, local vLLM, etc. Set the `endpoint` and `model` accordingly.
+
+### Budget Controls
+
+The rate limiter tracks daily spend per provider and persists it to `.plexium/agent-state.json`. When usage approaches the budget cap, the daemon applies adaptive batching delays (backs off requests) rather than hard-cutting.
+
+```bash
+plexium agent spend       # Show daily cost breakdown
+plexium agent status      # Show provider health and budget usage
+```
+
+### Task Routing
+
+The task router classifies wiki maintenance tasks by complexity and routes them to the appropriate cascade tier:
+
+| Complexity | Example Tasks | Provider |
+|------------|---------------|----------|
+| Deterministic | Hash computation, path validation, orphan detection | No LLM (pure code) |
+| Low | Frontmatter updates, log entries, index regeneration | Cheapest (Ollama) |
+| Medium | Cross-reference suggestions, module summaries | Assistive cascade |
+| High | Architecture synthesis, contradiction detection, ADR creation | Primary agent or cascade fallback |
+
+---
+
+## Daemon and Autonomous Maintenance
+
+The daemon runs a background poll loop that detects wiki issues and takes action.
+
+### Starting the Daemon
+
+```bash
+# Background (managed via PID file)
+plexium agent start
+plexium agent status      # Shows PID and provider state
+plexium agent stop
+
+# Foreground (for debugging)
 plexium daemon --poll-interval 300 --max-concurrent 2
 ```
 
-The daemon polls for staleness, lint violations, ingest opportunities, and documentation debt. It creates isolated git worktrees for concurrent work. The issue tracker integration (LinearTracker) is not yet implemented. The runner dispatches to external CLI tools (Claude, Codex, Gemini) but these integrations are untested.
+### Daemon Configuration
+
+```yaml
+daemon:
+  enabled: true
+  pollInterval: 300       # seconds between ticks
+  maxConcurrent: 2        # max parallel worktrees
+  runner: claude           # claude | codex | gemini | noop
+  runnerModel: ""          # optional model override
+  tracker: github          # github | none
+  watches:
+    staleness:
+      enabled: true
+      action: create-issue  # log-only | create-issue | auto-sync
+      threshold: "7d"
+    lint:
+      enabled: true
+      action: log-only
+    ingest:
+      enabled: true
+      action: auto-ingest
+      watchDir: ".wiki/raw/"
+    debt:
+      enabled: true
+      action: create-issue
+      maxDebt: 10
+```
+
+**Actions:** `log-only` records the finding. `create-issue` creates a GitHub issue. `auto-sync`, `auto-fix`, and `auto-ingest` create an isolated git worktree and run the configured runner to resolve the issue automatically.
+
+**Runner:** The daemon shells out to the configured CLI tool (e.g., `claude --print`) in the worktree to perform wiki updates. Set `runner: noop` for dry-run mode.
+
+**Tracker:** Set `tracker: github` and ensure `GITHUB_TOKEN` is set to enable automatic GitHub issue creation.
+
+---
+
+## LLM-Augmented Lint
+
+When the assistive agent is configured, `plexium lint --full` runs semantic analysis in addition to structural checks:
+
+```bash
+plexium lint --full
+```
+
+This detects:
+- **Contradictions** between linked wiki pages
+- **Missing concepts** mentioned in 3+ pages without their own page
+- **Missing cross-references** between related pages that should link
+- **Semantic staleness** where page content appears outdated in meaning
+
+Without the assistive agent, `--full` falls back to deterministic checks only.
+
+---
+
+## Experimental Features
+
+The following features have functional scaffolding but limited real-world testing. See [Status](status.md) for details.
 
 ### Orchestrate [Experimental]
 
@@ -392,15 +633,8 @@ The daemon polls for staleness, lint violations, ingest opportunities, and docum
 plexium orchestrate --issue PROJ-123
 ```
 
-Creates an isolated git worktree for a single issue, runs retriever and documenter agent roles, then cleans up. The default runner is noop (no actual agent execution). Requires a configured provider and runner to do real work.
+Creates an isolated git worktree for a single issue, runs retriever and documenter agent roles, then cleans up. Uses the configured `daemon.runner` from config (defaults to `noop` if not set). Set a real runner (e.g., `claude`) to do actual work.
 
-### Assistive Agent [Partial]
+### Linear Tracker [Stub]
 
-The agent lifecycle commands (`start`, `stop`) are stubs. The monitoring commands work:
-
-```bash
-plexium agent status      # Provider health and cost tracking
-plexium agent test        # Test provider connectivity
-plexium agent spend       # Daily spend per provider
-plexium agent benchmark   # Latency benchmarking
-```
+The `tracker: linear` option is defined but not yet implemented. Use `tracker: github` for GitHub issue creation.

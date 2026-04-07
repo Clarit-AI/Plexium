@@ -47,7 +47,7 @@ enforcement:
 **Session transcript ingestion:**
 1. `git memento init` is run during `plexium init --with-memento`
 2. Session transcripts are stored as git notes AND copied to `.wiki/raw/memento-transcripts/`
-3. CI gate (`git memento check --gate`) fails builds without proper session provenance
+3. CI gate (`git memento doctor --gate`) fails builds without proper session provenance
 
 **Transcript ingestion pipeline:**
 ```go
