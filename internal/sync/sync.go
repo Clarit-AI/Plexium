@@ -3,7 +3,6 @@ package sync
 import (
 	"fmt"
 	"path/filepath"
-	"time"
 
 	"github.com/Clarit-AI/Plexium/internal/compile"
 	"github.com/Clarit-AI/Plexium/internal/config"
@@ -61,13 +60,24 @@ func Run(opts Options) (*SyncResult, error) {
 	}
 	result.StalePages = len(stalePages)
 
-	if len(stalePages) == 0 {
-		return result, nil
-	}
-
 	// Collect affected page paths
 	for _, p := range stalePages {
 		result.PagesAffected = append(result.PagesAffected, p.WikiPath)
+	}
+
+	// Always scan for new source files, even when no pages are stale
+	if opts.Config != nil {
+		newFiles, err := detectNewSources(opts.RepoRoot, opts.Config, m)
+		if err != nil {
+			return nil, fmt.Errorf("detecting new sources: %w", err)
+		}
+		for _, f := range newFiles {
+			result.PagesAffected = append(result.PagesAffected, fmt.Sprintf("(new source) %s", f))
+		}
+	}
+
+	if len(stalePages) == 0 {
+		return result, nil
 	}
 
 	if opts.DryRun {
@@ -93,25 +103,12 @@ func Run(opts Options) (*SyncResult, error) {
 			updated++
 		}
 		stalePage.SourceFiles = newSources
-		stalePage.LastUpdated = time.Now().UTC().Format(time.RFC3339)
 
 		if err := mgr.UpsertPage(stalePage); err != nil {
 			return nil, fmt.Errorf("updating page %s: %w", stalePage.WikiPath, err)
 		}
 	}
 	result.HashesUpdated = updated
-
-	// Scan for new source files not yet in the manifest
-	if opts.Config != nil {
-		newFiles, err := detectNewSources(opts.RepoRoot, opts.Config, m)
-		if err == nil && len(newFiles) > 0 {
-			// New source files are reported but not auto-ingested —
-			// that requires `plexium convert`. This keeps sync fast and safe.
-			for _, f := range newFiles {
-				result.PagesAffected = append(result.PagesAffected, fmt.Sprintf("(new source) %s", f))
-			}
-		}
-	}
 
 	// Recompile navigation files
 	compiler := compile.NewCompiler(opts.RepoRoot, false)
