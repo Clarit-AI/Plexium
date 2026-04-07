@@ -150,7 +150,7 @@ func (p *Publisher) collectFiles(mf *manifest.Manifest) ([]string, []string, err
 				return nil
 			}
 			// Also match against just the filename for bare patterns like "credentials.json"
-			if matched, mErr := doublestar.Match(np, filepath.Base(path)); mErr == nil && matched {
+			if matched, mErr := doublestar.Match(np, filepath.Base(relPath)); mErr == nil && matched {
 				skipped = append(skipped, relPath)
 				return nil
 			}

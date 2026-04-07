@@ -27,7 +27,7 @@ The schema has a `schema-version` field in `.wiki/_schema.md`. When Plexium upgr
 
 ## Reading the Schema
 
-The schema is written in markdown with structured sections. Key sections to look for:
+The schema is written in Markdown with structured sections. Key sections to look for:
 
 - **Agent Contract** — the loop you must follow
 - **Page Types** — what goes in each wiki section

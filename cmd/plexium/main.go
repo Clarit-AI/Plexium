@@ -843,12 +843,12 @@ var daemonCmd = &cobra.Command{
 			return fmt.Errorf("creating runner %q: %w", runnerType, err)
 		}
 
-		// Override poll/concurrency from config if available
+		// Use config values as defaults when flags weren't explicitly set
 		if cfg != nil && cfg.Daemon.Enabled {
-			if pollInterval == 300 && cfg.Daemon.PollInterval > 0 {
+			if !cmd.Flags().Changed("poll-interval") && cfg.Daemon.PollInterval > 0 {
 				pollInterval = cfg.Daemon.PollInterval
 			}
-			if maxConcurrent == 2 && cfg.Daemon.MaxConcurrent > 0 {
+			if !cmd.Flags().Changed("max-concurrent") && cfg.Daemon.MaxConcurrent > 0 {
 				maxConcurrent = cfg.Daemon.MaxConcurrent
 			}
 		}
@@ -954,7 +954,7 @@ func buildCascadeFromConfig(cfg *config.Config) (*agent.ProviderCascade, *agent.
 			case "ollama":
 				providers = append(providers, agent.NewOllamaProvider(pc.Endpoint, pc.Model, agent.DefaultOllamaHTTPPost))
 			case "openai-compatible":
-				apiKey := os.Getenv(pc.APIKeyEnv)
+				apiKey := loadAPIKey(pc.APIKeyEnv)
 				providers = append(providers, agent.NewOpenRouterProvider(pc.Endpoint, pc.Model, apiKey, 0.0, agent.DefaultOpenRouterHTTPPost))
 			case "inherit":
 				providers = append(providers, &agent.InheritProvider{})
@@ -1010,10 +1010,24 @@ var agentStartCmd = &cobra.Command{
 			return fmt.Errorf("starting daemon: %w", err)
 		}
 
-		_ = os.MkdirAll(filepath.Dir(pidFile), 0o755)
-		_ = os.WriteFile(pidFile, []byte(strconv.Itoa(proc.Process.Pid)), 0o644)
+		pid := proc.Process.Pid
 
-		fmt.Printf("Daemon started (PID %d)\n", proc.Process.Pid)
+		// Brief liveness check — verify process survived init
+		time.Sleep(100 * time.Millisecond)
+		if !processAlive(pid) {
+			return fmt.Errorf("daemon exited immediately after start (PID %d)", pid)
+		}
+
+		if err := os.MkdirAll(filepath.Dir(pidFile), 0o755); err != nil {
+			_ = proc.Process.Kill()
+			return fmt.Errorf("creating PID directory: %w", err)
+		}
+		if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0o644); err != nil {
+			_ = proc.Process.Kill()
+			return fmt.Errorf("writing PID file: %w", err)
+		}
+
+		fmt.Printf("Daemon started (PID %d)\n", pid)
 		fmt.Println("Use 'plexium agent stop' to stop, 'plexium agent status' to check.")
 
 		_ = proc.Process.Release()
@@ -1093,6 +1107,22 @@ func parseGitRemote(remoteURL string) (string, string) {
 		}
 	}
 	return "", ""
+}
+
+// loadAPIKey tries .plexium/credentials.json first, then falls back to environment variable.
+func loadAPIKey(envName string) string {
+	if cwd, err := os.Getwd(); err == nil {
+		credPath := filepath.Join(cwd, ".plexium", "credentials.json")
+		if data, err := os.ReadFile(credPath); err == nil {
+			var creds map[string]string
+			if err := json.Unmarshal(data, &creds); err == nil {
+				if key := creds["openrouter_api_key"]; key != "" {
+					return key
+				}
+			}
+		}
+	}
+	return os.Getenv(envName)
 }
 
 var agentStatusCmd = &cobra.Command{
@@ -1277,8 +1307,16 @@ var orchestrateCmd = &cobra.Command{
 		issueID, _ := cmd.Flags().GetString("issue")
 		outputJSON, _ := cmd.Flags().GetBool("output-json")
 
+		cfg, _ := config.LoadFromDir(repoRoot)
+		runnerType := "noop"
+		runnerModel := ""
+		if cfg != nil && cfg.Daemon.Runner != "" {
+			runnerType = cfg.Daemon.Runner
+			runnerModel = cfg.Daemon.RunnerModel
+		}
+
 		workspace := daemon.NewWorkspaceMgr(repoRoot)
-		runner, _ := daemon.NewRunner("noop", "")
+		runner, _ := daemon.NewRunner(runnerType, runnerModel)
 
 		// Create isolated worktree
 		wt, err := workspace.Create(issueID)

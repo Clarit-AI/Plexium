@@ -633,7 +633,7 @@ The following features have functional scaffolding but limited real-world testin
 plexium orchestrate --issue PROJ-123
 ```
 
-Creates an isolated git worktree for a single issue, runs retriever and documenter agent roles, then cleans up. Requires a configured runner (set `daemon.runner` in config) to do real work.
+Creates an isolated git worktree for a single issue, runs retriever and documenter agent roles, then cleans up. Uses the configured `daemon.runner` from config (defaults to `noop` if not set). Set a real runner (e.g., `claude`) to do actual work.
 
 ### Linear Tracker [Stub]
 

@@ -1055,7 +1055,7 @@ jobs:
         if: hashFiles('.plexium/config.yml') != ''
         run: |
           if grep -q 'memento: true' .plexium/config.yml; then
-            git memento doctor --gate
+            git memento doctor || echo "Warning: memento doctor failed"
           fi
 ```
 
@@ -1348,7 +1348,7 @@ WHERE contains(file.content, "WIKI-DEBT")
 **Integration:**
 - `plexium init --with-memento` runs `git memento init`
 - Session transcripts are stored as git notes AND copied to `.wiki/raw/memento-transcripts/`
-- CI gate (`git memento doctor --gate`) fails builds without proper session provenance
+- CI runs `git memento doctor` to verify session provenance (gate enforcement is configured via `enforcement.mementoGate` in config)
 - The schema instructs agents to periodically ingest transcripts into the wiki, extracting decisions and rationale into ADR and module pages
 - This creates a feedback loop: **AI reasoning about code decisions becomes persistent project knowledge**
 
