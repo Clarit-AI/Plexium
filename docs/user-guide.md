@@ -637,4 +637,4 @@ Creates an isolated git worktree for a single issue, runs retriever and document
 
 ### Linear Tracker [Stub]
 
-The `tracker: linear` option is defined but not yet implemented. Use `tracker: github` for issue creation.
+The `tracker: linear` option is defined but not yet implemented. Use `tracker: github` for GitHub issue creation.

@@ -1316,7 +1316,10 @@ var orchestrateCmd = &cobra.Command{
 		}
 
 		workspace := daemon.NewWorkspaceMgr(repoRoot)
-		runner, _ := daemon.NewRunner(runnerType, runnerModel)
+		runner, err := daemon.NewRunner(runnerType, runnerModel)
+		if err != nil {
+			return fmt.Errorf("creating runner %q: %w", runnerType, err)
+		}
 
 		// Create isolated worktree
 		wt, err := workspace.Create(issueID)

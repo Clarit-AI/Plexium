@@ -120,7 +120,9 @@ func RunInteractiveSetup(repoRoot string) (*SetupResult, error) {
 				// Also write .env for convenience
 				envPath := filepath.Join(repoRoot, ".plexium", ".env")
 				envContent := fmt.Sprintf("# Source this file: source .plexium/.env\nexport OPENROUTER_API_KEY=%q\n", apiKey)
-				_ = os.WriteFile(envPath, []byte(envContent), 0o600)
+				if envErr := os.WriteFile(envPath, []byte(envContent), 0o600); envErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not write %s: %v\n", envPath, envErr)
+				}
 
 				result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
 				result.ProvidersConfigured = append(result.ProvidersConfigured, "openrouter")
