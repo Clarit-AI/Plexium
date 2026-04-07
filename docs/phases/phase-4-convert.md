@@ -2,7 +2,7 @@
 
 > **Model:** Frontier — Opus 4.6 (primary), GPT 5.4 acceptable
 > **Execution:** Agent-Teams (claude-code) or sub-agents (codex)
-> **Status:** Pending  
+> **Status:** Complete  
 > **bd Epic:** `plexium-m4`  
 > **Prerequisites:** Phase 3 complete
 
@@ -283,13 +283,15 @@ Orchestrate the full pipeline.
 
 **Command:**
 ```bash
-plexium convert [--depth shallow|deep] [--agent claude|codex|gemini] [--dry-run]
+plexium convert [--depth shallow|deep] [--dry-run]
 ```
 
 **Options:**
 - `--depth shallow`: Only process directory structure and README files
 - `--depth deep`: Full scour including docstrings, comments, git history
 - `--dry-run`: Output to `.plexium/output/` without writing to `.wiki/`
+
+> **Note:** The `--agent` flag (selecting which agent adapter to run post-conversion) is deferred to Phase 5 (M5.9) when agent adapters are built.
 
 **Pipeline:**
 ```

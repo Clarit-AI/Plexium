@@ -493,7 +493,9 @@ githubWiki:
 
 sensitivity:
   rules: ""
-  neverPublish: []
+  neverPublish:
+    - "credentials.json"
+    - ".env"
   maxFileSize: 1048576
   excludeExtensions:
     - ".env"

@@ -2,7 +2,7 @@
 
 > **Model:** Mid-tier — Sonnet 4 (primary), GPT 4.1, Gemini 2.5 Flash acceptable
 > **Execution:** Solo Agent
-> **Status:** Pending  
+> **Status:** Complete  
 > **bd Epic:** `plexium-m5`  
 > **Prerequisites:** Phase 3 complete (independent of Phase 4)
 
@@ -238,6 +238,15 @@ for _, adapter := range adapters {
 }
 ```
 
+### M5.9: plexium convert Integration
+
+Wire agent adapters into the convert pipeline so `plexium convert --agent <name>` runs the selected adapter after conversion completes.
+
+**Implementation:**
+- Add `--agent` flag to `plexium convert` command
+- After conversion pipeline finishes, run the selected adapter's plugin script
+- If no `--agent` flag provided, skip adapter execution
+
 ## Interfaces
 
 **Consumes from Phase 3:**
@@ -279,5 +288,6 @@ plexium-m5
 ├── M5.5: Gemini adapter (.gemini/config.md)
 ├── M5.6: Cursor adapter (.cursor/rules/plexium.mdc)
 ├── M5.7: plexium plugin add command
-└── M5.8: plexium init integration (run adapters after schema gen)
+├── M5.8: plexium init integration (run adapters after schema gen)
+└── M5.9: plexium convert integration (--agent flag wiring)
 ```

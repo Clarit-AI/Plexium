@@ -109,6 +109,7 @@ func init() {
 	agentCmd.AddCommand(agentTestCmd)
 	agentCmd.AddCommand(agentSpendCmd)
 	agentCmd.AddCommand(agentBenchmarkCmd)
+	agentCmd.AddCommand(agentSetupCmd)
 	agentTestCmd.Flags().String("provider", "", "Test a specific provider")
 
 	// Register subcommands
@@ -1509,6 +1510,36 @@ var beadsScanCmd = &cobra.Command{
 					fmt.Printf("  %s → %s\n", m.TaskID, strings.Join(m.WikiPaths, ", "))
 				}
 			}
+		}
+		return nil
+	},
+}
+
+var agentSetupCmd = &cobra.Command{
+	Use:   "setup",
+	Short: "Interactive provider setup (Ollama, OpenRouter)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		result, err := agent.RunInteractiveSetup(repoRoot)
+		if err != nil {
+			return fmt.Errorf("setup failed: %w", err)
+		}
+
+		fmt.Println()
+		if len(result.ProvidersConfigured) == 0 {
+			fmt.Println("No providers configured. Run 'plexium agent setup' again when ready.")
+		} else {
+			fmt.Printf("Configured: %s\n", strings.Join(result.ProvidersConfigured, ", "))
+			if result.ConfigUpdated {
+				fmt.Println("Config updated in .plexium/config.yml")
+			}
+			fmt.Println("\nNext steps:")
+			fmt.Println("  plexium agent test     — verify connectivity")
+			fmt.Println("  plexium agent status   — check provider health")
 		}
 		return nil
 	},

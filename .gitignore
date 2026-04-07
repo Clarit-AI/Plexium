@@ -10,6 +10,10 @@
 # Generated wiki (user-specific, not part of source)
 .wiki/
 
+# Credentials and secrets
+.plexium/credentials.json
+.plexium/.env
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
