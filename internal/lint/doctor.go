@@ -254,11 +254,11 @@ func (d *Doctor) checkMemento(report *DoctorReport) {
 	}
 
 	// Check if git memento is functional
-	cmd := exec.Command("git", "memento", "check")
+	cmd := exec.Command("git", "memento", "doctor")
 	cmd.Dir = d.repoRoot
 	if err := cmd.Run(); err != nil {
 		result.Status = "warning"
-		result.Message = "git memento check failed"
+		result.Message = "git memento doctor failed"
 		result.Remediation = "Initialize memento: git memento init"
 	} else {
 		result.Status = "pass"

@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 
 	"context"
 	"time"
@@ -186,6 +189,24 @@ var initCmd = &cobra.Command{
 		} else {
 			fmt.Printf("Initialized Plexium wiki in %s\n", result.WikiDir)
 			fmt.Printf("Created %d directories and %d files\n", len(result.DirsCreated), len(result.FilesCreated))
+
+			fmt.Println("\nNext steps:")
+			fmt.Println("  1. Run 'plexium doctor' to validate the setup")
+			fmt.Println("  2. Run 'plexium convert' to bootstrap wiki from existing code")
+			fmt.Println("  3. Run 'plexium lint --deterministic' to check wiki health")
+
+			if withPageIndex {
+				fmt.Println("\nPageIndex MCP server ready. Add to your agent's MCP config:")
+				fmt.Println(`  {`)
+				fmt.Println(`    "mcpServers": {`)
+				fmt.Println(`      "plexium-wiki": {`)
+				fmt.Println(`        "command": "plexium",`)
+				fmt.Println(`        "args": ["pageindex", "serve"]`)
+				fmt.Println(`      }`)
+				fmt.Println(`    }`)
+				fmt.Println(`  }`)
+				fmt.Println("  Or query directly: plexium retrieve \"<query>\"")
+			}
 		}
 
 		return nil
@@ -286,9 +307,13 @@ var lintCmd = &cobra.Command{
 
 		var report *lint.LintReport
 		if full {
-			// LLM-augmented lint — RunFull with nil client uses deterministic only
-			// A real LLM client would be injected here when integrations.llmProvider is configured
-			report, err = linter.RunFull(nil)
+			// Wire assistive agent cascade as LLM client when available
+			var llmClient lint.LLMClient
+			if cfg != nil && cfg.AssistiveAgent.Enabled {
+				cascade, _ := buildCascadeFromConfig(cfg)
+				llmClient = &agent.CascadeLLMClient{Cascade: cascade}
+			}
+			report, err = linter.RunFull(llmClient)
 		} else {
 			report, err = linter.RunDeterministic()
 		}
@@ -786,10 +811,28 @@ var daemonCmd = &cobra.Command{
 		cfg, _ := config.LoadFromDir(repoRoot)
 
 		workspace := daemon.NewWorkspaceMgr(repoRoot)
-		tracker := daemon.NewTracker("none", "", "", "")
-		runner, _ := daemon.NewRunner("noop", "")
 
-		// Override tracker from config if available
+		// Read runner/tracker from config, default to noop/none
+		runnerType := "noop"
+		runnerModel := ""
+		trackerType := "none"
+		if cfg != nil {
+			if cfg.Daemon.Runner != "" {
+				runnerType = cfg.Daemon.Runner
+			}
+			runnerModel = cfg.Daemon.RunnerModel
+			if cfg.Daemon.Tracker != "" {
+				trackerType = cfg.Daemon.Tracker
+			}
+		}
+
+		tracker := daemon.NewTracker(trackerType, "", "", os.Getenv("GITHUB_TOKEN"))
+		runner, err := daemon.NewRunner(runnerType, runnerModel)
+		if err != nil {
+			return fmt.Errorf("creating runner %q: %w", runnerType, err)
+		}
+
+		// Override poll/concurrency from config if available
 		if cfg != nil && cfg.Daemon.Enabled {
 			if pollInterval == 300 && cfg.Daemon.PollInterval > 0 {
 				pollInterval = cfg.Daemon.PollInterval
@@ -898,10 +941,10 @@ func buildCascadeFromConfig(cfg *config.Config) (*agent.ProviderCascade, *agent.
 			}
 			switch pc.Type {
 			case "ollama":
-				providers = append(providers, agent.NewOllamaProvider(pc.Endpoint, pc.Model, nil))
+				providers = append(providers, agent.NewOllamaProvider(pc.Endpoint, pc.Model, agent.DefaultOllamaHTTPPost))
 			case "openai-compatible":
 				apiKey := os.Getenv(pc.APIKeyEnv)
-				providers = append(providers, agent.NewOpenRouterProvider(pc.Endpoint, pc.Model, apiKey, 0.0, nil))
+				providers = append(providers, agent.NewOpenRouterProvider(pc.Endpoint, pc.Model, apiKey, 0.0, agent.DefaultOpenRouterHTTPPost))
 			case "inherit":
 				providers = append(providers, &agent.InheritProvider{})
 			}
@@ -923,20 +966,99 @@ func buildCascadeFromConfig(cfg *config.Config) (*agent.ProviderCascade, *agent.
 
 var agentStartCmd = &cobra.Command{
 	Use:   "start",
-	Short: "Start the assistive agent",
+	Short: "Start the assistive agent daemon in the background",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("Assistive agent started. Use 'plexium daemon' for continuous operation.")
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		pidFile := filepath.Join(repoRoot, ".plexium", "daemon.pid")
+
+		// Check if already running
+		if pid, err := readPIDFile(pidFile); err == nil {
+			if processAlive(pid) {
+				fmt.Printf("Daemon already running (PID %d)\n", pid)
+				return nil
+			}
+			_ = os.Remove(pidFile)
+		}
+
+		// Launch plexium daemon as a background process
+		exe, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("finding executable: %w", err)
+		}
+
+		proc := exec.Command(exe, "daemon")
+		proc.Dir = repoRoot
+		proc.Stdout = nil
+		proc.Stderr = nil
+
+		if err := proc.Start(); err != nil {
+			return fmt.Errorf("starting daemon: %w", err)
+		}
+
+		_ = os.MkdirAll(filepath.Dir(pidFile), 0o755)
+		_ = os.WriteFile(pidFile, []byte(strconv.Itoa(proc.Process.Pid)), 0o644)
+
+		fmt.Printf("Daemon started (PID %d)\n", proc.Process.Pid)
+		fmt.Println("Use 'plexium agent stop' to stop, 'plexium agent status' to check.")
+
+		_ = proc.Process.Release()
 		return nil
 	},
 }
 
 var agentStopCmd = &cobra.Command{
 	Use:   "stop",
-	Short: "Stop the assistive agent",
+	Short: "Stop the assistive agent daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("Assistive agent stopped.")
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		pidFile := filepath.Join(repoRoot, ".plexium", "daemon.pid")
+		pid, err := readPIDFile(pidFile)
+		if err != nil {
+			fmt.Println("No daemon running (PID file not found)")
+			return nil
+		}
+
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			_ = os.Remove(pidFile)
+			fmt.Println("No daemon running (process not found)")
+			return nil
+		}
+
+		if err := process.Signal(syscall.SIGTERM); err != nil {
+			_ = os.Remove(pidFile)
+			fmt.Printf("Daemon process %d not responding, cleaned up PID file\n", pid)
+			return nil
+		}
+
+		_ = os.Remove(pidFile)
+		fmt.Printf("Daemon stopped (PID %d)\n", pid)
 		return nil
 	},
+}
+
+func readPIDFile(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(string(data)))
+}
+
+func processAlive(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return process.Signal(syscall.Signal(0)) == nil
 }
 
 var agentStatusCmd = &cobra.Command{
@@ -992,6 +1114,15 @@ var agentStatusCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Assistive Agent: %s\n", map[bool]string{true: "enabled", false: "disabled"}[enabled])
+
+		// Show daemon status
+		pidFile := filepath.Join(repoRoot, ".plexium", "daemon.pid")
+		if pid, pidErr := readPIDFile(pidFile); pidErr == nil && processAlive(pid) {
+			fmt.Printf("Daemon: running (PID %d)\n", pid)
+		} else {
+			fmt.Println("Daemon: stopped")
+		}
+
 		fmt.Printf("Daily budget: $%.2f\n\n", status.Budget)
 		fmt.Println("Providers:")
 		for _, s := range statuses {

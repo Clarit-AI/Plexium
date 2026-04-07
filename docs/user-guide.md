@@ -255,6 +255,10 @@ Exit codes: 0 (clean), 1 (errors), 2 (warnings with `--fail-on warning`).
 
 ## Wiki Retrieval
 
+Plexium includes a built-in search engine that works immediately after `plexium init`. No additional setup or configuration is required.
+
+### CLI Search
+
 Query the wiki from the command line:
 
 ```bash
@@ -262,17 +266,68 @@ plexium retrieve "authentication flow"
 plexium retrieve "database schema" --format json
 ```
 
-Retrieve searches the wiki using BM25-scored PageIndex. It matches against page titles, content, wiki-links, and section names. When PageIndex returns no results, it falls back to `_index.md` parsing and content grep.
+The search engine uses BM25-style scoring across five dimensions: page titles, section headings, summaries, content bodies, and `[[wiki-links]]`. Results are ranked by relevance. When the PageIndex returns no results, it falls back to `_index.md` parsing combined with content grep to ensure queries always return something useful.
 
-### MCP Server Mode
+### MCP Server (Optional)
 
-For agents that support MCP (Model Context Protocol):
+The MCP server exposes the same PageIndex search engine over JSON-RPC 2.0 stdio, making the wiki queryable by any agent that supports the [Model Context Protocol](https://modelcontextprotocol.io). This is not a separate system -- it is the same engine that powers `plexium retrieve`, accessed through a different interface.
 
 ```bash
 plexium pageindex serve
 ```
 
-This starts a JSON-RPC 2.0 server in stdio mode. Agents connect via MCP to query the wiki index programmatically.
+The server exposes three tools:
+
+| Tool | Description |
+|------|-------------|
+| `pageindex_search` | Search wiki pages by query string |
+| `pageindex_get_page` | Retrieve a specific page by path |
+| `pageindex_list_pages` | List all indexed pages |
+
+#### Wiring the MCP server to your agent
+
+Add the server to your agent's MCP configuration. The command is the same for all agents:
+
+**Claude Code** (`.claude/settings.local.json` in the project root):
+
+```json
+{
+  "mcpServers": {
+    "plexium-wiki": {
+      "command": "plexium",
+      "args": ["pageindex", "serve"]
+    }
+  }
+}
+```
+
+**Cursor** (`.cursor/mcp.json` in the project root):
+
+```json
+{
+  "mcpServers": {
+    "plexium-wiki": {
+      "command": "plexium",
+      "args": ["pageindex", "serve"]
+    }
+  }
+}
+```
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "plexium-wiki": {
+      "command": "plexium",
+      "args": ["pageindex", "serve"]
+    }
+  }
+}
+```
+
+Once configured, your agent can call `pageindex_search`, `pageindex_get_page`, and `pageindex_list_pages` as MCP tools during its sessions.
 
 ---
 

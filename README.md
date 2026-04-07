@@ -120,6 +120,10 @@ Enforcement
   raw/                    # Unprocessed sources (meeting notes, transcripts)
 ```
 
+### Retrieval
+
+Plexium includes a built-in search engine queryable via CLI (`plexium retrieve "query"`) or MCP (`plexium pageindex serve`). The engine uses BM25-style scoring across page titles, sections, summaries, content, and wiki-links. CLI retrieval works immediately after `plexium init`. The MCP server exposes the same engine over JSON-RPC 2.0 stdio for agents that support the Model Context Protocol.
+
 ### Ownership Model
 
 | Mode | Meaning |
@@ -139,9 +143,61 @@ Enforcement
 | `plexium compile` | Regenerate navigation files |
 | `plexium publish` | Push wiki to GitHub Wiki |
 | `plexium doctor` | Validate setup and config |
-| `plexium retrieve` | Query the wiki |
+| `plexium retrieve` | Query the wiki (built-in search engine) |
 
 Full reference: [CLI Reference](docs/cli-reference.md)
+
+### Assistive Agent
+
+Plexium includes an assistive agent that automates wiki maintenance using a provider cascade. The cascade tries providers in cost order (cheapest first), falling through on failure:
+
+- **Ollama** -- local LLM via llama.cpp, zero cost, handles low-complexity tasks (frontmatter updates, index regeneration, log entries)
+- **OpenRouter / OpenAI-compatible** -- remote API with daily budget caps, handles medium-complexity tasks (module summaries, cross-reference suggestions)
+- **Inherit** -- delegates to the primary coding agent for high-complexity tasks (architecture synthesis, contradiction detection)
+
+A **task router** classifies each wiki maintenance task by complexity and routes it to the appropriate cascade tier. A **rate limiter** tracks daily spend per provider and applies adaptive batching delays as usage approaches the budget cap.
+
+The **daemon** (`plexium daemon` or `plexium agent start`) runs a background poll loop that detects stale pages, lint issues, ingest candidates, and wiki-debt, then takes the configured action (log, create issue, or auto-fix in an isolated worktree).
+
+```yaml
+# .plexium/config.yml
+assistiveAgent:
+  enabled: true
+  providers:
+    - name: local-ollama
+      enabled: true
+      type: ollama
+      endpoint: http://localhost:11434
+      model: llama3
+    - name: openrouter
+      enabled: true
+      type: openai-compatible
+      endpoint: https://openrouter.ai/api
+      model: meta-llama/llama-3.1-8b-instruct:free
+      apiKeyEnv: OPENROUTER_API_KEY
+  budget:
+    dailyUSD: 1.00
+
+daemon:
+  enabled: true
+  runner: claude
+  tracker: github
+  pollInterval: 300
+  watches:
+    staleness:
+      enabled: true
+      action: create-issue
+      threshold: "7d"
+```
+
+| Command | Purpose |
+|---------|---------|
+| `plexium agent start` | Launch daemon in background |
+| `plexium agent stop` | Stop background daemon |
+| `plexium agent status` | Show provider health, daemon state, daily spend |
+| `plexium agent test` | Test provider connectivity |
+| `plexium agent spend` | Show daily cost breakdown |
+| `plexium daemon` | Run daemon in foreground |
 
 ---
 
