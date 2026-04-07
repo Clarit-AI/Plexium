@@ -23,6 +23,7 @@ import (
 	"github.com/Clarit-AI/Plexium/internal/migrate"
 	"github.com/Clarit-AI/Plexium/internal/publish"
 	"github.com/Clarit-AI/Plexium/internal/retry"
+	plexiumsync "github.com/Clarit-AI/Plexium/internal/sync"
 	"github.com/Clarit-AI/Plexium/internal/wiki"
 	"github.com/spf13/cobra"
 )
@@ -63,6 +64,9 @@ func init() {
 
 	// publish flags
 	publishCmd.Flags().Bool("dry-run", false, "Preview without pushing")
+
+	// sync flags
+	syncCmd.Flags().Bool("dry-run", false, "Preview without writing changes")
 
 	// lint flags
 	lintCmd.Flags().Bool("deterministic", false, "Run deterministic checks only (link/orphan/staleness validation)")
@@ -252,8 +256,48 @@ var convertCmd = &cobra.Command{
 var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Sync wiki after source changes",
+	Long:  "Detect changed source files, update manifest hashes, and recompile navigation.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(" plexium sync")
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+		cfg, err := config.LoadFromDir(repoRoot)
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+
+		result, err := plexiumsync.Run(plexiumsync.Options{
+			RepoRoot: repoRoot,
+			Config:   cfg,
+			DryRun:   dryRun,
+		})
+		if err != nil {
+			return fmt.Errorf("sync failed: %w", err)
+		}
+
+		if outputJSON {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			if dryRun {
+				fmt.Println("[dry-run] sync preview:")
+			}
+			fmt.Printf("Source files checked: %d\n", result.SourceFilesChecked)
+			fmt.Printf("Stale pages found:   %d\n", result.StalePages)
+			fmt.Printf("Hashes updated:      %d\n", result.HashesUpdated)
+			fmt.Printf("Nav recompiled:      %v\n", result.NavRecompiled)
+			if len(result.PagesAffected) > 0 {
+				fmt.Println("Pages affected:")
+				for _, p := range result.PagesAffected {
+					fmt.Printf("  - %s\n", p)
+				}
+			}
+		}
 		return nil
 	},
 }
