@@ -1,3 +1,14 @@
+# Build output
+/plexium
+/test_join.go
+
+# Generated runtime state
+.plexium/manifest.json
+.plexium/output/
+.plexium/reports/
+
+# Generated wiki (user-specific, not part of source)
+.wiki/
 
 # Beads / Dolt files (added by bd init)
 .dolt/
