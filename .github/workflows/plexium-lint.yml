@@ -29,10 +29,12 @@ jobs:
         run: ./plexium init
 
       - name: Deterministic lint
+        continue-on-error: true
         run: |
-          ./plexium lint --deterministic --ci --fail-on error || true
+          ./plexium lint --deterministic --ci --fail-on error
 
       - name: CI diff check
+        continue-on-error: true
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -41,7 +43,7 @@ jobs:
           ./plexium ci check \
             --base "$BASE_SHA" \
             --head "$HEAD_SHA" \
-            --output .plexium/reports/ci-check.json || true
+            --output .plexium/reports/ci-check.json
 
       - name: Post results to PR
         if: always() && github.event_name == 'pull_request'
