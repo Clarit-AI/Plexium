@@ -106,17 +106,25 @@ func RunInteractiveSetup(repoRoot string) (*SetupResult, error) {
 		}
 
 		if apiKey != "" {
-			if err := SaveCredentials(repoRoot, apiKey); err != nil {
-				return nil, fmt.Errorf("saving credentials: %w", err)
+			// Validate key before persisting
+			fmt.Print("Validating key... ")
+			if _, vErr := validateKey(apiKey); vErr != nil {
+				fmt.Printf("FAILED (%v)\n", vErr)
+				fmt.Println("Key not saved. Check the key and try again.")
+			} else {
+				fmt.Println("OK")
+				if err := SaveCredentials(repoRoot, apiKey); err != nil {
+					return nil, fmt.Errorf("saving credentials: %w", err)
+				}
+
+				// Also write .env for convenience
+				envPath := filepath.Join(repoRoot, ".plexium", ".env")
+				envContent := fmt.Sprintf("# Source this file: source .plexium/.env\nexport OPENROUTER_API_KEY=%q\n", apiKey)
+				_ = os.WriteFile(envPath, []byte(envContent), 0o600)
+
+				result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
+				result.ProvidersConfigured = append(result.ProvidersConfigured, "openrouter")
 			}
-
-			// Also write .env for convenience
-			envPath := filepath.Join(repoRoot, ".plexium", ".env")
-			envContent := fmt.Sprintf("# Source this file: source .plexium/.env\nexport OPENROUTER_API_KEY=%q\n", apiKey)
-			_ = os.WriteFile(envPath, []byte(envContent), 0o600)
-
-			result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
-			result.ProvidersConfigured = append(result.ProvidersConfigured, "openrouter")
 		}
 	}
 
@@ -308,11 +316,17 @@ func validateKey(apiKey string) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("key validation failed (HTTP %d)", resp.StatusCode)
+	}
+
 	var result struct {
 		Label string `json:"label"`
 	}
 	body, _ := io.ReadAll(resp.Body)
-	_ = json.Unmarshal(body, &result)
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("invalid validation response: %w", err)
+	}
 
 	label := result.Label
 	if label == "" {
