@@ -18,12 +18,12 @@ The schema respects the `enforcement.strictness` setting in `.plexium/config.yml
 | Level | Behavior |
 |-------|----------|
 | `strict` | Pre-commit hook blocks commits without wiki updates. All source changes require corresponding wiki changes. |
-| `moderate` | Pre-commit hook warns but does not block. Wiki-debt is tracked in `_log.md`. |
+| `moderate` | Pre-commit hook blocks commits, but explains bypass and wiki-debt handling. Debt is tracked in `_log.md`. |
 | `advisory` | No enforcement. Schema serves as guidance only. |
 
 ## Schema Version
 
-The schema has a `schema-version` field in its frontmatter. When Plexium upgrades, `plexium migrate` updates the schema to the latest version.
+The schema has a `schema-version` field in `.wiki/_schema.md`. When Plexium upgrades, `plexium migrate` updates it to the latest version.
 
 ## Reading the Schema
 

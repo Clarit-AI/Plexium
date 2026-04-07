@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -143,9 +144,15 @@ func TestCallbackServerNoCode(t *testing.T) {
 }
 
 func TestPortAvailable(t *testing.T) {
-	// Port 0 should always be available (OS picks a free one)
-	// Use a likely-free high port for testing
-	assert.True(t, portAvailable(0) || true, "portAvailable should not crash")
+	// Port 0 lets OS pick a free port, so binding should succeed
+	assert.True(t, portAvailable(0), "port 0 should be available")
+
+	// Occupy a port and verify it's detected as unavailable
+	ln, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	assert.False(t, portAvailable(port), "occupied port should not be available")
 }
 
 func TestWriteAssistiveAgentConfig(t *testing.T) {

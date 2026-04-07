@@ -37,7 +37,7 @@ The `skill.md` file in each skill directory is self-contained markdown. Feed it 
 
 Each skill follows this layout:
 
-```
+```text
 skill-name/
   skill.md              # Main instructions (concise, actionable)
   reference/            # Supporting context (loaded on demand)

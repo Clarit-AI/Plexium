@@ -198,7 +198,7 @@ jobs:
         if: hashFiles('.plexium/config.yml') != ''
         run: |
           if grep -q 'memento: true' .plexium/config.yml; then
-            git memento check --gate
+            git memento doctor --gate
           fi
 ```
 

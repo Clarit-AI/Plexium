@@ -276,6 +276,7 @@ Wire agent adapters into the convert pipeline so `plexium convert --agent <name>
 | AC10 | `plexium plugin add <name>` copies plugin to `.plexium/plugins/` |
 | AC11 | `plexium init` runs all detected adapters |
 | AC12 | Schema generator detects tech stack correctly |
+| AC13 | `plexium convert --agent <name>` runs selected adapter after conversion; no adapter runs when flag is omitted |
 
 ## bd Task Mapping
 

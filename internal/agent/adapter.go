@@ -1,6 +1,9 @@
 package agent
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // CascadeLLMClient adapts a ProviderCascade to the lint.LLMClient interface.
 // It bridges the agent package (context-aware, returns CompletionResult) with
@@ -14,6 +17,9 @@ type CascadeLLMClient struct {
 
 // Complete sends a prompt through the provider cascade and returns the response text.
 func (c *CascadeLLMClient) Complete(prompt string) (string, error) {
+	if c == nil || c.Cascade == nil {
+		return "", errors.New("cascade client is not configured")
+	}
 	result, err := c.Cascade.Complete(context.Background(), prompt)
 	if err != nil {
 		return "", err

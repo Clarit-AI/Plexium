@@ -307,7 +307,7 @@ plexium doctor
 7. **CI config**: GitHub Actions workflows exist if enabled
 8. **Auth check**: GitHub token has write access to wiki repo (if publishing enabled)
 9. **Git status**: Repo is a git repository
-10. **memento**: `git memento check` passes if configured
+10. **memento**: `git memento doctor` passes if configured
 
 **Output:**
 ```go

@@ -371,7 +371,9 @@ func SaveCredentials(repoRoot string, key string) error {
 	// Read existing credentials if any
 	existing := make(map[string]string)
 	if data, err := os.ReadFile(credPath); err == nil {
-		_ = json.Unmarshal(data, &existing)
+		if err := json.Unmarshal(data, &existing); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: existing credentials.json is malformed, will be overwritten\n")
+		}
 	}
 
 	existing["openrouter_api_key"] = key

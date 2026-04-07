@@ -52,7 +52,7 @@ Every coding session is captured as a git note on the commit. This provides:
 git memento init
 
 # Verify it's working
-git memento check
+git memento doctor
 ```
 
 
@@ -263,7 +263,7 @@ For detailed architectural context, see `docs/architecture/core-architecture.md`
 
 ## Build Norms
 
-1. **Every commit is memento-captured.** Run `git memento check` before pushing. If it fails, fix before pushing.
+1. **Every commit is memento-captured.** Run `git memento doctor` before pushing. If it fails, fix before pushing.
 2. **Use `bd` for task tracking.** Don't just start working — log the task first so progress is visible across sessions.
 3. **Reference architecture docs, don't duplicate.** When implementing, link to relevant sections of `core-architecture.md` rather than copying context into your implementation notes.
 4. **Phase docs are the living spec.** The archived original (`docs/reference/plexium-spec-full.md`) is reference only. Implementation decisions live in the phase docs.

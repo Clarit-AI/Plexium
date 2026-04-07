@@ -601,7 +601,7 @@ daemon:
 
 **Runner:** The daemon shells out to the configured CLI tool (e.g., `claude --print`) in the worktree to perform wiki updates. Set `runner: noop` for dry-run mode.
 
-**Tracker:** Set `tracker: github` and ensure `GITHUB_TOKEN` is set to enable automatic issue creation.
+**Tracker:** Set `tracker: github` and ensure `GITHUB_TOKEN` is set to enable automatic GitHub issue creation.
 
 ---
 

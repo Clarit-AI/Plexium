@@ -827,7 +827,17 @@ var daemonCmd = &cobra.Command{
 			}
 		}
 
-		tracker := daemon.NewTracker(trackerType, "", "", os.Getenv("GITHUB_TOKEN"))
+		// Derive owner/repo from git remote for GitHub tracker
+		owner, repo := "", ""
+		if trackerType == "github" {
+			if remoteURL, gitErr := exec.Command("git", "-C", repoRoot, "remote", "get-url", "origin").Output(); gitErr == nil {
+				owner, repo = parseGitRemote(strings.TrimSpace(string(remoteURL)))
+			}
+			if owner == "" || repo == "" {
+				return fmt.Errorf("tracker %q requires owner/repo but could not derive from git remote origin", trackerType)
+			}
+		}
+		tracker := daemon.NewTracker(trackerType, owner, repo, os.Getenv("GITHUB_TOKEN"))
 		runner, err := daemon.NewRunner(runnerType, runnerModel)
 		if err != nil {
 			return fmt.Errorf("creating runner %q: %w", runnerType, err)
@@ -1060,6 +1070,29 @@ func processAlive(pid int) bool {
 		return false
 	}
 	return process.Signal(syscall.Signal(0)) == nil
+}
+
+// parseGitRemote extracts owner/repo from a git remote URL.
+// Supports HTTPS (https://github.com/owner/repo.git) and SSH (git@github.com:owner/repo.git).
+func parseGitRemote(remoteURL string) (string, string) {
+	// HTTPS: https://github.com/owner/repo.git
+	if strings.Contains(remoteURL, "://") {
+		remoteURL = strings.TrimSuffix(remoteURL, ".git")
+		parts := strings.Split(remoteURL, "/")
+		if len(parts) >= 2 {
+			return parts[len(parts)-2], parts[len(parts)-1]
+		}
+	}
+	// SSH: git@github.com:owner/repo.git
+	if strings.Contains(remoteURL, ":") {
+		after := remoteURL[strings.Index(remoteURL, ":")+1:]
+		after = strings.TrimSuffix(after, ".git")
+		parts := strings.Split(after, "/")
+		if len(parts) == 2 {
+			return parts[0], parts[1]
+		}
+	}
+	return "", ""
 }
 
 var agentStatusCmd = &cobra.Command{
