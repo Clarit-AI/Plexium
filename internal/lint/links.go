@@ -44,6 +44,12 @@ func (c *LinkCrawler) Crawl() ([]WikiLink, error) {
 			return nil
 		}
 
+		// Skip _schema.md — it contains [[wiki-links]] as documentation
+		// examples of syntax, not actual cross-references.
+		if info.Name() == "_schema.md" {
+			return nil
+		}
+
 		// Read the file
 		content, err := os.ReadFile(path)
 		if err != nil {
