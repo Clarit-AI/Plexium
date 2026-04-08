@@ -83,7 +83,11 @@ jobs:
           else
             details="Could not read report file."
             if [ -f .plexium/reports/ci-check.log ]; then
-              details=$(cat .plexium/reports/ci-check.log)
+              log_size=$(wc -c < .plexium/reports/ci-check.log | tr -d '[:space:]')
+              details=$(head -c 50000 .plexium/reports/ci-check.log)
+              if [ "${log_size:-0}" -gt 50000 ]; then
+                details="${details}"$'\n[...truncated]'
+              fi
             fi
             {
               echo "## Plexium Wiki Check"
@@ -106,6 +110,11 @@ jobs:
             try {
               report = fs.readFileSync('.plexium/reports/ci-check-summary.md', 'utf8');
             } catch (e) {}
+            const truncationNotice = '\n\n[...truncated]';
+            const maxCommentLength = 60000;
+            if (report.length > maxCommentLength) {
+              report = report.slice(0, maxCommentLength - truncationNotice.length) + truncationNotice;
+            }
             github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
