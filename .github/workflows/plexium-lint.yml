@@ -56,36 +56,56 @@ jobs:
           set -e
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
 
-      - name: Post results to PR
+      - name: Build PR summary
         if: always() && github.event_name == 'pull_request'
         env:
           DETERMINISTIC_LINT_EXIT_CODE: ${{ steps.deterministic_lint.outputs.exit_code }}
           CI_DIFF_CHECK_EXIT_CODE: ${{ steps.ci_diff_check.outputs.exit_code }}
+        run: |
+          summary_file=.plexium/reports/ci-check-summary.md
+          if [ -f .plexium/reports/ci-check.json ] && jq -e . .plexium/reports/ci-check.json >/dev/null 2>&1; then
+            {
+              echo "## Plexium Wiki Check"
+              echo
+              jq -r '
+                "- **Changed files:** \((.changedFiles // []) | length) (\((.sourceFiles // []) | length) source)",
+                "- **Wiki updated:** \(if .wikiUpdated then "Yes" else "No" end)",
+                "- **Wiki debt:** \(.debtCount) entries",
+                "- **Result:** \(if .passes then "✅ Passes" else "❌ Fails" end)"
+              ' .plexium/reports/ci-check.json
+              if [ -n "${CI_DIFF_CHECK_EXIT_CODE:-}" ] && [ "$CI_DIFF_CHECK_EXIT_CODE" != "0" ]; then
+                echo "- **CI check exit code:** $CI_DIFF_CHECK_EXIT_CODE"
+              fi
+              if [ -n "${DETERMINISTIC_LINT_EXIT_CODE:-}" ] && [ "$DETERMINISTIC_LINT_EXIT_CODE" != "0" ]; then
+                echo "- **Deterministic lint:** emitted findings on the freshly initialized wiki; see workflow logs."
+              fi
+            } > "$summary_file"
+          else
+            details="Could not read report file."
+            if [ -f .plexium/reports/ci-check.log ]; then
+              details=$(cat .plexium/reports/ci-check.log)
+            fi
+            {
+              echo "## Plexium Wiki Check"
+              echo
+              echo "⚠️ Could not read report file."
+              echo
+              echo '```'
+              printf '%s\n' "$details"
+              echo '```'
+            } > "$summary_file"
+          fi
+
+      - name: Post results to PR
+        if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            let report = '';
+            let report = '## Plexium Wiki Check\n\n⚠️ Could not read summary file.\n';
             try {
-              const data = JSON.parse(fs.readFileSync('.plexium/reports/ci-check.json', 'utf8'));
-              report = `## Plexium Wiki Check\n\n`;
-              report += `- **Changed files:** ${data.changedFiles.length} (${data.sourceFiles.length} source)\n`;
-              report += `- **Wiki updated:** ${data.wikiUpdated ? 'Yes' : 'No'}\n`;
-              report += `- **Wiki debt:** ${data.debtCount} entries\n`;
-              report += `- **Result:** ${data.passes ? '✅ Passes' : '❌ Fails'}\n`;
-              if (process.env.CI_DIFF_CHECK_EXIT_CODE && process.env.CI_DIFF_CHECK_EXIT_CODE !== '0') {
-                report += `- **CI check exit code:** ${process.env.CI_DIFF_CHECK_EXIT_CODE}\n`;
-              }
-              if (process.env.DETERMINISTIC_LINT_EXIT_CODE && process.env.DETERMINISTIC_LINT_EXIT_CODE !== '0') {
-                report += `- **Deterministic lint:** emitted findings on the freshly initialized wiki; see workflow logs.\n`;
-              }
-            } catch (e) {
-              let details = e.message;
-              try {
-                details = fs.readFileSync('.plexium/reports/ci-check.log', 'utf8').trim() || details;
-              } catch (_) {}
-              report = `## Plexium Wiki Check\n\n⚠️ Could not read report file.\n\n\`\`\`\n${details}\n\`\`\`\n`;
-            }
+              report = fs.readFileSync('.plexium/reports/ci-check-summary.md', 'utf8');
+            } catch (e) {}
             github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
