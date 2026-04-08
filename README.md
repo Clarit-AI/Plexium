@@ -87,7 +87,7 @@ daemon:
 
 | Command | Purpose |
 |---------|---------|
-| `plexium agent setup` | Interactive provider configuration |
+| `plexium agent setup` | Provider configuration with browser OAuth, `--api-key`, or env-var fallback |
 | `plexium agent start` | Launch daemon in background |
 | `plexium agent stop` | Stop background daemon |
 | `plexium agent status` | Show provider health, daemon state, daily spend |

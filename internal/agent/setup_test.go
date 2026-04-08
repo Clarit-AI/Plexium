@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -221,4 +222,80 @@ daemon:
 	assert.Contains(t, content, "openrouter")
 	// Daemon section should be preserved
 	assert.Contains(t, content, "daemon:")
+}
+
+func TestRunInteractiveSetup_WithAPIKeyOption(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".plexium", "config.yml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	require.NoError(t, os.WriteFile(configPath, []byte("sources:\n  include:\n    - \"**/*.go\"\n"), 0o644))
+
+	restore := stubOpenRouterValidation(t)
+	defer restore()
+
+	result, err := RunInteractiveSetup(dir, SetupOptions{APIKey: "sk-or-v1-test"})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"openrouter"}, result.ProvidersConfigured)
+	assert.True(t, result.ConfigUpdated)
+	assert.FileExists(t, filepath.Join(dir, ".plexium", "credentials.json"))
+	assert.FileExists(t, filepath.Join(dir, ".plexium", ".env"))
+}
+
+func TestRunInteractiveSetup_UsesEnvVarFallback(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".plexium", "config.yml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	require.NoError(t, os.WriteFile(configPath, []byte("sources:\n  include:\n    - \"**/*.go\"\n"), 0o644))
+
+	restore := stubOpenRouterValidation(t)
+	defer restore()
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-v1-env")
+
+	result, err := RunInteractiveSetup(dir, SetupOptions{})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"openrouter"}, result.ProvidersConfigured)
+	assert.True(t, result.ConfigUpdated)
+}
+
+func stubOpenRouterValidation(t *testing.T) func() {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/auth/key" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got == "" {
+			http.Error(w, "missing auth", http.StatusUnauthorized)
+			return
+		}
+		_, _ = io.WriteString(w, `{"label":"valid"}`)
+	}))
+
+	original := httpClient
+	httpClient = &http.Client{
+		Transport: rewriteTransport{
+			targetHost: server.Listener.Addr().String(),
+			base:       http.DefaultTransport,
+		},
+	}
+
+	return func() {
+		httpClient = original
+		server.Close()
+	}
+}
+
+type rewriteTransport struct {
+	targetHost string
+	base       http.RoundTripper
+}
+
+func (t rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	clone.URL.Scheme = "http"
+	clone.URL.Host = t.targetHost
+	return t.base.RoundTrip(clone)
 }

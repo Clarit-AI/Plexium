@@ -39,8 +39,15 @@ type SetupResult struct {
 	ConfigUpdated       bool
 }
 
+// SetupOptions controls non-interactive setup behavior.
+type SetupOptions struct {
+	// APIKey bypasses OAuth and manual entry. If empty, the setup flow also
+	// checks OPENROUTER_API_KEY before falling back to interactive prompts.
+	APIKey string
+}
+
 // RunInteractiveSetup runs the full interactive provider setup flow.
-func RunInteractiveSetup(repoRoot string) (*SetupResult, error) {
+func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, error) {
 	// Verify config exists
 	configPath := filepath.Join(repoRoot, ".plexium", "config.yml")
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
@@ -49,6 +56,41 @@ func RunInteractiveSetup(repoRoot string) (*SetupResult, error) {
 
 	result := &SetupResult{}
 	reader := bufio.NewReader(os.Stdin)
+
+	if opts.APIKey == "" {
+		opts.APIKey = os.Getenv("OPENROUTER_API_KEY")
+	}
+	if opts.APIKey != "" {
+		fmt.Println("Plexium Agent Setup")
+		fmt.Println("===================")
+		fmt.Println()
+		fmt.Print("Validating provided API key... ")
+		if _, err := validateKey(opts.APIKey); err != nil {
+			fmt.Printf("FAILED (%v)\n", err)
+			return nil, fmt.Errorf("key validation failed: %w", err)
+		}
+		fmt.Println("OK")
+
+		if err := SaveCredentials(repoRoot, opts.APIKey); err != nil {
+			return nil, fmt.Errorf("saving credentials: %w", err)
+		}
+
+		envPath := filepath.Join(repoRoot, ".plexium", ".env")
+		envContent := fmt.Sprintf("# Source this file: source .plexium/.env\nexport OPENROUTER_API_KEY=%q\n", opts.APIKey)
+		if err := os.WriteFile(envPath, []byte(envContent), 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not write %s: %v\n", envPath, err)
+		}
+
+		result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
+		result.ProvidersConfigured = append(result.ProvidersConfigured, "openrouter")
+		if err := writeAssistiveAgentConfig(configPath, result); err != nil {
+			fmt.Printf("Warning: could not update config: %v\n", err)
+		} else {
+			result.ConfigUpdated = true
+		}
+		fmt.Println("OpenRouter configured.")
+		return result, nil
+	}
 
 	fmt.Println("Plexium Agent Setup")
 	fmt.Println("===================")
@@ -147,7 +189,7 @@ func RunInteractiveSetup(repoRoot string) (*SetupResult, error) {
 
 // --- PKCE OAuth Flow ---
 
-// generatePKCEPair returns (code_verifier, code_challenge).
+// generatePKCEPair returns (code_verifier, code_challenge) using S256 PKCE.
 func generatePKCEPair() (string, string, error) {
 	verifierBytes := make([]byte, 64)
 	if _, err := rand.Read(verifierBytes); err != nil {
@@ -183,21 +225,20 @@ func RunOAuthFlow(appName string) (string, error) {
 		}
 		authURL := openRouterAuthURL + "?" + params.Encode()
 
-		if attempt == 1 {
-			fmt.Println("Opening browser for OpenRouter authorization...")
-			fmt.Printf("  %s\n", authURL)
-			fmt.Println()
-		} else {
-			fmt.Printf("Attempt %d of %d — new authorization link:\n", attempt, maxAttempts)
-			fmt.Printf("  %s\n\n", authURL)
-		}
-
-		// Start callback server before opening browser
+		// Start callback server before opening browser.
 		codeCh := make(chan string, 1)
 		errCh := make(chan error, 1)
 		server := startCallbackServer(codeCh, errCh)
 
-		openBrowser(authURL)
+		if attempt == 1 {
+			fmt.Println("Opening browser for OpenRouter authorization...")
+			fmt.Printf("  %s\n", authURL)
+			fmt.Println()
+			openBrowser(authURL)
+		} else {
+			fmt.Printf("Attempt %d of %d — open this URL in your browser:\n", attempt, maxAttempts)
+			fmt.Printf("  %s\n\n", authURL)
+		}
 		fmt.Printf("Waiting up to %ds for authorization...\n", int(oauthTimeout.Seconds()))
 
 		// Wait for callback or timeout

@@ -485,13 +485,24 @@ Best for: higher-quality models, teams without local GPU, free-tier models for l
 
 1. Create an account at https://openrouter.ai and get an API key.
 
-2. Set the API key:
+2. Choose a setup path:
+
+Direct setup through Plexium:
+
+```bash
+plexium agent setup --api-key "sk-or-v1-..."
+```
+
+Or export the key first and let `plexium agent setup` pick it up automatically:
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-v1-..."
+plexium agent setup
 ```
 
-3. Add to `.plexium/config.yml`:
+3. Plexium saves the key in `.plexium/credentials.json`, writes `.plexium/.env` for convenience, and updates `.plexium/config.yml`.
+
+If you prefer to wire the provider manually, the resulting config looks like:
 
 ```yaml
 assistiveAgent:

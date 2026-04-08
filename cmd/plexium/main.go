@@ -114,6 +114,7 @@ func init() {
 	agentCmd.AddCommand(agentSpendCmd)
 	agentCmd.AddCommand(agentBenchmarkCmd)
 	agentCmd.AddCommand(agentSetupCmd)
+	agentSetupCmd.Flags().String("api-key", "", "Provide OpenRouter API key directly (skip OAuth)")
 	agentTestCmd.Flags().String("provider", "", "Test a specific provider")
 
 	// Register subcommands
@@ -1639,7 +1640,8 @@ var agentSetupCmd = &cobra.Command{
 			return fmt.Errorf("getting working directory: %w", err)
 		}
 
-		result, err := agent.RunInteractiveSetup(repoRoot)
+		apiKey, _ := cmd.Flags().GetString("api-key")
+		result, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{APIKey: apiKey})
 		if err != nil {
 			return fmt.Errorf("setup failed: %w", err)
 		}
