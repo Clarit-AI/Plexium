@@ -14,6 +14,12 @@ description: Use when the user wants to initialize Plexium, set up the current r
 5. For a verification-only pass, run `plexium verify codex`.
 6. If the user only wants the native MCP command, run `plexium pageindex connect codex`.
 
+## Secret Handling
+
+- Never ask the user to paste API keys or other secrets into chat.
+- For provider setup, prefer env vars or terminal-only flags such as `plexium agent setup --api-key`, entered outside the chat transcript.
+- If the user already pasted a secret and memento is enabled, tell them to rewind the session if possible and not commit that session to memento.
+
 ## Output
 
 - Summarize whether the repository itself is ready.

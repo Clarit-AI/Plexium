@@ -28,7 +28,13 @@ Full command reference for agents working in Plexium repositories.
 | `plexium init` | Scaffold `.wiki/`, `.plexium/`, config |
 | `plexium convert` | Bootstrap wiki from existing source code |
 | `plexium migrate` | Apply schema version migrations |
-| `plexium agent setup` | Interactive provider configuration |
+| `plexium agent setup` | Provider configuration via OAuth, `--api-key`, or env-var fallback |
+
+## Secret Safety
+
+- Never paste API keys or secrets into chat.
+- Prefer terminal-native setup such as `export OPENROUTER_API_KEY=...` followed by `plexium agent setup`.
+- In repos using memento, pasted secrets can end up in session notes. If that happens, rewind the session if possible and do not commit that session to memento.
 
 ## Agent Management
 

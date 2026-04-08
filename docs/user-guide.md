@@ -487,13 +487,20 @@ Best for: higher-quality models, teams without local GPU, free-tier models for l
 
 2. Choose a setup path:
 
+**Security note:** Never paste API keys or other secrets into an AI chat window. They can become part of the model context stream, logs, or session transcripts. In repositories using memento, that context may later be attached to commits as git notes.
+
+If you already pasted a secret into chat:
+- stop and rotate the secret if needed
+- rewind the session if your client supports it
+- do not commit that session to memento or publish its notes
+
 Direct setup through Plexium:
 
 ```bash
 plexium agent setup --api-key "sk-or-v1-..."
 ```
 
-Or export the key first and let `plexium agent setup` pick it up automatically:
+Or, even better, export the key in your terminal and let `plexium agent setup` pick it up automatically without ever placing the secret in chat:
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-v1-..."

@@ -219,6 +219,19 @@ Full details: [Implementation Status](docs/status.md)
 
 Full reference: [CLI Reference](docs/cli-reference.md)
 
+## Secret Safety
+
+Never paste API keys, tokens, or other secrets into an AI chat window. In Plexium workflows, that is especially important when memento is enabled, because session context can later be attached to commits as git notes.
+
+Prefer terminal-native flows such as:
+
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-..."
+plexium agent setup
+```
+
+If a secret was already pasted into chat, rewind that session if possible and avoid committing its memento note.
+
 ---
 
 ## Inspirations
