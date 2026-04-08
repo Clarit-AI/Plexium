@@ -2,7 +2,7 @@
 
 > **Model:** Budget — Sonnet 4 mini (primary), GLM-5, Minimax acceptable
 > **Execution:** Solo Agent
-> **Status:** Pending  
+> **Status:** Complete  
 > **bd Epic:** `plexium-m6`  
 > **Prerequisites:** Phase 3 complete
 
@@ -307,7 +307,7 @@ plexium doctor
 7. **CI config**: GitHub Actions workflows exist if enabled
 8. **Auth check**: GitHub token has write access to wiki repo (if publishing enabled)
 9. **Git status**: Repo is a git repository
-10. **memento**: `git memento doctor` passes if configured
+10. **memento**: `git memento check` passes if configured
 
 **Output:**
 ```go
