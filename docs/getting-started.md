@@ -71,6 +71,8 @@ plexium setup claude --write-config --with-memento
 plexium setup codex --write-config --with-memento
 ```
 
+On Claude, Plexium also writes a temporary repo-local compatibility shim (`.plexium/bin/claude-memento-bridge.js`) into the local `git-memento` config so Claude users can keep using Memento until upstream support is patched.
+
 After setup, verify readiness explicitly:
 
 ```bash
@@ -135,7 +137,7 @@ plexium init --strictness strict
 
 The CLI retrieval command (`plexium retrieve`) works regardless of whether `--with-pageindex` was passed. The flag enables the PageIndex integration in config but the built-in search engine is always available.
 
-**A note on `--with-memento`:** This flag is also per-repository. If `git-memento` is already installed, Plexium initializes it for the current repo. If it is missing, Plexium can offer to install it with the official installer script before running `git memento init`.
+**A note on `--with-memento`:** This flag is also per-repository. If `git-memento` is already installed, Plexium initializes it for the current repo. If it is missing, Plexium can offer to install it with the official installer script before running `git memento init`. On Claude, Plexium additionally configures the temporary compatibility shim automatically.
 
 ### Preview first
 

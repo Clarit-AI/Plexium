@@ -128,6 +128,8 @@ plexium setup claude --write-config --with-memento
 plexium setup codex --write-config --with-memento
 ```
 
+For Claude Code, Plexium also installs a temporary repo-local Memento compatibility shim while upstream `git-memento` catches up with Claude's current session model.
+
 ### Claude Code marketplace
 
 ```text

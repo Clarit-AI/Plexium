@@ -97,6 +97,20 @@ func IsInitialized(repoRoot string) (bool, error) {
 	return false, fmt.Errorf("check git-memento repo config: %w", err)
 }
 
+// ConfiguredProvider returns the currently configured git-memento provider, if any.
+func ConfiguredProvider(repoRoot string) (string, error) {
+	cmd := exec.Command("git", "config", "--local", "--get", "memento.provider")
+	cmd.Dir = repoRoot
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return strings.TrimSpace(string(output)), nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		return "", nil
+	}
+	return "", fmt.Errorf("read memento.provider: %w", err)
+}
+
 // InitRepo initializes git-memento for the repository, optionally pinning a provider.
 func InitRepo(repoRoot, provider string) error {
 	args := []string{"memento", "init"}
@@ -113,6 +127,29 @@ func InitRepo(repoRoot, provider string) error {
 			return fmt.Errorf("run `%s`: %s", strings.Join(args, " "), text)
 		}
 		return fmt.Errorf("run `%s`: %w", strings.Join(args, " "), err)
+	}
+	return nil
+}
+
+// ConfigureClaudeShim installs the repo-local Claude compatibility shim config.
+func ConfigureClaudeShim(repoRoot string) error {
+	bridgePath := filepath.Join(repoRoot, ".plexium", "bin", "claude-memento-bridge.js")
+	if err := os.MkdirAll(filepath.Dir(bridgePath), 0o755); err != nil {
+		return fmt.Errorf("create shim directory: %w", err)
+	}
+	if err := os.WriteFile(bridgePath, []byte(claudeBridgeScript), 0o755); err != nil {
+		return fmt.Errorf("write Claude compatibility bridge: %w", err)
+	}
+
+	cmd := exec.Command("git", "config", "--local", "memento.claude.bin", bridgePath)
+	cmd.Dir = repoRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		text := strings.TrimSpace(string(output))
+		if text != "" {
+			return fmt.Errorf("configure Claude compatibility bridge: %s", text)
+		}
+		return fmt.Errorf("configure Claude compatibility bridge: %w", err)
 	}
 	return nil
 }

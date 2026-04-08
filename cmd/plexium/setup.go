@@ -303,14 +303,6 @@ func configureMemento(repoRoot, agent string, opts setupAgentOptions) setupStep 
 		return setupStep{Name: "memento", Status: "warning", Message: message}
 	}
 
-	if err := enableMementoInConfig(repoRoot); err != nil {
-		return setupStep{
-			Name:    "memento",
-			Status:  "warning",
-			Message: fmt.Sprintf("git-memento is installed but Plexium config could not be updated: %v", err),
-		}
-	}
-
 	initialized, err := memento.IsInitialized(repoRoot)
 	if err != nil {
 		return setupStep{
@@ -319,7 +311,15 @@ func configureMemento(repoRoot, agent string, opts setupAgentOptions) setupStep 
 			Message: fmt.Sprintf("git-memento is installed but repo config could not be inspected: %v", err),
 		}
 	}
-	if !initialized {
+	provider, err := memento.ConfiguredProvider(repoRoot)
+	if err != nil {
+		return setupStep{
+			Name:    "memento",
+			Status:  "warning",
+			Message: fmt.Sprintf("git-memento is installed but the configured provider could not be read: %v", err),
+		}
+	}
+	if !initialized || provider != agent {
 		if err := memento.InitRepo(repoRoot, agent); err != nil {
 			return setupStep{
 				Name:    "memento",
@@ -329,9 +329,30 @@ func configureMemento(repoRoot, agent string, opts setupAgentOptions) setupStep 
 		}
 	}
 
+	if agent == "claude" {
+		if err := memento.ConfigureClaudeShim(repoRoot); err != nil {
+			return setupStep{
+				Name:    "memento",
+				Status:  "warning",
+				Message: fmt.Sprintf("git-memento is initialized but the Claude compatibility shim could not be configured: %v", err),
+			}
+		}
+	}
+
+	if err := enableMementoInConfig(repoRoot); err != nil {
+		return setupStep{
+			Name:    "memento",
+			Status:  "warning",
+			Message: fmt.Sprintf("git-memento is ready but Plexium config could not be updated: %v", err),
+		}
+	}
+
 	message := "initialized git-memento for this repository"
 	if result.Installed {
 		message = "installed git-memento and initialized repo-local session tracking"
+	}
+	if agent == "claude" {
+		message += " with the temporary Claude compatibility shim"
 	}
 	return setupStep{Name: "memento", Status: "pass", Message: message}
 }

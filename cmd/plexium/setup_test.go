@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -120,5 +121,104 @@ func TestSetupAgent_WithMementoDeclined_DoesNotPersistConfigFlags(t *testing.T) 
 	}
 	if cfg.Enforcement.MementoGate {
 		t.Fatalf("expected enforcement.mementoGate to remain disabled")
+	}
+}
+
+func TestSetupAgent_WithMementoClaude_ConfiguresShimAndProvider(t *testing.T) {
+	repoRoot := t.TempDir()
+	binDir := t.TempDir()
+
+	initCmd := exec.Command("/usr/bin/git", "init")
+	initCmd.Dir = repoRoot
+	if output, err := initCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init temp repo: %v\n%s", err, output)
+	}
+
+	gitStub := `#!/bin/sh
+if [ "$1" = "memento" ] && [ "$2" = "--version" ]; then
+  exit 0
+fi
+if [ "$1" = "config" ] && [ "$2" = "--local" ] && [ "$3" = "--get-regexp" ]; then
+  /usr/bin/git "$@"
+  exit $?
+fi
+if [ "$1" = "config" ] && [ "$2" = "--local" ] && [ "$3" = "--get" ]; then
+  /usr/bin/git "$@"
+  exit $?
+fi
+if [ "$1" = "config" ] && [ "$2" = "--local" ]; then
+  /usr/bin/git "$@"
+  exit $?
+fi
+if [ "$1" = "memento" ] && [ "$2" = "init" ]; then
+  provider="$3"
+  if [ -z "$provider" ]; then
+    provider="codex"
+  fi
+  /usr/bin/git config --local memento.provider "$provider"
+  exit 0
+fi
+exit 1
+`
+
+	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(gitStub), 0o755); err != nil {
+		t.Fatalf("write git stub: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+"/usr/bin:/bin:/opt/homebrew/bin")
+	setupStdout := &bytes.Buffer{}
+
+	result, err := setupAgent(repoRoot, "claude", setupAgentOptions{
+		WithMemento: true,
+		Stdin:       bytes.NewBufferString(""),
+		Stdout:      setupStdout,
+		Stderr:      &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatalf("setupAgent returned error: %v", err)
+	}
+
+	foundPass := false
+	for _, step := range result.Steps {
+		if step.Name == "memento" && step.Status == "pass" {
+			foundPass = true
+			break
+		}
+	}
+	if !foundPass {
+		t.Fatalf("expected successful memento setup step")
+	}
+
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !cfg.Integrations.Memento || !cfg.Enforcement.MementoGate {
+		t.Fatalf("expected memento integration and gate to be enabled")
+	}
+
+	cmd := exec.Command("/usr/bin/git", "config", "--local", "--get", "memento.provider")
+	cmd.Dir = repoRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("read memento.provider: %v\n%s", err, output)
+	}
+	if got := string(bytes.TrimSpace(output)); got != "claude" {
+		t.Fatalf("expected provider claude, got %q", got)
+	}
+
+	cmd = exec.Command("/usr/bin/git", "config", "--local", "--get", "memento.claude.bin")
+	cmd.Dir = repoRoot
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("read memento.claude.bin: %v\n%s", err, output)
+	}
+	expectedShim := filepath.Join(repoRoot, ".plexium", "bin", "claude-memento-bridge.js")
+	if got := string(bytes.TrimSpace(output)); got != expectedShim {
+		t.Fatalf("expected shim path %q, got %q", expectedShim, got)
+	}
+
+	if _, err := os.Stat(expectedShim); err != nil {
+		t.Fatalf("expected shim file to exist: %v", err)
 	}
 }
