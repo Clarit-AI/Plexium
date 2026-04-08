@@ -143,7 +143,7 @@ func promptForInstall(stdin io.Reader, stdout io.Writer) (bool, error) {
 		stdout = os.Stdout
 	}
 
-	fmt.Fprint(stdout, "Install git-memento now? [Y/n]: ")
+	fmt.Fprint(stdout, "Install git-memento now? [y/N]: ")
 	reader := bufio.NewReader(stdin)
 	answer, err := reader.ReadString('\n')
 	if err == io.EOF {

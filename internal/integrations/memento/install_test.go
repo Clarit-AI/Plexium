@@ -49,7 +49,7 @@ func TestEnsureCLI_DeclineInstallLeavesToolUnavailable(t *testing.T) {
 	if result.InstallCommand == "" {
 		t.Fatalf("expected install command guidance")
 	}
-	if !bytes.Contains(stdout.Bytes(), []byte("Install git-memento now?")) {
+	if !bytes.Contains(stdout.Bytes(), []byte("Install git-memento now? [y/N]: ")) {
 		t.Fatalf("expected install prompt in stdout")
 	}
 }
