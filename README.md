@@ -65,7 +65,7 @@ Plexium can stay passive, or it can stay alive while you code. Git hooks can enf
 
 ### Assistive Layer
 
-If you want autonomous wiki upkeep, Plexium can route maintenance work to local or remote model providers. Ollama is the zero-cost local path. OpenRouter or another OpenAI-compatible endpoint is the remote path. This layer is optional: the core wiki and retrieval workflow do not require a paid provider.
+If you want autonomous wiki upkeep, Plexium can route maintenance work to local or remote model providers. Ollama is the zero-cost local path. OpenRouter or another OpenAI-compatible endpoint is the remote path. This layer is optional: the core wiki and retrieval workflow do not require a paid provider. We recomend using highly capable - low cost models that work well be it in the cloud or on-prem. Our current top picks are google/gemma-4-26B-A4B-it, Qwen/Qwen3.5-35B-A3B and nvidia/Nemotron-Cascade-2-30B-A3B.
 
 ### Transcript and Provenance Layer
 
@@ -86,6 +86,7 @@ Plexium is shaped by the LLM Wiki idea, but it goes further in a few important w
 - [Go 1.25+](https://go.dev/dl/)
 - Git
 - A Git repository
+- Memento (Optional, recomended)
 
 ### Binary-first
 
