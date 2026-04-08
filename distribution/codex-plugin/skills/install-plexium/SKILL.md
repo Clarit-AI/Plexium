@@ -9,7 +9,7 @@ description: Use when the user wants to install or verify the Plexium CLI from i
 
 1. Check whether `plexium` is already installed with `plexium --version`.
 2. If it is missing, check whether `go` is available with `go version`.
-3. If Go is available, run `go install github.com/Clarit-AI/Plexium/cmd/plexium@latest`.
+3. If Go is available, run `go install ./cmd/plexium`.
 4. Verify the install with `plexium --version`.
 5. If Go is missing, explain that the bootstrap is blocked and say exactly which command failed.
 

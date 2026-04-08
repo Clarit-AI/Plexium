@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,7 +115,8 @@ func init() {
 	agentCmd.AddCommand(agentSpendCmd)
 	agentCmd.AddCommand(agentBenchmarkCmd)
 	agentCmd.AddCommand(agentSetupCmd)
-	agentSetupCmd.Flags().String("api-key", "", "Provide OpenRouter API key directly (skip OAuth)")
+	agentSetupCmd.Flags().String("api-key-file", "", "Read OpenRouter API key from a file")
+	agentSetupCmd.Flags().Bool("api-key-stdin", false, "Read OpenRouter API key from stdin")
 	agentTestCmd.Flags().String("provider", "", "Test a specific provider")
 
 	// Register subcommands
@@ -1633,14 +1635,17 @@ var beadsScanCmd = &cobra.Command{
 
 var agentSetupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Interactive provider setup (Ollama, OpenRouter)",
+	Short: "Provider setup for Ollama and OpenRouter",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		repoRoot, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("getting working directory: %w", err)
 		}
 
-		apiKey, _ := cmd.Flags().GetString("api-key")
+		apiKey, err := resolveSetupAPIKey(cmd)
+		if err != nil {
+			return err
+		}
 		result, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{APIKey: apiKey})
 		if err != nil {
 			return fmt.Errorf("setup failed: %w", err)
@@ -1660,6 +1665,44 @@ var agentSetupCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+func resolveSetupAPIKey(cmd *cobra.Command) (string, error) {
+	apiKeyFile, _ := cmd.Flags().GetString("api-key-file")
+	apiKeyStdin, _ := cmd.Flags().GetBool("api-key-stdin")
+
+	if apiKeyFile != "" && apiKeyStdin {
+		return "", fmt.Errorf("use only one of --api-key-file or --api-key-stdin")
+	}
+
+	if apiKeyFile != "" {
+		data, err := os.ReadFile(apiKeyFile)
+		if err != nil {
+			return "", fmt.Errorf("read API key file: %w", err)
+		}
+		key := strings.TrimSpace(string(data))
+		if key == "" {
+			return "", fmt.Errorf("API key file is empty")
+		}
+		return key, nil
+	}
+
+	if apiKeyStdin {
+		if stat, err := os.Stdin.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) != 0 {
+			return "", fmt.Errorf("--api-key-stdin requires piped input")
+		}
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("read API key from stdin: %w", err)
+		}
+		key := strings.TrimSpace(string(data))
+		if key == "" {
+			return "", fmt.Errorf("stdin did not contain an API key")
+		}
+		return key, nil
+	}
+
+	return "", nil
 }
 
 func main() {

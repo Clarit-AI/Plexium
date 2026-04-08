@@ -15,6 +15,7 @@ import (
 	"github.com/Clarit-AI/Plexium/internal/lint"
 	"github.com/Clarit-AI/Plexium/internal/plugins"
 	"github.com/Clarit-AI/Plexium/internal/wiki"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -328,13 +329,14 @@ func verifyAgent(repoRoot, agent string) (*verifyResult, error) {
 	}
 
 	lintReport, err := lint.NewLinter(repoRoot, cfg).RunDeterministic()
-	if err != nil {
-		return nil, fmt.Errorf("run lint: %w", err)
-	}
 	lintStatus := "pass"
 	lintMessage := "deterministic lint passes cleanly"
 	lintRemediation := ""
-	if lintReport.Summary.Errors > 0 {
+	if err != nil {
+		lintStatus = "fail"
+		lintMessage = fmt.Sprintf("deterministic lint could not run: %v", err)
+		lintRemediation = "Run `plexium lint --deterministic` directly and resolve the reported error."
+	} else if lintReport.Summary.Errors > 0 {
 		lintStatus = "fail"
 		lintMessage = fmt.Sprintf("deterministic lint reported %d errors and %d warnings", lintReport.Summary.Errors, lintReport.Summary.Warnings)
 		lintRemediation = "Run `plexium lint --deterministic` and fix the reported issues."
@@ -453,7 +455,14 @@ func detectMCPConfig(repoRoot, agent string) (bool, string, error) {
 			}
 			return false, path, fmt.Errorf("read Claude MCP config: %w", err)
 		}
-		return strings.Contains(string(data), "plexium-wiki"), path, nil
+		var cfg struct {
+			MCPServers map[string]json.RawMessage `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return false, path, fmt.Errorf("parse Claude MCP config: %w", err)
+		}
+		_, ok := cfg.MCPServers["plexium-wiki"]
+		return ok, path, nil
 	case "codex":
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -467,7 +476,17 @@ func detectMCPConfig(repoRoot, agent string) (bool, string, error) {
 			}
 			return false, path, fmt.Errorf("read Codex config: %w", err)
 		}
-		return strings.Contains(string(data), "plexium-wiki"), path, nil
+		var cfg struct {
+			MCPServers map[string]struct {
+				Command string   `toml:"command"`
+				Args    []string `toml:"args"`
+			} `toml:"mcp_servers"`
+		}
+		if err := toml.Unmarshal(data, &cfg); err != nil {
+			return false, path, fmt.Errorf("parse Codex config: %w", err)
+		}
+		_, ok := cfg.MCPServers["plexium-wiki"]
+		return ok, path, nil
 	default:
 		return false, "", fmt.Errorf("unsupported agent %q", agent)
 	}

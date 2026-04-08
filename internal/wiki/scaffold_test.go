@@ -159,6 +159,27 @@ func TestInit_StarterScaffoldIsLintFriendly(t *testing.T) {
 	assert.Contains(t, string(sidebarContent), "[[onboarding|Onboarding Guide]]")
 }
 
+func TestInit_WithPageIndex_CreatesStableReference(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := Init(InitOptions{RepoRoot: dir, WithPageIndex: true})
+	require.NoError(t, err)
+
+	path := filepath.Join(dir, ".plexium", "pageindex-mcp.json")
+	first, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NotEmpty(t, first)
+	assert.Contains(t, string(first), `"server": "plexium-pageindex"`)
+
+	_, err = Init(InitOptions{RepoRoot: dir, WithPageIndex: true})
+	require.NoError(t, err)
+
+	second, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NotEmpty(t, second)
+	assert.Equal(t, string(first), string(second))
+}
+
 func TestInit_SchemaContent(t *testing.T) {
 	dir := t.TempDir()
 

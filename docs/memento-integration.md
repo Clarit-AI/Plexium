@@ -28,7 +28,7 @@ When enabled, Memento sits beside the normal source and wiki workflow:
 1. A coding session is captured as provenance.
 2. Plexium copies or references that transcript material as raw input.
 3. The assistive layer can extract useful decisions, rationale, and follow-up documentation from it.
-4. The resulting knowledge can flow into module pages, ADRs, logs, or contradiction tracking.
+4. The resulting knowledge can flow into module pages, ADR candidates, logs, or contradiction tracking.
 
 That means Plexium is not limited to documenting what changed. It can also document why it changed.
 

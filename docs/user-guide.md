@@ -503,13 +503,19 @@ If you already pasted a secret into chat:
 - rewind the session if your client supports it
 - do not commit that session to memento or publish its notes
 
-Direct setup through Plexium:
+Safe non-interactive setup through Plexium:
 
 ```bash
-plexium agent setup --api-key "sk-or-v1-..."
+plexium agent setup --api-key-file /path/to/openrouter.key
 ```
 
-Or, even better, export the key in your terminal and let `plexium agent setup` pick it up automatically without ever placing the secret in chat:
+Or feed the key through stdin without putting it in shell history:
+
+```bash
+printf '%s' "$OPENROUTER_API_KEY" | plexium agent setup --api-key-stdin
+```
+
+Or export the key in your terminal and let `plexium agent setup` pick it up automatically without ever placing the secret in chat:
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-v1-..."

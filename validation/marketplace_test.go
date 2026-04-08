@@ -29,6 +29,11 @@ func TestMarketplaceArtifacts_AreValidJSON(t *testing.T) {
 		if err := json.Unmarshal(data, &payload); err != nil {
 			t.Fatalf("parse %s: %v", rel, err)
 		}
+
+		switch rel {
+		case ".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json":
+			validateLocalMarketplacePaths(t, repoRoot, rel, payload)
+		}
 	}
 }
 
@@ -46,6 +51,45 @@ func TestMarketplacePluginRootsExist(t *testing.T) {
 	for _, rel := range paths {
 		if _, err := os.Stat(filepath.Join(repoRoot, rel)); err != nil {
 			t.Fatalf("expected %s to exist: %v", rel, err)
+		}
+	}
+}
+
+func validateLocalMarketplacePaths(t *testing.T, repoRoot, rel string, payload map[string]any) {
+	t.Helper()
+
+	plugins, ok := payload["plugins"].([]any)
+	if !ok {
+		t.Fatalf("%s: expected plugins array", rel)
+	}
+
+	for _, entry := range plugins {
+		plugin, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatalf("%s: expected plugin entry object", rel)
+		}
+
+		var path string
+		switch source := plugin["source"].(type) {
+		case string:
+			path = source
+		case map[string]any:
+			if kind, _ := source["type"].(string); kind != "" && kind != "local" {
+				continue
+			}
+			if kind, _ := source["source"].(string); kind != "" && kind != "local" {
+				continue
+			}
+			path, _ = source["path"].(string)
+		}
+
+		if path == "" {
+			continue
+		}
+
+		target := filepath.Join(repoRoot, path)
+		if _, err := os.Stat(target); err != nil {
+			t.Fatalf("%s: local source path %q does not exist: %v", rel, path, err)
 		}
 	}
 }

@@ -41,9 +41,13 @@ type SetupResult struct {
 
 // SetupOptions controls non-interactive setup behavior.
 type SetupOptions struct {
-	// APIKey bypasses OAuth and manual entry. If empty, the setup flow also
-	// checks OPENROUTER_API_KEY before falling back to interactive prompts.
+	// APIKey provides a non-interactive OpenRouter setup path. If empty, the
+	// setup flow also checks OPENROUTER_API_KEY before falling back to
+	// interactive prompts.
 	APIKey string
+	// HTTPClient allows tests to inject a request transport without mutating the
+	// package-level shared client.
+	HTTPClient *http.Client
 }
 
 // RunInteractiveSetup runs the full interactive provider setup flow.
@@ -56,6 +60,7 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 
 	result := &SetupResult{}
 	reader := bufio.NewReader(os.Stdin)
+	client := clientOrDefault(opts.HTTPClient)
 
 	if opts.APIKey == "" {
 		opts.APIKey = os.Getenv("OPENROUTER_API_KEY")
@@ -65,7 +70,7 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 		fmt.Println("===================")
 		fmt.Println()
 		fmt.Print("Validating provided API key... ")
-		if _, err := validateKey(opts.APIKey); err != nil {
+		if _, err := validateKey(client, opts.APIKey); err != nil {
 			fmt.Printf("FAILED (%v)\n", err)
 			return nil, fmt.Errorf("key validation failed: %w", err)
 		}
@@ -98,7 +103,7 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 
 	// Ollama detection
 	ollamaEndpoint := "http://localhost:11434"
-	models, err := DetectOllama(ollamaEndpoint)
+	models, err := DetectOllama(client, ollamaEndpoint)
 	if err == nil && len(models) > 0 {
 		fmt.Printf("Checking for Ollama... found (%s)\n", ollamaEndpoint)
 		fmt.Printf("Available models: %s\n\n", strings.Join(models, ", "))
@@ -129,7 +134,7 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 		switch choice {
 		case "1", "":
 			fmt.Println()
-			apiKey, err = RunOAuthFlow(oauthAppName)
+			apiKey, err = RunOAuthFlow(client, oauthAppName)
 			if err != nil {
 				fmt.Printf("OAuth failed: %v\n", err)
 				fmt.Println("Falling back to manual entry...")
@@ -150,7 +155,7 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 		if apiKey != "" {
 			// Validate key before persisting
 			fmt.Print("Validating key... ")
-			if _, vErr := validateKey(apiKey); vErr != nil {
+			if _, vErr := validateKey(client, apiKey); vErr != nil {
 				fmt.Printf("FAILED (%v)\n", vErr)
 				fmt.Println("Key not saved. Check the key and try again.")
 			} else {
@@ -205,7 +210,9 @@ func generatePKCEPair() (string, string, error) {
 
 // RunOAuthFlow runs the PKCE OAuth flow for OpenRouter.
 // Returns the API key on success.
-func RunOAuthFlow(appName string) (string, error) {
+func RunOAuthFlow(client *http.Client, appName string) (string, error) {
+	client = clientOrDefault(client)
+
 	if !portAvailable(callbackPort) {
 		return "", fmt.Errorf("port %d is in use (required by OpenRouter OAuth callback)", callbackPort)
 	}
@@ -228,7 +235,10 @@ func RunOAuthFlow(appName string) (string, error) {
 		// Start callback server before opening browser.
 		codeCh := make(chan string, 1)
 		errCh := make(chan error, 1)
-		server := startCallbackServer(codeCh, errCh)
+		server, err := startCallbackServer(codeCh, errCh)
+		if err != nil {
+			return "", fmt.Errorf("start callback server: %w", err)
+		}
 
 		if attempt == 1 {
 			fmt.Println("Opening browser for OpenRouter authorization...")
@@ -256,7 +266,7 @@ func RunOAuthFlow(appName string) (string, error) {
 		server.Close()
 
 		fmt.Print("Exchanging code for API key... ")
-		apiKey, err := exchangeCode(code, codeVerifier)
+		apiKey, err := exchangeCode(client, code, codeVerifier)
 		if err != nil {
 			if attempt < maxAttempts && strings.Contains(err.Error(), "400") {
 				fmt.Printf("FAILED (%v)\nRetrying with fresh PKCE pair...\n", err)
@@ -269,7 +279,7 @@ func RunOAuthFlow(appName string) (string, error) {
 
 		// Validate
 		fmt.Print("Validating key... ")
-		label, err := validateKey(apiKey)
+		label, err := validateKey(client, apiKey)
 		if err != nil {
 			fmt.Println("SKIPPED (network error)")
 		} else {
@@ -282,7 +292,7 @@ func RunOAuthFlow(appName string) (string, error) {
 	return "", fmt.Errorf("all OAuth attempts failed")
 }
 
-func startCallbackServer(codeCh chan<- string, errCh chan<- error) *http.Server {
+func startCallbackServer(codeCh chan<- string, errCh chan<- error) (*http.Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
@@ -303,24 +313,29 @@ func startCallbackServer(codeCh chan<- string, errCh chan<- error) *http.Server 
 		Handler: mux,
 	}
 
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return nil, err
+	}
+
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 	}()
 
-	// Give server a moment to bind
-	time.Sleep(50 * time.Millisecond)
-	return server
+	return server, nil
 }
 
-func exchangeCode(code, codeVerifier string) (string, error) {
+func exchangeCode(client *http.Client, code, codeVerifier string) (string, error) {
+	client = clientOrDefault(client)
+
 	payload, _ := json.Marshal(map[string]string{
 		"code":          code,
 		"code_verifier": codeVerifier,
 	})
 
-	resp, err := httpClient.Post(openRouterTokenURL, "application/json", strings.NewReader(string(payload)))
+	resp, err := client.Post(openRouterTokenURL, "application/json", strings.NewReader(string(payload)))
 	if err != nil {
 		return "", fmt.Errorf("token exchange request: %w", err)
 	}
@@ -349,11 +364,13 @@ func exchangeCode(code, codeVerifier string) (string, error) {
 	return key, nil
 }
 
-func validateKey(apiKey string) (string, error) {
+func validateKey(client *http.Client, apiKey string) (string, error) {
+	client = clientOrDefault(client)
+
 	req, _ := http.NewRequest("GET", openRouterKeyURL, nil)
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -381,7 +398,9 @@ func validateKey(apiKey string) (string, error) {
 // --- Ollama Detection ---
 
 // DetectOllama checks if Ollama is running and returns available model names.
-func DetectOllama(endpoint string) ([]string, error) {
+func DetectOllama(client *http.Client, endpoint string) ([]string, error) {
+	client = clientOrDefault(client)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -390,7 +409,7 @@ func DetectOllama(endpoint string) ([]string, error) {
 		return nil, err
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -412,6 +431,13 @@ func DetectOllama(endpoint string) ([]string, error) {
 		names = append(names, m.Name)
 	}
 	return names, nil
+}
+
+func clientOrDefault(client *http.Client) *http.Client {
+	if client != nil {
+		return client
+	}
+	return httpClient
 }
 
 // --- Credential Storage ---

@@ -8,7 +8,7 @@
       "name": "plexium-tools",
       "source": {
         "source": "local",
-        "path": "./../../distribution/codex-plugin"
+        "path": "./distribution/codex-plugin"
       },
       "policy": {
         "installation": "AVAILABLE",

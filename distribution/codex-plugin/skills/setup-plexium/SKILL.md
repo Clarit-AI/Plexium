@@ -17,7 +17,7 @@ description: Use when the user wants to initialize Plexium, set up the current r
 ## Secret Handling
 
 - Never ask the user to paste API keys or other secrets into chat.
-- For provider setup, prefer env vars or terminal-only flags such as `plexium agent setup --api-key`, entered outside the chat transcript.
+- For provider setup, prefer env vars, `--api-key-file`, or `--api-key-stdin`, entered outside the chat transcript.
 - If the user already pasted a secret and memento is enabled, tell them to rewind the session if possible and not commit that session to memento.
 
 ## Output

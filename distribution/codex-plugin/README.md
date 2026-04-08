@@ -10,5 +10,5 @@ This plugin keeps Codex on the Plexium happy path by teaching it to:
 
 Repo marketplace install uses:
 
-- `/Users/.../Plexium/.agents/plugins/marketplace.json`
+- `<repo-root>/.agents/plugins/marketplace.json`
 - `distribution/codex-plugin/`
