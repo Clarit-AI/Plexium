@@ -355,7 +355,7 @@ Install a Plexium plugin adapter.
 plexium plugin add <name> [flags]
 ```
 
-Reads plugin from `.plexium/plugins/<name>/` (or `--path`), validates `manifest.json`, copies files, makes `plugin.sh` executable, and runs it to generate agent instruction files.
+Installs a bundled Plexium adapter by name, or installs a custom adapter from `--path`. Plexium validates `manifest.json`, copies the adapter into `.plexium/plugins/<name>/`, and runs `plugin.sh` to generate the target instruction file.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
@@ -372,13 +372,13 @@ plexium plugin add custom-adapter --path /path/to/plugin
 
 ### `plexium plugin list` [Stable]
 
-List installed Plexium plugins.
+List available Plexium plugins.
 
 ```bash
 plexium plugin list
 ```
 
-Scans `.plexium/plugins/` and reads each plugin's `manifest.json` for name and description.
+Lists bundled adapters and marks which ones are already installed in `.plexium/plugins/`.
 
 No flags.
 
@@ -452,9 +452,34 @@ plexium pageindex serve
 
 Runs in stdio mode using JSON-RPC 2.0. Exposes the same search engine used by [`plexium retrieve`](#plexium-retrieve-stable) over the Model Context Protocol. Agents connect via MCP and gain access to three tools: `pageindex_search`, `pageindex_get_page`, and `pageindex_list_pages`.
 
-For agent configuration instructions (Claude Code, Cursor, Claude Desktop), see [User Guide: MCP Server](user-guide.md#mcp-server-optional).
+Use [`plexium pageindex connect`](#plexium-pageindex-connect-stable) for agent-specific setup guidance.
 
 No flags.
+
+---
+
+### `plexium pageindex connect` [Stable]
+
+Show or apply the native MCP setup command for Claude Code or Codex.
+
+```bash
+plexium pageindex connect <agent> [flags]
+```
+
+Supports `claude` and `codex`.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--write-config` | boolean | `false` | Run the native `claude mcp add ...` or `codex mcp add ...` command instead of only printing it |
+
+**Examples:**
+
+```bash
+plexium pageindex connect claude
+plexium pageindex connect claude --write-config
+plexium pageindex connect codex
+plexium pageindex connect codex --write-config
+```
 
 ---
 

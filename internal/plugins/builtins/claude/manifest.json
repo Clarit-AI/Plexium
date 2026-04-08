@@ -1,0 +1,11 @@
+{
+  "name": "claude",
+  "version": 1,
+  "description": "Claude Code adapter for Plexium",
+  "instructionFile": "CLAUDE.md",
+  "instructionFilePath": ".",
+  "schemaInjection": true,
+  "requires": [
+    "_schema.md"
+  ]
+}

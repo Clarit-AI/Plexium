@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -99,6 +101,104 @@ func TestClaudeRunner_ImplementsRunnerAdapter(t *testing.T) {
 
 func TestCodexRunner_ImplementsRunnerAdapter(t *testing.T) {
 	var _ RunnerAdapter = (*CodexRunner)(nil)
+}
+
+func TestCodexRunner_RunUsesExecAndOutputFile(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "codex-args.txt")
+
+	script := `#!/bin/sh
+printf '%s\n' "$@" > "$CODEX_TEST_LOG"
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output-last-message" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+done
+printf 'codex final output' > "$out"
+`
+	scriptPath := filepath.Join(binDir, "codex")
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CODEX_TEST_LOG", logPath)
+
+	runner := NewCodexRunner("o3")
+	result, err := runner.Run(context.Background(), "coder", "fix bug", []string{"modules/auth.md"})
+	require.NoError(t, err)
+	assert.Equal(t, "codex final output", result.Output)
+
+	data, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	got := string(data)
+	assert.Contains(t, got, "exec")
+	assert.Contains(t, got, "--full-auto")
+	assert.Contains(t, got, "--output-last-message")
+	assert.Contains(t, got, "--model")
+	assert.Contains(t, got, "o3")
+}
+
+func TestCodexRunner_RunReturnsResultWhenCLIIsMissing(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	runner := NewCodexRunner("o3")
+	result, err := runner.Run(context.Background(), "coder", "fix bug", nil)
+	require.Error(t, err)
+	require.NotNil(t, result)
+	assert.Contains(t, err.Error(), "codex CLI not found")
+	assert.Equal(t, "", result.Output)
+	assert.GreaterOrEqual(t, result.LatencyMs, int64(0))
+}
+
+func TestCodexRunner_RunReturnsPartialOutputOnExecFailure(t *testing.T) {
+	binDir := t.TempDir()
+	script := `#!/bin/sh
+echo "partial codex output"
+echo "stderr detail" 1>&2
+exit 7
+`
+	scriptPath := filepath.Join(binDir, "codex")
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	runner := NewCodexRunner("")
+	result, err := runner.Run(context.Background(), "coder", "fix bug", nil)
+	require.Error(t, err)
+	require.NotNil(t, result)
+	assert.Contains(t, err.Error(), "codex exec failed")
+	assert.Contains(t, err.Error(), "partial codex output")
+	assert.Contains(t, result.Output, "partial codex output")
+	assert.Contains(t, result.Output, "stderr detail")
+}
+
+func TestCodexRunner_RunReturnsPartialOutputWhenFinalReadFails(t *testing.T) {
+	binDir := t.TempDir()
+	script := `#!/bin/sh
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output-last-message" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+done
+echo "combined output fallback"
+rm -f "$out"
+`
+	scriptPath := filepath.Join(binDir, "codex")
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	runner := NewCodexRunner("")
+	result, err := runner.Run(context.Background(), "coder", "fix bug", nil)
+	require.Error(t, err)
+	require.NotNil(t, result)
+	assert.Contains(t, err.Error(), "reading Codex final output")
+	assert.Contains(t, result.Output, "combined output fallback")
 }
 
 func TestGeminiRunner_ImplementsRunnerAdapter(t *testing.T) {

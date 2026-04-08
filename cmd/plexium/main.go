@@ -201,15 +201,10 @@ var initCmd = &cobra.Command{
 			fmt.Println("  3. Run 'plexium lint --deterministic' to check wiki health")
 
 			if withPageIndex {
-				fmt.Println("\nPageIndex MCP server ready. Add to your agent's MCP config:")
-				fmt.Println(`  {`)
-				fmt.Println(`    "mcpServers": {`)
-				fmt.Println(`      "plexium-wiki": {`)
-				fmt.Println(`        "command": "plexium",`)
-				fmt.Println(`        "args": ["pageindex", "serve"]`)
-				fmt.Println(`      }`)
-				fmt.Println(`    }`)
-				fmt.Println(`  }`)
+				fmt.Println("\nPageIndex MCP server ready.")
+				fmt.Println("  Connect Claude Code: plexium pageindex connect claude")
+				fmt.Println("  Connect Codex:       plexium pageindex connect codex")
+				fmt.Println("  Add --write-config to let Plexium run the native MCP command for you.")
 				fmt.Println("  Or query directly: plexium retrieve \"<query>\"")
 			}
 		}
