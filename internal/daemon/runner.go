@@ -4,7 +4,9 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -122,27 +124,58 @@ func NewCodexRunner(model string) *CodexRunner {
 	return &CodexRunner{modelFlag: model}
 }
 
-// Run executes `codex --quiet [--model <model>] <prompt>`.
+// Run executes `codex exec --full-auto [--model <model>] --output-last-message <file> <prompt>`.
 // TokensUsed and CostUSD are -1 (unknown).
 func (r *CodexRunner) Run(ctx context.Context, role, prompt string, contextPages []string) (*RunResult, error) {
 	start := time.Now()
 	fullPrompt := buildPrompt(role, prompt, contextPages)
 
-	args := []string{"--quiet"}
+	outputFile, err := os.CreateTemp("", "plexium-codex-output-*.txt")
+	if err != nil {
+		return nil, fmt.Errorf("creating Codex output file: %w", err)
+	}
+	outputPath := outputFile.Name()
+	if err := outputFile.Close(); err != nil {
+		return nil, fmt.Errorf("closing Codex output file: %w", err)
+	}
+	defer os.Remove(outputPath)
+
+	args := []string{"exec", "--full-auto", "--output-last-message", outputPath}
 	if r.modelFlag != "" {
 		args = append(args, "--model", r.modelFlag)
 	}
 	args = append(args, fullPrompt)
 
 	cmd := exec.CommandContext(ctx, "codex", args...)
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		var execErr *exec.Error
+		if errors.As(err, &execErr) {
+			return nil, fmt.Errorf("codex CLI not found in PATH: %w", err)
+		}
+		text := strings.TrimSpace(string(out))
+		if text != "" {
+			return nil, fmt.Errorf("codex exec failed: %w: %s", err, text)
+		}
+		return nil, fmt.Errorf("codex exec failed: %w", err)
+	}
+
+	finalOutput, readErr := os.ReadFile(outputPath)
+	if readErr != nil {
+		return nil, fmt.Errorf("reading Codex final output: %w", readErr)
+	}
+
+	output := strings.TrimSpace(string(finalOutput))
+	if output == "" {
+		output = strings.TrimSpace(string(out))
+	}
 
 	return &RunResult{
-		Output:     string(out),
+		Output:     output,
 		TokensUsed: tokensUnknown,
 		CostUSD:    costUnknown,
 		LatencyMs:  time.Since(start).Milliseconds(),
-	}, err
+	}, nil
 }
 
 // ---------------------------------------------------------------------------

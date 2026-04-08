@@ -116,7 +116,7 @@ plexium compile
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `plugin not found` | No directory at `.plexium/plugins/<name>/` | Verify the plugin directory exists and contains `plugin.sh` |
+| `plugin not found` | The adapter name is unknown and no custom path was provided | Run `plexium plugin list` to see bundled adapters, or pass `--path` for a custom adapter |
 | `reading plugin manifest` | Missing or malformed `manifest.json` | Create a valid `manifest.json` with `name`, `version`, `description`, and `instructionFile` fields |
 | `making plugin executable` | Permission denied | Check file system permissions on the plugin directory |
 | `running plugin` | `plugin.sh` execution error | Run `bash .plexium/plugins/<name>/plugin.sh` manually to see the error output |

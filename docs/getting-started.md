@@ -95,7 +95,7 @@ plexium init --with-memento --with-beads --with-pageindex
 plexium init --strictness strict
 ```
 
-**A note on `--with-pageindex`:** This flag sets `integrations.pageindex: true` in config and generates a reference MCP configuration file at `.plexium/pageindex-mcp.json`. However, no agent reads that file automatically. To connect the MCP server to your agent, you need to add the server to your agent's own MCP configuration. See [User Guide: MCP Server](user-guide.md#mcp-server-optional) for copy-paste snippets.
+**A note on `--with-pageindex`:** This flag enables the PageIndex integration in config and writes a reference file at `.plexium/pageindex-mcp.json`. Agents do not read that file automatically. After init, run `plexium pageindex connect claude` or `plexium pageindex connect codex` to see the exact native MCP setup command for your agent. Add `--write-config` if you want Plexium to run that native command for you.
 
 The CLI retrieval command (`plexium retrieve`) works regardless of whether `--with-pageindex` was passed. The flag enables the PageIndex integration in config but the built-in search engine is always available.
 

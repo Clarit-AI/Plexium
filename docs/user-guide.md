@@ -286,45 +286,32 @@ The server exposes three tools:
 
 #### Wiring the MCP server to your agent
 
-Add the server to your agent's MCP configuration. The command is the same for all agents:
+Plexium can print the exact native setup command for the agents it supports:
 
-**Claude Code** (`.claude/settings.local.json` in the project root):
-
-```json
-{
-  "mcpServers": {
-    "plexium-wiki": {
-      "command": "plexium",
-      "args": ["pageindex", "serve"]
-    }
-  }
-}
+```bash
+plexium pageindex connect claude
+plexium pageindex connect codex
 ```
 
-**Cursor** (`.cursor/mcp.json` in the project root):
+Add `--write-config` to have Plexium run the native command for you:
 
-```json
-{
-  "mcpServers": {
-    "plexium-wiki": {
-      "command": "plexium",
-      "args": ["pageindex", "serve"]
-    }
-  }
-}
+```bash
+plexium pageindex connect claude --write-config
+plexium pageindex connect codex --write-config
 ```
 
-**Claude Desktop** (`claude_desktop_config.json`):
+Current native commands:
 
-```json
-{
-  "mcpServers": {
-    "plexium-wiki": {
-      "command": "plexium",
-      "args": ["pageindex", "serve"]
-    }
-  }
-}
+**Claude Code** (project-scoped MCP in `.mcp.json`):
+
+```bash
+claude mcp add --scope project plexium-wiki -- plexium pageindex serve
+```
+
+**Codex** (managed by Codex `config.toml`):
+
+```bash
+codex mcp add plexium-wiki -- plexium pageindex serve
 ```
 
 Once configured, your agent can call `pageindex_search`, `pageindex_get_page`, and `pageindex_list_pages` as MCP tools during its sessions.
@@ -371,7 +358,12 @@ plexium plugin add claude
 plexium plugin add my-adapter --path /path/to/plugin
 ```
 
-Each plugin runs a `plugin.sh` script that generates an instruction file (e.g., `CLAUDE.md`, `.cursorrules`) tailored to the wiki's structure and schema. Four adapters are included: Claude, Codex, Cursor, and Gemini.
+Each plugin runs a `plugin.sh` script that generates an instruction file (e.g., `CLAUDE.md`, `AGENTS.md`, `.cursor/rules/plexium.mdc`) tailored to the wiki's structure and schema. Four adapters are included: Claude, Codex, Cursor, and Gemini.
+
+- `claude` generates `CLAUDE.md`
+- `codex` generates `AGENTS.md`
+- `cursor` generates `.cursor/rules/plexium.mdc`
+- `gemini` generates `.gemini/config.md`
 
 **Plugin structure:**
 

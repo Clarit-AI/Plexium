@@ -40,7 +40,7 @@ The wiki is browsable as an [Obsidian](https://obsidian.md) vault, publishable a
 
 ### Retrieval
 
-Plexium includes a built-in search engine queryable via CLI (`plexium retrieve "query"`) or MCP (`plexium pageindex serve`). The engine uses BM25-style scoring across page titles, sections, summaries, content, and wiki-links. CLI retrieval works immediately after `plexium init`. The MCP server exposes the same engine over JSON-RPC 2.0 stdio for agents that support the Model Context Protocol.
+Plexium includes a built-in search engine queryable via CLI (`plexium retrieve "query"`) or MCP (`plexium pageindex serve`). The engine uses BM25-style scoring across page titles, sections, summaries, content, and wiki-links. CLI retrieval works immediately after `plexium init`. The MCP server exposes the same engine over JSON-RPC 2.0 stdio for agents that support the Model Context Protocol. Use `plexium pageindex connect claude` or `plexium pageindex connect codex` to see the native MCP setup command for each agent.
 
 ### Assistive Agent
 

@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -99,6 +101,43 @@ func TestClaudeRunner_ImplementsRunnerAdapter(t *testing.T) {
 
 func TestCodexRunner_ImplementsRunnerAdapter(t *testing.T) {
 	var _ RunnerAdapter = (*CodexRunner)(nil)
+}
+
+func TestCodexRunner_RunUsesExecAndOutputFile(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "codex-args.txt")
+
+	script := `#!/bin/sh
+printf '%s\n' "$@" > "$CODEX_TEST_LOG"
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output-last-message" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+done
+printf 'codex final output' > "$out"
+`
+	scriptPath := filepath.Join(binDir, "codex")
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CODEX_TEST_LOG", logPath)
+
+	runner := NewCodexRunner("o3")
+	result, err := runner.Run(context.Background(), "coder", "fix bug", []string{"modules/auth.md"})
+	require.NoError(t, err)
+	assert.Equal(t, "codex final output", result.Output)
+
+	data, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	got := string(data)
+	assert.Contains(t, got, "exec")
+	assert.Contains(t, got, "--full-auto")
+	assert.Contains(t, got, "--output-last-message")
+	assert.Contains(t, got, "--model")
+	assert.Contains(t, got, "o3")
 }
 
 func TestGeminiRunner_ImplementsRunnerAdapter(t *testing.T) {

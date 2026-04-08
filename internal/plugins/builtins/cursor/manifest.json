@@ -1,0 +1,11 @@
+{
+  "name": "cursor",
+  "version": 1,
+  "description": "Cursor adapter for Plexium",
+  "instructionFile": "plexium.mdc",
+  "instructionFilePath": ".cursor/rules",
+  "schemaInjection": true,
+  "requires": [
+    "_schema.md"
+  ]
+}

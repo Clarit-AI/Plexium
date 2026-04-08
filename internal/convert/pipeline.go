@@ -3,13 +3,13 @@ package convert
 import (
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"time"
 
 	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/manifest"
+	"github.com/Clarit-AI/Plexium/internal/plugins"
 	"github.com/Clarit-AI/Plexium/internal/scanner"
+	"path/filepath"
 )
 
 // Pipeline orchestrates the full convert workflow.
@@ -28,7 +28,7 @@ type PipelineResult struct {
 	FilesWritten   []string
 	ReportPath     string
 	ReportJSONPath string
-	AdapterRan    string
+	AdapterRan     string
 }
 
 // PipelineOptions configures the pipeline.
@@ -143,17 +143,10 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 }
 
 func (p *Pipeline) runAdapter(agent string) error {
-	pluginDir := filepath.Join(p.repoRoot, ".plexium", "plugins", agent)
-	scriptPath := filepath.Join(pluginDir, "plugin.sh")
-
-	if _, err := os.Stat(scriptPath); err != nil {
-		return fmt.Errorf("adapter %q not found: %w", agent, err)
+	if err := plugins.RunAdapter(p.repoRoot, agent); err != nil {
+		return fmt.Errorf("adapter %q failed: %w", agent, err)
 	}
-
-	cmd := exec.Command("bash", scriptPath)
-	cmd.Dir = p.repoRoot
-	cmd.Env = append(os.Environ(), "PLEXIUM_DIR="+p.repoRoot)
-	return cmd.Run()
+	return nil
 }
 
 func (p *Pipeline) writeOutput(result *PipelineResult) error {

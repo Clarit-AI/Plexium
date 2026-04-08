@@ -1,0 +1,11 @@
+{
+  "name": "codex",
+  "version": 1,
+  "description": "OpenAI Codex adapter for Plexium",
+  "instructionFile": "AGENTS.md",
+  "instructionFilePath": ".",
+  "schemaInjection": true,
+  "requires": [
+    "_schema.md"
+  ]
+}
