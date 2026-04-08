@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -87,6 +88,136 @@ func TestInstalledScript_UsesRepoRootWithoutPLEXIUMDIR(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); err != nil {
 		t.Fatalf("expected CLAUDE.md to exist after manual run: %v", err)
 	}
+}
+
+func TestInstallAdapter_RejectsCustomOverrideOfBuiltInName(t *testing.T) {
+	dir := t.TempDir()
+	writeSchemaFixture(t, dir)
+
+	pluginDir := t.TempDir()
+	writePluginFixture(t, pluginDir, `{
+  "name": "codex",
+  "version": 1,
+  "description": "custom codex",
+  "instructionFile": "AGENTS.md"
+}`, "#!/bin/sh\nexit 0\n")
+
+	_, err := InstallAdapter(dir, "codex", pluginDir)
+	if err == nil {
+		t.Fatalf("expected override error")
+	}
+	if got := err.Error(); got == "" || !containsAll(got, "codex", "cannot be overridden via --path") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReadManifestFromFile_RejectsMissingRequiredFields(t *testing.T) {
+	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(manifestPath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, err := readManifestFromFile(manifestPath)
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if got := err.Error(); got == "" || !containsAll(got, "invalid plugin manifest", "missing name") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateManifest_RejectsInstructionFileTraversal(t *testing.T) {
+	err := validateManifest(Manifest{
+		Name:            "custom",
+		InstructionFile: "../AGENTS.md",
+	}, "")
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if got := err.Error(); got == "" || !containsAll(got, "instructionFile", "within the repository") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestInstallAdapter_CleansUpFailedInstall(t *testing.T) {
+	dir := t.TempDir()
+	writeSchemaFixture(t, dir)
+
+	pluginDir := t.TempDir()
+	writePluginFixture(t, pluginDir, `{
+  "name": "custom",
+  "version": 1,
+  "description": "custom plugin",
+  "instructionFile": "CUSTOM.md"
+}`, "#!/bin/sh\necho broken 1>&2\nexit 5\n")
+
+	_, err := InstallAdapter(dir, "custom", pluginDir)
+	if err == nil {
+		t.Fatalf("expected install error")
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, ".plexium", "plugins", "custom")); !os.IsNotExist(statErr) {
+		t.Fatalf("expected staged install to be cleaned up, got: %v", statErr)
+	}
+}
+
+func TestInstallAdapter_PreservesExistingInstallOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	writeSchemaFixture(t, dir)
+
+	goodPluginDir := t.TempDir()
+	writePluginFixture(t, goodPluginDir, `{
+  "name": "custom",
+  "version": 1,
+  "description": "custom plugin",
+  "instructionFile": "CUSTOM.md"
+}`, "#!/bin/sh\nprintf 'first version' > CUSTOM.md\n")
+
+	if _, err := InstallAdapter(dir, "custom", goodPluginDir); err != nil {
+		t.Fatalf("unexpected initial install error: %v", err)
+	}
+	originalScript, err := os.ReadFile(filepath.Join(dir, ".plexium", "plugins", "custom", "plugin.sh"))
+	if err != nil {
+		t.Fatalf("read original script: %v", err)
+	}
+
+	badPluginDir := t.TempDir()
+	writePluginFixture(t, badPluginDir, `{
+  "name": "custom",
+  "version": 1,
+  "description": "custom plugin",
+  "instructionFile": "CUSTOM.md"
+}`, "#!/bin/sh\necho broken 1>&2\nexit 9\n")
+
+	if _, err := InstallAdapter(dir, "custom", badPluginDir); err == nil {
+		t.Fatalf("expected reinstall error")
+	}
+	currentScript, err := os.ReadFile(filepath.Join(dir, ".plexium", "plugins", "custom", "plugin.sh"))
+	if err != nil {
+		t.Fatalf("read preserved script: %v", err)
+	}
+	if string(currentScript) != string(originalScript) {
+		t.Fatalf("expected previous install to remain active")
+	}
+}
+
+func writePluginFixture(t *testing.T, dir, manifest, script string) {
+	t.Helper()
+
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.sh"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write plugin script: %v", err)
+	}
+}
+
+func containsAll(text string, parts ...string) bool {
+	for _, part := range parts {
+		if !strings.Contains(text, part) {
+			return false
+		}
+	}
+	return true
 }
 
 func writeSchemaFixture(t *testing.T, dir string) {

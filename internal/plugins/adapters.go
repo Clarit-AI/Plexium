@@ -112,26 +112,39 @@ func InstallAdapter(repoRoot, name, pluginPath string) (*InstallResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	if pluginPath != "" {
+		if _, err := readBuiltinManifest(name); err == nil {
+			return nil, fmt.Errorf("adapter %q is bundled and cannot be overridden via --path", name)
+		}
+	}
 
 	destDir := filepath.Join(repoRoot, ".plexium", "plugins", name)
-	if err := os.MkdirAll(filepath.Dir(destDir), 0o755); err != nil {
+	parentDir := filepath.Dir(destDir)
+	if err := os.MkdirAll(parentDir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating plugins directory: %w", err)
 	}
-	if err := os.RemoveAll(destDir); err != nil {
-		return nil, fmt.Errorf("cleaning plugin directory: %w", err)
+	stagedDir, err := os.MkdirTemp(parentDir, name+".tmp-*")
+	if err != nil {
+		return nil, fmt.Errorf("creating staged plugin directory: %w", err)
 	}
+	cleanupStaged := true
+	defer func() {
+		if cleanupStaged {
+			_ = os.RemoveAll(stagedDir)
+		}
+	}()
 
 	if builtIn {
-		if err := materializeBuiltin(name, destDir); err != nil {
+		if err := materializeBuiltin(name, stagedDir); err != nil {
 			return nil, err
 		}
 	} else {
-		if err := copyDir(srcDir, destDir); err != nil {
+		if err := copyDir(srcDir, stagedDir); err != nil {
 			return nil, err
 		}
 	}
 
-	scriptPath := filepath.Join(destDir, "plugin.sh")
+	scriptPath := filepath.Join(stagedDir, "plugin.sh")
 	if err := os.Chmod(scriptPath, 0o755); err != nil {
 		return nil, fmt.Errorf("making plugin executable: %w", err)
 	}
@@ -147,6 +160,13 @@ func InstallAdapter(repoRoot, name, pluginPath string) (*InstallResult, error) {
 	if _, err := os.Stat(filepath.Join(repoRoot, generatedFile)); err != nil {
 		return nil, fmt.Errorf("verifying generated instruction file %q: %w", generatedFile, err)
 	}
+	if err := os.RemoveAll(destDir); err != nil {
+		return nil, fmt.Errorf("cleaning plugin directory: %w", err)
+	}
+	if err := os.Rename(stagedDir, destDir); err != nil {
+		return nil, fmt.Errorf("activating plugin directory: %w", err)
+	}
+	cleanupStaged = false
 
 	return &InstallResult{
 		Name:            name,
@@ -235,6 +255,9 @@ func readBuiltinManifest(name string) (Manifest, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return Manifest{}, fmt.Errorf("parsing plugin manifest: %w", err)
 	}
+	if err := validateManifest(manifest, name); err != nil {
+		return Manifest{}, fmt.Errorf("invalid plugin manifest: %w", err)
+	}
 
 	return manifest, nil
 }
@@ -249,8 +272,40 @@ func readManifestFromFile(path string) (Manifest, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return Manifest{}, fmt.Errorf("parsing plugin manifest: %w", err)
 	}
+	if err := validateManifest(manifest, ""); err != nil {
+		return Manifest{}, fmt.Errorf("invalid plugin manifest: %w", err)
+	}
 
 	return manifest, nil
+}
+
+func validateManifest(manifest Manifest, expectedName string) error {
+	if strings.TrimSpace(manifest.Name) == "" {
+		return fmt.Errorf("missing name")
+	}
+	if expectedName != "" && manifest.Name != expectedName {
+		return fmt.Errorf("name %q does not match adapter %q", manifest.Name, expectedName)
+	}
+	if strings.TrimSpace(manifest.InstructionFile) == "" {
+		return fmt.Errorf("missing instructionFile")
+	}
+	if filepath.IsAbs(manifest.InstructionFile) {
+		return fmt.Errorf("instructionFile must be relative")
+	}
+	cleanInstructionFile := filepath.Clean(manifest.InstructionFile)
+	if cleanInstructionFile == "." || cleanInstructionFile == ".." || strings.HasPrefix(cleanInstructionFile, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("instructionFile must stay within the repository")
+	}
+	if manifest.InstructionFilePath != "" {
+		if filepath.IsAbs(manifest.InstructionFilePath) {
+			return fmt.Errorf("instructionFilePath must be relative")
+		}
+		cleanPath := filepath.Clean(manifest.InstructionFilePath)
+		if cleanPath == ".." || strings.HasPrefix(cleanPath, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("instructionFilePath must stay within the repository")
+		}
+	}
+	return nil
 }
 
 func materializeBuiltin(name, destDir string) error {

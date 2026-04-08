@@ -75,6 +75,15 @@ func buildPrompt(role, prompt string, contextPages []string) string {
 const tokensUnknown = -1
 const costUnknown = -1
 
+func newRunResult(output string, started time.Time) *RunResult {
+	return &RunResult{
+		Output:     strings.TrimSpace(output),
+		TokensUsed: tokensUnknown,
+		CostUSD:    costUnknown,
+		LatencyMs:  time.Since(started).Milliseconds(),
+	}
+}
+
 // ClaudeRunner shells out to the `claude` CLI.
 type ClaudeRunner struct {
 	modelFlag string
@@ -136,10 +145,10 @@ func (r *CodexRunner) Run(ctx context.Context, role, prompt string, contextPages
 		return nil, fmt.Errorf("creating Codex output file: %w", err)
 	}
 	outputPath := outputFile.Name()
+	defer os.Remove(outputPath)
 	if err := outputFile.Close(); err != nil {
 		return nil, fmt.Errorf("closing Codex output file: %w", err)
 	}
-	defer os.Remove(outputPath)
 
 	args := []string{"exec", "--full-auto", "--output-last-message", outputPath}
 	if r.modelFlag != "" {
@@ -150,20 +159,20 @@ func (r *CodexRunner) Run(ctx context.Context, role, prompt string, contextPages
 	cmd := exec.CommandContext(ctx, "codex", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		result := newRunResult(string(out), start)
 		var execErr *exec.Error
 		if errors.As(err, &execErr) {
-			return nil, fmt.Errorf("codex CLI not found in PATH: %w", err)
+			return result, fmt.Errorf("codex CLI not found in PATH: %w", err)
 		}
-		text := strings.TrimSpace(string(out))
-		if text != "" {
-			return nil, fmt.Errorf("codex exec failed: %w: %s", err, text)
+		if result.Output != "" {
+			return result, fmt.Errorf("codex exec failed: %w: %s", err, result.Output)
 		}
-		return nil, fmt.Errorf("codex exec failed: %w", err)
+		return result, fmt.Errorf("codex exec failed: %w", err)
 	}
 
 	finalOutput, readErr := os.ReadFile(outputPath)
 	if readErr != nil {
-		return nil, fmt.Errorf("reading Codex final output: %w", readErr)
+		return newRunResult(string(out), start), fmt.Errorf("reading Codex final output: %w", readErr)
 	}
 
 	output := strings.TrimSpace(string(finalOutput))
@@ -172,12 +181,7 @@ func (r *CodexRunner) Run(ctx context.Context, role, prompt string, contextPages
 		output = strings.TrimSpace(string(out))
 	}
 
-	return &RunResult{
-		Output:     output,
-		TokensUsed: tokensUnknown,
-		CostUSD:    costUnknown,
-		LatencyMs:  time.Since(start).Milliseconds(),
-	}, nil
+	return newRunResult(output, start), nil
 }
 
 // ---------------------------------------------------------------------------
