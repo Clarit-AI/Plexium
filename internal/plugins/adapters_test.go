@@ -79,7 +79,7 @@ func TestInstalledScript_UsesRepoRootWithoutPLEXIUMDIR(t *testing.T) {
 	scriptPath := filepath.Join(dir, ".plexium", "plugins", "claude", "plugin.sh")
 	cmd := exec.Command("bash", scriptPath)
 	cmd.Dir = dir
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+	cmd.Env = os.Environ()
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("manual script run failed: %v: %s", err, string(output))
 	}

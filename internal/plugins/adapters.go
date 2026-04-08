@@ -316,18 +316,21 @@ func copyDir(srcDir, destDir string) error {
 		if err != nil {
 			return err
 		}
-		defer src.Close()
 
 		dst, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
 		if err != nil {
+			_ = src.Close()
 			return err
 		}
-		defer dst.Close()
 
-		if _, err := io.Copy(dst, src); err != nil {
-			return err
+		_, copyErr := io.Copy(dst, src)
+		if cerr := dst.Close(); copyErr == nil && cerr != nil {
+			copyErr = cerr
 		}
-		return nil
+		if cerr := src.Close(); copyErr == nil && cerr != nil {
+			copyErr = cerr
+		}
+		return copyErr
 	})
 }
 

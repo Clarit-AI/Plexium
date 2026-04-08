@@ -143,10 +143,7 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 }
 
 func (p *Pipeline) runAdapter(agent string) error {
-	if err := plugins.RunAdapter(p.repoRoot, agent); err != nil {
-		return fmt.Errorf("adapter %q failed: %w", agent, err)
-	}
-	return nil
+	return plugins.RunAdapter(p.repoRoot, agent)
 }
 
 func (p *Pipeline) writeOutput(result *PipelineResult) error {

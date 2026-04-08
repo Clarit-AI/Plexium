@@ -9,11 +9,7 @@ import (
 )
 
 func TestFreshInstall_BuiltInPluginsWork(t *testing.T) {
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	repoRoot := filepath.Dir(wd)
+	repoRoot := currentRepoRoot(t)
 
 	binDir := t.TempDir()
 	binaryPath := filepath.Join(binDir, "plexium")
@@ -61,4 +57,22 @@ func TestFreshInstall_BuiltInPluginsWork(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repoDir, "AGENTS.md")); err != nil {
 		t.Fatalf("expected AGENTS.md to exist: %v", err)
 	}
+}
+
+func currentRepoRoot(t *testing.T) string {
+	t.Helper()
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = wd
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("resolve repo root: %v: %s", err, string(output))
+	}
+
+	return strings.TrimSpace(string(output))
 }

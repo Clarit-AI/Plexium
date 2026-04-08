@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -167,6 +168,7 @@ func (r *CodexRunner) Run(ctx context.Context, role, prompt string, contextPages
 
 	output := strings.TrimSpace(string(finalOutput))
 	if output == "" {
+		log.Printf("warning: empty codex output file, falling back to combined stdout/stderr: %s", outputPath)
 		output = strings.TrimSpace(string(out))
 	}
 

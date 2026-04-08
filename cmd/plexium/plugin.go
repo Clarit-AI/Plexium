@@ -45,7 +45,10 @@ func runPluginAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	if outputJSON {
-		data, _ := json.MarshalIndent(result, "", "  ")
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal install result to JSON: %w", err)
+		}
 		fmt.Println(string(data))
 		return nil
 	}
@@ -73,7 +76,10 @@ func runPluginList(cmd *cobra.Command, args []string) error {
 	}
 
 	if outputJSON {
-		data, _ := json.MarshalIndent(available, "", "  ")
+		data, err := json.MarshalIndent(available, "", "  ")
+		if err != nil {
+			return fmt.Errorf("json marshal available plugins: %w", err)
+		}
 		fmt.Println(string(data))
 		return nil
 	}

@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 )
@@ -33,13 +35,16 @@ var pageidxConnectCmd = &cobra.Command{
 		writeConfig, _ := cmd.Flags().GetBool("write-config")
 
 		if outputJSON {
-			data, _ := json.MarshalIndent(plan, "", "  ")
+			data, err := json.MarshalIndent(plan, "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshal plan to JSON: %w", err)
+			}
 			fmt.Println(string(data))
 			return nil
 		}
 
 		if !writeConfig {
-			fmt.Printf("Connect %s to the Plexium PageIndex MCP server with:\n", strings.Title(plan.Agent))
+			fmt.Printf("Connect %s to the Plexium PageIndex MCP server with:\n", capitalizeFirst(plan.Agent))
 			fmt.Printf("  %s\n", plan.Command)
 			fmt.Printf("Config target: %s\n", plan.ConfigLocation)
 			fmt.Println("Add --write-config to have Plexium run that native command for you.")
@@ -51,12 +56,12 @@ var pageidxConnectCmd = &cobra.Command{
 			return fmt.Errorf("getting working directory: %w", err)
 		}
 
-		fmt.Printf("Running native %s MCP setup...\n", strings.Title(plan.Agent))
+		fmt.Printf("Running native %s MCP setup...\n", capitalizeFirst(plan.Agent))
 		if err := runPageIndexConnect(context.Background(), repoRoot, plan); err != nil {
 			return err
 		}
 
-		fmt.Printf("Configured %s MCP access for Plexium.\n", strings.Title(plan.Agent))
+		fmt.Printf("Configured %s MCP access for Plexium.\n", capitalizeFirst(plan.Agent))
 		fmt.Printf("Config target: %s\n", plan.ConfigLocation)
 		return nil
 	},
@@ -121,11 +126,37 @@ func shellJoin(command string, args []string) string {
 	parts := make([]string, 0, len(args)+1)
 	parts = append(parts, command)
 	for _, arg := range args {
-		if arg == "" || strings.ContainsAny(arg, " \t\n\"'") {
-			parts = append(parts, fmt.Sprintf("%q", arg))
-		} else {
-			parts = append(parts, arg)
-		}
+		parts = append(parts, shellQuote(arg))
 	}
 	return strings.Join(parts, " ")
+}
+
+func shellQuote(arg string) string {
+	if arg == "" {
+		return "''"
+	}
+	if isShellSafe(arg) {
+		return arg
+	}
+	return "'" + strings.ReplaceAll(arg, "'", "'\"'\"'") + "'"
+}
+
+func isShellSafe(arg string) bool {
+	for _, r := range arg {
+		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("@%_+=:,./-", r)) {
+			return false
+		}
+	}
+	return true
+}
+
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r, size := utf8.DecodeRuneInString(s)
+	if r == utf8.RuneError && size == 0 {
+		return s
+	}
+	return string(unicode.ToUpper(r)) + s[size:]
 }
