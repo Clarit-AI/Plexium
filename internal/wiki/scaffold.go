@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Clarit-AI/Plexium/internal/integrations/pageindex"
 	"github.com/Clarit-AI/Plexium/internal/manifest"
 	"github.com/Clarit-AI/Plexium/internal/plugins"
 )
@@ -26,10 +27,10 @@ type InitOptions struct {
 
 // InitResult holds the result of plexium init
 type InitResult struct {
-	WikiDir       string
-	PlexiumDir    string
-	FilesCreated  []string
-	DirsCreated   []string
+	WikiDir      string
+	PlexiumDir   string
+	FilesCreated []string
+	DirsCreated  []string
 }
 
 // Init scaffolds the .wiki/ and .plexium/ directories.
@@ -115,13 +116,13 @@ func Init(opts InitOptions) (*InitResult, error) {
 		}
 	}
 
-	// Generate _index.md (empty)
-	if err := writeFile(dr, filepath.Join(wikiDir, "_index.md"), "", result); err != nil {
+	// Generate _index.md placeholder
+	if err := writeFile(dr, filepath.Join(wikiDir, "_index.md"), "# Wiki Index\n\n_Run `plexium compile` to regenerate this file._\n", result); err != nil {
 		return nil, err
 	}
 
-	// Generate _log.md (empty)
-	if err := writeFile(dr, filepath.Join(wikiDir, "_log.md"), "", result); err != nil {
+	// Generate _log.md starter page
+	if err := writeFile(dr, filepath.Join(wikiDir, "_log.md"), generateLogStub(), result); err != nil {
 		return nil, err
 	}
 
@@ -131,8 +132,8 @@ func Init(opts InitOptions) (*InitResult, error) {
 		return nil, err
 	}
 
-	// Generate _Sidebar.md (empty)
-	if err := writeFile(dr, filepath.Join(wikiDir, "_Sidebar.md"), "", result); err != nil {
+	// Generate _Sidebar.md starter navigation
+	if err := writeFile(dr, filepath.Join(wikiDir, "_Sidebar.md"), generateSidebarStub(), result); err != nil {
 		return nil, err
 	}
 
@@ -223,18 +224,10 @@ func Init(opts InitOptions) (*InitResult, error) {
 	}
 
 	if opts.WithPageIndex && !opts.DryRun {
-		// Generate MCP config for PageIndex server
-		mcpConfig := `{
-  "server": "plexium-pageindex",
-  "command": "plexium",
-  "args": ["pageindex", "serve"],
-  "transport": "stdio"
-}
-`
-		mcpPath := filepath.Join(opts.RepoRoot, ".plexium", "pageindex-mcp.json")
-		if err := os.WriteFile(mcpPath, []byte(mcpConfig), 0644); err != nil {
+		mcpPath, created, err := pageindex.EnsureProjectReference(opts.RepoRoot)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to write PageIndex MCP config: %v\n", err)
-		} else {
+		} else if created {
 			result.FilesCreated = append(result.FilesCreated, mcpPath)
 		}
 	}
@@ -327,14 +320,32 @@ func generateHome(opts InitOptions) string {
 		repoName, time.Now().Format("2006-01-02")))
 	b.WriteString(fmt.Sprintf("# %s\n\n", repoName))
 	b.WriteString(fmt.Sprintf("Wiki for %s, maintained by Plexium.\n\n", repoName))
+	b.WriteString("## Start Here\n\n")
+	b.WriteString("- [[architecture/overview|Architecture Overview]]\n")
+	b.WriteString("- [[onboarding|Onboarding Guide]]\n")
+	b.WriteString("- [[contradictions|Contradictions]]\n")
+	b.WriteString("- [[open-questions|Open Questions]]\n")
+	b.WriteString("- [[_log|Activity Log]]\n\n")
 
 	if readmeBody != "" {
-		b.WriteString("---\n\n")
+		b.WriteString("## Repository Overview\n\n")
 		b.WriteString(readmeBody)
 		b.WriteString("\n")
 	}
 
 	return b.String()
+}
+
+func generateSidebarStub() string {
+	return `**[[Home]]**
+
+**Start Here**
+- [[architecture/overview|Architecture Overview]]
+- [[onboarding|Onboarding Guide]]
+- [[contradictions|Contradictions]]
+- [[open-questions|Open Questions]]
+- [[_log|Activity Log]]
+`
 }
 
 func generateFooter() string {
@@ -347,6 +358,19 @@ Powered by [Plexium](https://github.com/Clarit-AI/Plexium)
 
 [[Home.md|Back to Home]]
 `, time.Now().Format("2006-01-02"))
+}
+
+func generateLogStub() string {
+	return `---
+title: "Activity Log"
+ownership: co-maintained
+last-updated: pending
+---
+
+# Activity Log
+
+Use this page to capture notable wiki maintenance, validation runs, and follow-up work.
+`
 }
 
 func generateArchStub() string {

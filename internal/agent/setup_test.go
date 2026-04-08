@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -92,13 +93,13 @@ func TestDetectOllama(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	models, err := DetectOllama(srv.URL)
+	models, err := DetectOllama(http.DefaultClient, srv.URL)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"llama3.2:3b", "qwen2.5:7b"}, models)
 }
 
 func TestDetectOllamaNotRunning(t *testing.T) {
-	models, err := DetectOllama("http://localhost:19999")
+	models, err := DetectOllama(http.DefaultClient, "http://localhost:19999")
 	assert.Error(t, err)
 	assert.Nil(t, models)
 }
@@ -110,7 +111,7 @@ func TestDetectOllamaEmptyModels(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	models, err := DetectOllama(srv.URL)
+	models, err := DetectOllama(http.DefaultClient, srv.URL)
 	require.NoError(t, err)
 	assert.Empty(t, models)
 }
@@ -118,7 +119,8 @@ func TestDetectOllamaEmptyModels(t *testing.T) {
 func TestCallbackServerHandler(t *testing.T) {
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
-	server := startCallbackServer(codeCh, errCh)
+	server, err := startCallbackServer(codeCh, errCh)
+	require.NoError(t, err)
 	defer server.Close()
 
 	// Simulate OAuth callback with code
@@ -134,7 +136,8 @@ func TestCallbackServerHandler(t *testing.T) {
 func TestCallbackServerNoCode(t *testing.T) {
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
-	server := startCallbackServer(codeCh, errCh)
+	server, err := startCallbackServer(codeCh, errCh)
+	require.NoError(t, err)
 	defer server.Close()
 
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", callbackPort))
@@ -221,4 +224,79 @@ daemon:
 	assert.Contains(t, content, "openrouter")
 	// Daemon section should be preserved
 	assert.Contains(t, content, "daemon:")
+}
+
+func TestRunInteractiveSetup_WithAPIKeyOption(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".plexium", "config.yml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	require.NoError(t, os.WriteFile(configPath, []byte("sources:\n  include:\n    - \"**/*.go\"\n"), 0o644))
+
+	client, cleanup := stubOpenRouterValidation(t)
+	defer cleanup()
+
+	result, err := RunInteractiveSetup(dir, SetupOptions{
+		APIKey:     "sk-or-v1-test",
+		HTTPClient: client,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"openrouter"}, result.ProvidersConfigured)
+	assert.True(t, result.ConfigUpdated)
+	assert.FileExists(t, filepath.Join(dir, ".plexium", "credentials.json"))
+	assert.FileExists(t, filepath.Join(dir, ".plexium", ".env"))
+}
+
+func TestRunInteractiveSetup_UsesEnvVarFallback(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".plexium", "config.yml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	require.NoError(t, os.WriteFile(configPath, []byte("sources:\n  include:\n    - \"**/*.go\"\n"), 0o644))
+
+	client, cleanup := stubOpenRouterValidation(t)
+	defer cleanup()
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-v1-env")
+
+	result, err := RunInteractiveSetup(dir, SetupOptions{HTTPClient: client})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"openrouter"}, result.ProvidersConfigured)
+	assert.True(t, result.ConfigUpdated)
+}
+
+func stubOpenRouterValidation(t *testing.T) (*http.Client, func()) {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/auth/key" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got == "" {
+			http.Error(w, "missing auth", http.StatusUnauthorized)
+			return
+		}
+		_, _ = io.WriteString(w, `{"label":"valid"}`)
+	}))
+
+	client := &http.Client{
+		Transport: rewriteTransport{
+			targetHost: server.Listener.Addr().String(),
+			base:       http.DefaultTransport,
+		},
+	}
+
+	return client, server.Close
+}
+
+type rewriteTransport struct {
+	targetHost string
+	base       http.RoundTripper
+}
+
+func (t rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	clone.URL.Scheme = "http"
+	clone.URL.Host = t.targetHost
+	return t.base.RoundTrip(clone)
 }

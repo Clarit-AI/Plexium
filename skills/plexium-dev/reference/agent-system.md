@@ -53,9 +53,16 @@ Resets daily. `CanMakeRequest()` checks against budget. `GetBatchingDelay()` ret
 
 `setup.go` handles interactive provider configuration:
 - PKCE OAuth for OpenRouter (localhost:3000 callback, code exchange, key validation)
+- Non-interactive OpenRouter setup via `OPENROUTER_API_KEY`, `--api-key-file`, or `--api-key-stdin`
 - Ollama detection via `/api/tags` endpoint
 - Writes credentials to `.plexium/credentials.json` (mode 0600)
 - Updates `.plexium/config.yml` with provider entries
+
+## Secret Safety
+
+- Never ask users to paste secrets into chat.
+- Prefer terminal env vars, key files, or stdin-fed setup for provider configuration.
+- In memento-enabled repos, pasted secrets can become part of git-note session history, so a compromised session should be rewound and not committed to memento.
 
 ## Wiring in main.go
 

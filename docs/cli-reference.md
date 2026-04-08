@@ -267,6 +267,54 @@ No flags.
 
 ---
 
+### `plexium setup` [Stable]
+
+Canonical repo onboarding for Claude Code or Codex.
+
+```bash
+plexium setup <agent> [flags]
+```
+
+Runs idempotent repo setup for the selected agent: initializes Plexium if needed, compiles navigation, installs the built-in adapter, ensures the PageIndex reference file exists, optionally runs the native MCP command, and then verifies readiness.
+
+Supports `claude` and `codex`.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--write-config` | boolean | `false` | Run the native MCP configuration command instead of only printing it |
+
+**Examples:**
+
+```bash
+plexium setup claude
+plexium setup claude --write-config
+plexium setup codex
+plexium setup codex --write-config
+```
+
+---
+
+### `plexium verify` [Stable]
+
+Agent-specific readiness verification for Plexium repositories.
+
+```bash
+plexium verify <agent>
+```
+
+Checks the general Plexium install plus agent-facing readiness: compiled navigation files, generated instruction file, PageIndex reference, deterministic lint status, and whether the agent MCP config is already present or still pending.
+
+Supports `claude` and `codex`.
+
+**Examples:**
+
+```bash
+plexium verify claude
+plexium verify codex
+```
+
+---
+
 ### `plexium migrate` [Stable]
 
 Apply schema migrations to the wiki.
@@ -355,7 +403,7 @@ Install a Plexium plugin adapter.
 plexium plugin add <name> [flags]
 ```
 
-Installs a bundled Plexium adapter by name, or installs a custom adapter from `--path`. Plexium validates `manifest.json`, copies the adapter into `.plexium/plugins/<name>/`, and runs `plugin.sh` to generate the target instruction file.
+Installs a bundled Plexium adapter by name, or installs a custom adapter from `--path`. Plexium validates `manifest.json`, copies the adapter into `.plexium/plugins/<name>/`, and runs `plugin.sh` to generate the target instruction file. Most users should prefer [`plexium setup`](#plexium-setup-stable), which wraps this command into the full onboarding flow.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
@@ -467,6 +515,8 @@ plexium pageindex connect <agent> [flags]
 ```
 
 Supports `claude` and `codex`.
+
+For the canonical onboarding flow, prefer [`plexium setup`](#plexium-setup-stable). Use `pageindex connect` when you only want the native MCP command without the rest of the setup steps.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|

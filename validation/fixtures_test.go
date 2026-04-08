@@ -177,10 +177,27 @@ last-updated: 2026-01-01
 
 # Plexium Wiki Schema
 `)
-	f.WriteFile(".wiki/_index.md", "# Wiki Index\n")
-	f.WriteFile(".wiki/_Sidebar.md", "**[[Home]]**\n")
+	f.WriteFile(".wiki/_index.md", "# Wiki Index\n\n_Run `plexium compile` to regenerate this file._\n")
+	f.WriteFile(".wiki/_Sidebar.md", `**[[Home]]**
+
+**Start Here**
+- [[architecture/overview|Architecture Overview]]
+- [[onboarding|Onboarding Guide]]
+- [[contradictions|Contradictions]]
+- [[open-questions|Open Questions]]
+- [[_log|Activity Log]]
+`)
 	f.WriteFile(".wiki/_Footer.md", "Powered by Plexium\n")
-	f.WriteFile(".wiki/_log.md", "")
+	f.WriteFile(".wiki/_log.md", `---
+title: "Activity Log"
+ownership: co-maintained
+last-updated: 2026-01-01
+---
+
+# Activity Log
+
+Use this page to capture notable wiki maintenance, validation runs, and follow-up work.
+`)
 	f.WriteFile(".wiki/Home.md", `---
 title: "Test Project"
 ownership: managed
@@ -190,6 +207,14 @@ last-updated: 2026-01-01
 # Test Project
 
 Wiki for Test Project.
+
+## Start Here
+
+- [[architecture/overview|Architecture Overview]]
+- [[onboarding|Onboarding Guide]]
+- [[contradictions|Contradictions]]
+- [[open-questions|Open Questions]]
+- [[_log|Activity Log]]
 `)
 	f.WriteFile(".wiki/architecture/overview.md", `---
 title: "Architecture Overview"
@@ -200,6 +225,36 @@ last-updated: pending
 # Architecture Overview
 
 > Stub.
+`)
+	f.WriteFile(".wiki/onboarding.md", `---
+title: "Onboarding"
+ownership: co-maintained
+last-updated: 2026-01-01
+---
+
+# Onboarding Guide
+
+Quick start information for new contributors.
+`)
+	f.WriteFile(".wiki/contradictions.md", `---
+title: "Contradictions"
+ownership: managed
+last-updated: 2026-01-01
+---
+
+# Contradictions
+
+Tracked contradictions between wiki pages.
+`)
+	f.WriteFile(".wiki/open-questions.md", `---
+title: "Open Questions"
+ownership: managed
+last-updated: 2026-01-01
+---
+
+# Open Questions
+
+Unresolved questions about the codebase.
 `)
 	return f
 }

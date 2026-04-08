@@ -1,0 +1,32 @@
+{
+  "name": "plexium-tools",
+  "version": "0.1.0",
+  "description": "Install, set up, and verify Plexium repositories from inside Codex.",
+  "author": {
+    "name": "Clarit AI",
+    "url": "https://github.com/Clarit-AI"
+  },
+  "homepage": "https://github.com/Clarit-AI/Plexium",
+  "repository": "https://github.com/Clarit-AI/Plexium",
+  "license": "Apache-2.0",
+  "keywords": ["plexium", "wiki", "codex", "mcp"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Plexium Tools",
+    "shortDescription": "Install and operate Plexium from inside Codex",
+    "longDescription": "Thin Codex plugin wrapper around the Plexium CLI for install, setup, verification, retrieval, and MCP guidance.",
+    "developerName": "Clarit AI",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/Clarit-AI/Plexium",
+    "privacyPolicyURL": "https://github.com/Clarit-AI/Plexium",
+    "termsOfServiceURL": "https://github.com/Clarit-AI/Plexium",
+    "defaultPrompt": [
+      "Install Plexium if it is missing and verify the binary.",
+      "Set up Plexium for Codex in this repository.",
+      "Verify that Plexium is ready for Codex in this repository.",
+      "Query the Plexium wiki for a topic in this repository."
+    ],
+    "brandColor": "#1A7F64"
+  }
+}

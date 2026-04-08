@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,6 +115,8 @@ func init() {
 	agentCmd.AddCommand(agentSpendCmd)
 	agentCmd.AddCommand(agentBenchmarkCmd)
 	agentCmd.AddCommand(agentSetupCmd)
+	agentSetupCmd.Flags().String("api-key-file", "", "Read OpenRouter API key from a file")
+	agentSetupCmd.Flags().Bool("api-key-stdin", false, "Read OpenRouter API key from stdin")
 	agentTestCmd.Flags().String("provider", "", "Test a specific provider")
 
 	// Register subcommands
@@ -183,7 +186,10 @@ var initCmd = &cobra.Command{
 		}
 
 		if outputJSON {
-			data, _ := json.MarshalIndent(result, "", "  ")
+			data, err := json.MarshalIndent(result, "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshal init result to JSON: %w", err)
+			}
 			fmt.Println(string(data))
 			return nil
 		}
@@ -196,15 +202,14 @@ var initCmd = &cobra.Command{
 			fmt.Printf("Created %d directories and %d files\n", len(result.DirsCreated), len(result.FilesCreated))
 
 			fmt.Println("\nNext steps:")
-			fmt.Println("  1. Run 'plexium doctor' to validate the setup")
-			fmt.Println("  2. Run 'plexium convert' to bootstrap wiki from existing code")
-			fmt.Println("  3. Run 'plexium lint --deterministic' to check wiki health")
+			fmt.Println("  1. Run 'plexium setup claude' or 'plexium setup codex' for agent-ready onboarding")
+			fmt.Println("  2. Run 'plexium doctor' to validate the setup")
+			fmt.Println("  3. Run 'plexium convert' to bootstrap wiki from existing code")
 
 			if withPageIndex {
 				fmt.Println("\nPageIndex MCP server ready.")
-				fmt.Println("  Connect Claude Code: plexium pageindex connect claude")
-				fmt.Println("  Connect Codex:       plexium pageindex connect codex")
-				fmt.Println("  Add --write-config to let Plexium run the native MCP command for you.")
+				fmt.Println("  Finish setup for Claude: plexium setup claude --write-config")
+				fmt.Println("  Finish setup for Codex:  plexium setup codex --write-config")
 				fmt.Println("  Or query directly: plexium retrieve \"<query>\"")
 			}
 		}
@@ -1630,14 +1635,18 @@ var beadsScanCmd = &cobra.Command{
 
 var agentSetupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Interactive provider setup (Ollama, OpenRouter)",
+	Short: "Provider setup for Ollama and OpenRouter",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		repoRoot, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("getting working directory: %w", err)
 		}
 
-		result, err := agent.RunInteractiveSetup(repoRoot)
+		apiKey, err := resolveSetupAPIKey(cmd)
+		if err != nil {
+			return err
+		}
+		result, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{APIKey: apiKey})
 		if err != nil {
 			return fmt.Errorf("setup failed: %w", err)
 		}
@@ -1656,6 +1665,44 @@ var agentSetupCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+func resolveSetupAPIKey(cmd *cobra.Command) (string, error) {
+	apiKeyFile, _ := cmd.Flags().GetString("api-key-file")
+	apiKeyStdin, _ := cmd.Flags().GetBool("api-key-stdin")
+
+	if apiKeyFile != "" && apiKeyStdin {
+		return "", fmt.Errorf("use only one of --api-key-file or --api-key-stdin")
+	}
+
+	if apiKeyFile != "" {
+		data, err := os.ReadFile(apiKeyFile)
+		if err != nil {
+			return "", fmt.Errorf("read API key file: %w", err)
+		}
+		key := strings.TrimSpace(string(data))
+		if key == "" {
+			return "", fmt.Errorf("API key file is empty")
+		}
+		return key, nil
+	}
+
+	if apiKeyStdin {
+		if stat, err := os.Stdin.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) != 0 {
+			return "", fmt.Errorf("--api-key-stdin requires piped input")
+		}
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("read API key from stdin: %w", err)
+		}
+		key := strings.TrimSpace(string(data))
+		if key == "" {
+			return "", fmt.Errorf("stdin did not contain an API key")
+		}
+		return key, nil
+	}
+
+	return "", nil
 }
 
 func main() {

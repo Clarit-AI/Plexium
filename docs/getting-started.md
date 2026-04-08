@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide takes you from zero to a working Plexium wiki. You will initialize a wiki, validate the setup, run your first lint, and generate navigation files.
+This guide takes you from zero to a working Plexium wiki. The fastest path is now `plexium setup <agent>`, which prepares the repo, installs the right instruction file, and tells you whether any native MCP step is still outstanding.
 
 ---
 
@@ -26,7 +26,7 @@ go build -o plexium ./cmd/plexium
 Move the binary to your PATH:
 
 ```bash
-mv plexium /usr/local/bin/
+install -m 0755 plexium /usr/local/bin/plexium
 ```
 
 ### Via `go install`
@@ -40,6 +40,33 @@ go install github.com/Clarit-AI/Plexium/cmd/plexium@latest
 ```bash
 plexium --version
 # plexium version 0.1.0
+```
+
+---
+
+## Fastest Path
+
+If you already know which agent you want to use, this is the canonical onboarding flow:
+
+```bash
+cd /path/to/your/repo
+plexium setup claude
+# or
+plexium setup codex
+```
+
+Add `--write-config` to let Plexium run the native MCP configuration command for you:
+
+```bash
+plexium setup claude --write-config
+plexium setup codex --write-config
+```
+
+After setup, verify readiness explicitly:
+
+```bash
+plexium verify claude
+plexium verify codex
 ```
 
 ---
@@ -95,7 +122,7 @@ plexium init --with-memento --with-beads --with-pageindex
 plexium init --strictness strict
 ```
 
-**A note on `--with-pageindex`:** This flag enables the PageIndex integration in config and writes a reference file at `.plexium/pageindex-mcp.json`. Agents do not read that file automatically. After init, run `plexium pageindex connect claude` or `plexium pageindex connect codex` to see the exact native MCP setup command for your agent. Add `--write-config` if you want Plexium to run that native command for you.
+**A note on `--with-pageindex`:** This flag enables the PageIndex integration in config and writes a reference file at `.plexium/pageindex-mcp.json`. Agents do not read that file automatically. After init, prefer `plexium setup claude` or `plexium setup codex`, which installs the agent adapter, compiles navigation, and prints or applies the native MCP command for you.
 
 The CLI retrieval command (`plexium retrieve`) works regardless of whether `--with-pageindex` was passed. The flag enables the PageIndex integration in config but the built-in search engine is always available.
 
@@ -113,9 +140,12 @@ Dry-run shows what files and directories would be created without writing anythi
 
 ```bash
 plexium doctor
+plexium verify claude
+# or
+plexium verify codex
 ```
 
-Doctor validates that config parses, required directories exist, the manifest loads, and integrations are configured. Each check reports PASS, FAIL, WARN, or SKIP.
+`plexium doctor` validates the general Plexium install. `plexium verify <agent>` adds agent-specific checks for the compiled navigation files, generated instruction file, PageIndex reference, deterministic lint status, and MCP configuration state.
 
 If any checks fail, see [Troubleshooting: Doctor Reports Failures](troubleshooting.md#doctor-reports-failures).
 
@@ -129,11 +159,7 @@ plexium lint --deterministic
 
 This runs six structural checks on the wiki: link validation, orphan detection, staleness detection, manifest validation, sidebar validation, and frontmatter validation.
 
-**Expected on a fresh wiki:** You will see two types of findings:
-
-1. **Broken links in `_schema.md`**: The schema contains `[[wiki-links]]` as syntax examples. The link crawler correctly flags these as broken. This is a known false positive, safe to ignore. See [Troubleshooting](troubleshooting.md#lint-reports-broken-links-in-_schemamd).
-
-2. **Missing frontmatter fields**: Scaffolded pages have minimal frontmatter. Agents fill in the remaining fields as they work. See [Troubleshooting](troubleshooting.md#freshly-initialized-pages-fail-frontmatter-lint).
+On a fresh scaffold, deterministic lint should pass cleanly. If it does not, treat that as a real setup problem rather than an expected first-run warning.
 
 ---
 
@@ -186,6 +212,32 @@ After conversion, compile navigation:
 ```bash
 plexium compile
 ```
+
+---
+
+## TUI-Native Installs
+
+### Claude Code
+
+Plexium ships a repo-local Claude marketplace entry:
+
+```text
+/plugin marketplace add /path/to/Plexium
+/plugin install plexium-tools@plexium-local
+```
+
+The plugin provides:
+
+- `/plexium-install`
+- `/plexium-setup`
+- `/plexium-setup-auto`
+- `/plexium-verify`
+- `/plexium-retrieve`
+- `/plexium-connect`
+
+### Codex
+
+Plexium also ships a repo-local Codex marketplace entry via `.agents/plugins/marketplace.json`. After cloning the repo and restarting Codex, install `Plexium Tools` from the `Plexium Local Plugins` source. The Codex plugin uses skills and starter prompts to keep users on the same `plexium setup codex` and `plexium verify codex` flow as the CLI.
 
 ---
 

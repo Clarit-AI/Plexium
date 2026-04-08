@@ -1,0 +1,561 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/Clarit-AI/Plexium/internal/compile"
+	"github.com/Clarit-AI/Plexium/internal/config"
+	"github.com/Clarit-AI/Plexium/internal/integrations/pageindex"
+	"github.com/Clarit-AI/Plexium/internal/lint"
+	"github.com/Clarit-AI/Plexium/internal/plugins"
+	"github.com/Clarit-AI/Plexium/internal/wiki"
+	"github.com/pelletier/go-toml/v2"
+	"github.com/spf13/cobra"
+)
+
+type setupStep struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+type setupResult struct {
+	Agent       string                `json:"agent"`
+	RepoRoot    string                `json:"repoRoot"`
+	WriteConfig bool                  `json:"writeConfig"`
+	ConnectPlan *pageindexConnectPlan `json:"connectPlan"`
+	Steps       []setupStep           `json:"steps"`
+	Verify      *verifyResult         `json:"verify"`
+}
+
+type verifyCheck struct {
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	Message     string `json:"message"`
+	Remediation string `json:"remediation,omitempty"`
+}
+
+type verifyResult struct {
+	Agent       string                `json:"agent"`
+	RepoRoot    string                `json:"repoRoot"`
+	Ready       bool                  `json:"ready"`
+	Configured  bool                  `json:"configured"`
+	ConnectPlan *pageindexConnectPlan `json:"connectPlan"`
+	Checks      []verifyCheck         `json:"checks"`
+}
+
+var setupCmd = &cobra.Command{
+	Use:   "setup <agent>",
+	Short: "Initialize, connect, and verify Plexium for an agent",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSetupCommand,
+}
+
+var verifyCmd = &cobra.Command{
+	Use:   "verify <agent>",
+	Short: "Verify that Plexium is ready for an agent",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runVerifyCommand,
+}
+
+func init() {
+	rootCmd.AddCommand(setupCmd)
+	rootCmd.AddCommand(verifyCmd)
+
+	setupCmd.Flags().Bool("write-config", false, "Run the native MCP configuration command")
+}
+
+func runSetupCommand(cmd *cobra.Command, args []string) error {
+	repoRoot, err := currentGitRepoRoot()
+	if err != nil {
+		return err
+	}
+
+	writeConfig, _ := cmd.Flags().GetBool("write-config")
+	outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+	result, err := setupAgent(repoRoot, args[0], writeConfig)
+	if err != nil {
+		return err
+	}
+
+	if outputJSON {
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal setup result to JSON: %w", err)
+		}
+		fmt.Println(string(data))
+		return nil
+	}
+
+	fmt.Printf("Plexium setup for %s\n", capitalizeFirst(result.Agent))
+	fmt.Printf("Repository: %s\n", result.RepoRoot)
+	for _, step := range result.Steps {
+		fmt.Printf("- %s: %s\n", step.Name, step.Message)
+	}
+
+	passCount, warnCount, failCount := result.Verify.summary()
+	fmt.Printf("Verification: %d pass, %d warning, %d fail\n", passCount, warnCount, failCount)
+	if !result.Verify.Configured {
+		fmt.Printf("Native MCP command: %s\n", result.ConnectPlan.Command)
+		if !writeConfig {
+			fmt.Println("Run the command above or rerun with --write-config to apply it for you.")
+		}
+	}
+	if result.Verify.Ready {
+		fmt.Println("Plexium is ready for use.")
+		return nil
+	}
+	return fmt.Errorf("setup completed with verification failures")
+}
+
+func runVerifyCommand(cmd *cobra.Command, args []string) error {
+	repoRoot, err := currentGitRepoRoot()
+	if err != nil {
+		return err
+	}
+
+	outputJSON, _ := cmd.Flags().GetBool("output-json")
+	result, err := verifyAgent(repoRoot, args[0])
+	if err != nil {
+		return err
+	}
+
+	if outputJSON {
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal verify result to JSON: %w", err)
+		}
+		fmt.Println(string(data))
+		return nil
+	}
+
+	fmt.Printf("Plexium verification for %s\n", capitalizeFirst(result.Agent))
+	fmt.Printf("Repository: %s\n", result.RepoRoot)
+	for _, check := range result.Checks {
+		icon := "✅"
+		switch check.Status {
+		case "warning":
+			icon = "⚠️"
+		case "fail":
+			icon = "❌"
+		}
+		fmt.Printf("%s %s: %s\n", icon, check.Name, check.Message)
+		if check.Remediation != "" {
+			fmt.Printf("   → %s\n", check.Remediation)
+		}
+	}
+
+	if result.Ready {
+		fmt.Println("Plexium is ready for this agent.")
+		return nil
+	}
+	return fmt.Errorf("verification failed")
+}
+
+func setupAgent(repoRoot, agent string, writeConfig bool) (*setupResult, error) {
+	normalizedAgent := normalizeAgentName(agent)
+	plan, err := buildPageIndexConnectPlan(normalizedAgent)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &setupResult{
+		Agent:       normalizedAgent,
+		RepoRoot:    repoRoot,
+		WriteConfig: writeConfig,
+		ConnectPlan: plan,
+	}
+
+	if needsPlexiumInit(repoRoot) {
+		if _, err := wiki.Init(wiki.InitOptions{
+			RepoRoot:      repoRoot,
+			WithPageIndex: true,
+		}); err != nil {
+			return nil, fmt.Errorf("initialize Plexium: %w", err)
+		}
+		result.Steps = append(result.Steps, setupStep{Name: "init", Status: "pass", Message: "initialized Plexium scaffold"})
+	} else {
+		result.Steps = append(result.Steps, setupStep{Name: "init", Status: "pass", Message: "existing Plexium scaffold detected"})
+	}
+
+	if _, err := compile.NewCompiler(repoRoot, false).Compile(); err != nil {
+		return nil, fmt.Errorf("compile navigation: %w", err)
+	}
+	result.Steps = append(result.Steps, setupStep{Name: "compile", Status: "pass", Message: "compiled navigation files"})
+
+	installResult, err := plugins.InstallAdapter(repoRoot, normalizedAgent, "")
+	if err != nil {
+		return nil, fmt.Errorf("install %s adapter: %w", normalizedAgent, err)
+	}
+	result.Steps = append(result.Steps, setupStep{
+		Name:    "adapter",
+		Status:  "pass",
+		Message: fmt.Sprintf("installed %s adapter and generated %s", sourceLabel(installResult.BuiltIn), installResult.InstructionFile),
+	})
+
+	mcpPath, _, err := pageindex.EnsureProjectReference(repoRoot)
+	if err != nil {
+		return nil, fmt.Errorf("write PageIndex reference: %w", err)
+	}
+	result.Steps = append(result.Steps, setupStep{
+		Name:    "pageindex",
+		Status:  "pass",
+		Message: fmt.Sprintf("ensured PageIndex reference at %s", relativeToRepo(repoRoot, mcpPath)),
+	})
+
+	configured, _, err := detectMCPConfig(repoRoot, normalizedAgent)
+	if err != nil {
+		return nil, err
+	}
+	if writeConfig && !configured {
+		if err := runPageIndexConnect(context.Background(), repoRoot, plan); err != nil {
+			return nil, err
+		}
+		result.Steps = append(result.Steps, setupStep{
+			Name:    "connect",
+			Status:  "pass",
+			Message: fmt.Sprintf("applied native %s MCP configuration", capitalizeFirst(normalizedAgent)),
+		})
+	} else if configured {
+		result.Steps = append(result.Steps, setupStep{
+			Name:    "connect",
+			Status:  "pass",
+			Message: fmt.Sprintf("%s MCP configuration already present", capitalizeFirst(normalizedAgent)),
+		})
+	} else {
+		result.Steps = append(result.Steps, setupStep{
+			Name:    "connect",
+			Status:  "warning",
+			Message: fmt.Sprintf("native MCP command ready: %s", plan.Command),
+		})
+	}
+
+	result.Verify, err = verifyAgent(repoRoot, normalizedAgent)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func verifyAgent(repoRoot, agent string) (*verifyResult, error) {
+	normalizedAgent := normalizeAgentName(agent)
+	plan, err := buildPageIndexConnectPlan(normalizedAgent)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &verifyResult{
+		Agent:       normalizedAgent,
+		RepoRoot:    repoRoot,
+		ConnectPlan: plan,
+	}
+
+	doctor := lint.NewDoctor(repoRoot)
+	doctorReport, err := doctor.Run()
+	if err != nil {
+		return nil, fmt.Errorf("run doctor: %w", err)
+	}
+	passed, failed, warnings, _ := doctorReport.Summary()
+	doctorStatus := "pass"
+	doctorMessage := fmt.Sprintf("doctor checks passed (%d pass)", passed)
+	if failed > 0 {
+		doctorStatus = "fail"
+		doctorMessage = fmt.Sprintf("doctor reported %d failures and %d warnings", failed, warnings)
+	} else if warnings > 0 {
+		doctorStatus = "warning"
+		doctorMessage = fmt.Sprintf("doctor reported %d warnings", warnings)
+	}
+	result.Checks = append(result.Checks, verifyCheck{
+		Name:        "doctor",
+		Status:      doctorStatus,
+		Message:     doctorMessage,
+		Remediation: "Run `plexium doctor` for detailed remediation steps.",
+	})
+
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		result.Checks = append(result.Checks, verifyCheck{
+			Name:        "config",
+			Status:      "fail",
+			Message:     "Plexium config is missing or invalid",
+			Remediation: "Run `plexium init` or `plexium setup " + normalizedAgent + "`.",
+		})
+		result.Ready = false
+		return result, nil
+	}
+
+	indexCheck := verifyCompiledNavigation(repoRoot)
+	result.Checks = append(result.Checks, indexCheck)
+
+	instructionFile := instructionFileForAgent(repoRoot, normalizedAgent)
+	instructionPath := filepath.Join(repoRoot, instructionFile)
+	if _, err := os.Stat(instructionPath); err != nil {
+		result.Checks = append(result.Checks, verifyCheck{
+			Name:        "instruction-file",
+			Status:      "fail",
+			Message:     fmt.Sprintf("%s is missing", instructionFile),
+			Remediation: fmt.Sprintf("Run `plexium plugin add %s` or `plexium setup %s`.", normalizedAgent, normalizedAgent),
+		})
+	} else {
+		result.Checks = append(result.Checks, verifyCheck{
+			Name:    "instruction-file",
+			Status:  "pass",
+			Message: fmt.Sprintf("%s is present", instructionFile),
+		})
+	}
+
+	mcpReference := filepath.Join(repoRoot, ".plexium", "pageindex-mcp.json")
+	if _, err := os.Stat(mcpReference); err != nil {
+		result.Checks = append(result.Checks, verifyCheck{
+			Name:        "pageindex-reference",
+			Status:      "fail",
+			Message:     ".plexium/pageindex-mcp.json is missing",
+			Remediation: "Run `plexium setup " + normalizedAgent + "`.",
+		})
+	} else {
+		result.Checks = append(result.Checks, verifyCheck{
+			Name:    "pageindex-reference",
+			Status:  "pass",
+			Message: "PageIndex reference file is present",
+		})
+	}
+
+	lintReport, err := lint.NewLinter(repoRoot, cfg).RunDeterministic()
+	lintStatus := "pass"
+	lintMessage := "deterministic lint passes cleanly"
+	lintRemediation := ""
+	if err != nil {
+		lintStatus = "fail"
+		lintMessage = fmt.Sprintf("deterministic lint could not run: %v", err)
+		lintRemediation = "Run `plexium lint --deterministic` directly and resolve the reported error."
+	} else if lintReport.Summary.Errors > 0 {
+		lintStatus = "fail"
+		lintMessage = fmt.Sprintf("deterministic lint reported %d errors and %d warnings", lintReport.Summary.Errors, lintReport.Summary.Warnings)
+		lintRemediation = "Run `plexium lint --deterministic` and fix the reported issues."
+	} else if lintReport.Summary.Warnings > 0 {
+		lintStatus = "warning"
+		lintMessage = fmt.Sprintf("deterministic lint reported %d warnings", lintReport.Summary.Warnings)
+		lintRemediation = "Run `plexium lint --deterministic` and review the warnings."
+	}
+	result.Checks = append(result.Checks, verifyCheck{
+		Name:        "lint",
+		Status:      lintStatus,
+		Message:     lintMessage,
+		Remediation: lintRemediation,
+	})
+
+	configured, configLocation, err := detectMCPConfig(repoRoot, normalizedAgent)
+	if err != nil {
+		return nil, err
+	}
+	result.Configured = configured
+	if configured {
+		result.Checks = append(result.Checks, verifyCheck{
+			Name:    "mcp",
+			Status:  "pass",
+			Message: fmt.Sprintf("%s MCP configuration is present (%s)", capitalizeFirst(normalizedAgent), configLocation),
+		})
+	} else if _, err := exec.LookPath(plan.Executable); err == nil {
+		result.Checks = append(result.Checks, verifyCheck{
+			Name:        "mcp",
+			Status:      "warning",
+			Message:     fmt.Sprintf("%s MCP configuration is not applied yet", capitalizeFirst(normalizedAgent)),
+			Remediation: fmt.Sprintf("Run `%s` or rerun `plexium setup %s --write-config`.", plan.Command, normalizedAgent),
+		})
+	} else {
+		result.Checks = append(result.Checks, verifyCheck{
+			Name:        "mcp",
+			Status:      "warning",
+			Message:     fmt.Sprintf("%s CLI was not found, so MCP configuration could not be verified", capitalizeFirst(normalizedAgent)),
+			Remediation: fmt.Sprintf("Install `%s` or run `plexium pageindex connect %s` on a machine where it is available.", plan.Executable, normalizedAgent),
+		})
+	}
+
+	result.Ready = true
+	for _, check := range result.Checks {
+		if check.Status == "fail" {
+			result.Ready = false
+			break
+		}
+	}
+
+	return result, nil
+}
+
+func (r *verifyResult) summary() (passCount, warnCount, failCount int) {
+	for _, check := range r.Checks {
+		switch check.Status {
+		case "pass":
+			passCount++
+		case "warning":
+			warnCount++
+		case "fail":
+			failCount++
+		}
+	}
+	return
+}
+
+func verifyCompiledNavigation(repoRoot string) verifyCheck {
+	indexPath := filepath.Join(repoRoot, ".wiki", "_index.md")
+	sidebarPath := filepath.Join(repoRoot, ".wiki", "_Sidebar.md")
+
+	indexData, indexErr := os.ReadFile(indexPath)
+	sidebarData, sidebarErr := os.ReadFile(sidebarPath)
+	if indexErr != nil || sidebarErr != nil {
+		return verifyCheck{
+			Name:        "compiled-navigation",
+			Status:      "fail",
+			Message:     "compiled navigation files are missing",
+			Remediation: "Run `plexium compile`.",
+		}
+	}
+
+	index := string(indexData)
+	sidebar := string(sidebarData)
+	if strings.TrimSpace(index) == "" || !strings.Contains(index, "# Wiki Index") {
+		return verifyCheck{
+			Name:        "compiled-navigation",
+			Status:      "fail",
+			Message:     "_index.md does not look compiled yet",
+			Remediation: "Run `plexium compile`.",
+		}
+	}
+	if strings.TrimSpace(sidebar) == "" || !strings.Contains(sidebar, "[[Home]]") {
+		return verifyCheck{
+			Name:        "compiled-navigation",
+			Status:      "fail",
+			Message:     "_Sidebar.md does not look compiled yet",
+			Remediation: "Run `plexium compile`.",
+		}
+	}
+	return verifyCheck{
+		Name:    "compiled-navigation",
+		Status:  "pass",
+		Message: "compiled navigation files are present",
+	}
+}
+
+func detectMCPConfig(repoRoot, agent string) (bool, string, error) {
+	switch agent {
+	case "claude":
+		path := filepath.Join(repoRoot, ".mcp.json")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return false, path, nil
+			}
+			return false, path, fmt.Errorf("read Claude MCP config: %w", err)
+		}
+		var cfg struct {
+			MCPServers map[string]json.RawMessage `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return false, path, fmt.Errorf("parse Claude MCP config: %w", err)
+		}
+		_, ok := cfg.MCPServers["plexium-wiki"]
+		return ok, path, nil
+	case "codex":
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return false, "", fmt.Errorf("resolve home directory: %w", err)
+		}
+		path := filepath.Join(homeDir, ".codex", "config.toml")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return false, path, nil
+			}
+			return false, path, fmt.Errorf("read Codex config: %w", err)
+		}
+		var cfg struct {
+			MCPServers map[string]struct {
+				Command string   `toml:"command"`
+				Args    []string `toml:"args"`
+			} `toml:"mcp_servers"`
+		}
+		if err := toml.Unmarshal(data, &cfg); err != nil {
+			return false, path, fmt.Errorf("parse Codex config: %w", err)
+		}
+		_, ok := cfg.MCPServers["plexium-wiki"]
+		return ok, path, nil
+	default:
+		return false, "", fmt.Errorf("unsupported agent %q", agent)
+	}
+}
+
+func instructionFileForAgent(repoRoot, agent string) string {
+	available, err := plugins.ListAdapters(repoRoot)
+	if err == nil {
+		for _, adapter := range available {
+			if adapter.Name == agent && adapter.InstructionFile != "" {
+				return adapter.InstructionFile
+			}
+		}
+	}
+
+	switch agent {
+	case "claude":
+		return "CLAUDE.md"
+	case "codex":
+		return "AGENTS.md"
+	default:
+		return strings.ToUpper(agent) + ".md"
+	}
+}
+
+func sourceLabel(builtIn bool) string {
+	if builtIn {
+		return "built-in"
+	}
+	return "custom"
+}
+
+func relativeToRepo(repoRoot, path string) string {
+	rel, err := filepath.Rel(repoRoot, path)
+	if err != nil {
+		return path
+	}
+	return rel
+}
+
+func needsPlexiumInit(repoRoot string) bool {
+	required := []string{
+		filepath.Join(repoRoot, ".plexium", "config.yml"),
+		filepath.Join(repoRoot, ".plexium", "manifest.json"),
+		filepath.Join(repoRoot, ".wiki", "Home.md"),
+	}
+	for _, path := range required {
+		if _, err := os.Stat(path); err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func currentGitRepoRoot() (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("get working directory: %w", err)
+	}
+
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = wd
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		text := strings.TrimSpace(string(output))
+		if text != "" {
+			return "", fmt.Errorf("current directory is not inside a git repository: %s", text)
+		}
+		return "", fmt.Errorf("current directory is not inside a git repository")
+	}
+	return strings.TrimSpace(string(output)), nil
+}

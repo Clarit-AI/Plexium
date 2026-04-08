@@ -16,234 +16,146 @@
 
 ---
 
-## The Problem
+## What Plexium Is
 
-LLM coding agents have no memory. Every session starts cold: the agent scans the repo, rebuilds its understanding through RAG, writes code, and then discards everything it learned. The next session repeats the same discovery from scratch.
+Plexium is a repo memory system for human developers and coding agents. It does not replace your source code or your existing docs. It adds a durable knowledge layer beside them: a `.wiki/` vault that agents can read before they work, update after they work, and query later through CLI or MCP instead of rebuilding context from scratch every session.
 
-This means:
-- **No compounding knowledge.** Insights from session 47 are invisible to session 48.
-- **Redundant context building.** Agents re-parse the same files and re-derive the same architectural understanding on every invocation.
-- **No shared understanding.** Multiple agents working on the same repo have no common knowledge surface. Each builds its own ephemeral mental model.
-- **Documentation debt accumulates silently.** Code changes outpace documentation because nothing enforces the connection.
+The short version is simple: LLM agents are good at coding, but they are terrible at remembering. Plexium turns that repeated rediscovery into a shared project memory that can compound over time.
 
-RAG retrieval helps agents find relevant code, but it does not accumulate understanding. It is a search mechanism, not a knowledge layer.
+## What Happens When You Install It
 
----
+When you run Plexium in a repository, it creates two project-local surfaces:
 
-## How Plexium Works
+- `.wiki/` becomes the durable knowledge layer: pages, navigation, change log, raw source material, and agent instructions.
+- `.plexium/` becomes the control plane: config, manifest, templates, reports, integrations, and generated instruction files for agents.
 
-Plexium adds a synthesized knowledge layer to your repository. Source files are the ground truth (immutable). The `.wiki/` vault is the knowledge surface (agent-maintained). A state manifest (`.plexium/manifest.json`) tracks bidirectional mappings between source files and wiki pages, with content hashes for staleness detection and ownership metadata to prevent conflicts.
+From there, Plexium gives you three ways to use that memory:
 
-Agents read the wiki before working on a task, gaining accumulated project context. After making changes, agents update the relevant wiki pages. Git hooks validate that wiki updates accompany source changes. CI pipelines enforce this across the team.
+- read and maintain it as a browsable wiki in GitHub Wiki or Obsidian
+- retrieve answers from it with `plexium retrieve` or PageIndex over MCP
+- keep it in sync with your code through hooks, CI, and optional background automation
 
-The wiki is browsable as an [Obsidian](https://obsidian.md) vault, publishable as a [GitHub Wiki](https://docs.github.com/en/communities/documenting-your-project-with-wikis), and queryable via [MCP](https://modelcontextprotocol.io) by any coding agent. A governance schema (`_schema.md`) instructs agents on the read-execute-document-validate loop, ownership rules, and page generation conventions.
+> Core vs optional:
+> The core product is the wiki, manifest, compile/lint flow, and retrieval CLI. MCP setup, marketplace plugins, daemon automation, Ollama/OpenRouter providers, and Memento ingestion are optional layers you can add when you want more leverage.
 
-### Retrieval
+## How It Works In Practice
 
-Plexium includes a built-in search engine queryable via CLI (`plexium retrieve "query"`) or MCP (`plexium pageindex serve`). The engine uses BM25-style scoring across page titles, sections, summaries, content, and wiki-links. CLI retrieval works immediately after `plexium init`. The MCP server exposes the same engine over JSON-RPC 2.0 stdio for agents that support the Model Context Protocol. Use `plexium pageindex connect claude` or `plexium pageindex connect codex` to see the native MCP setup command for each agent.
+The day-to-day loop looks like this:
 
-### Assistive Agent
+1. A user or agent retrieves context from the wiki instead of starting cold.
+2. Code changes happen in the normal repo workflow.
+3. Plexium updates or validates the wiki, navigation, and state manifest.
+4. Hooks and CI catch drift so the memory stays aligned with the codebase.
 
-Plexium includes an assistive agent that automates wiki maintenance using a provider cascade. The cascade tries providers in cost order (cheapest first), falling through on failure:
+That means Plexium is not just a wiki generator. It is a system for keeping project understanding durable, queryable, and enforceable while real work is happening.
 
-- **Ollama** -- local LLM via llama.cpp, zero cost, handles low-complexity tasks (frontmatter updates, index regeneration, log entries)
-- **OpenRouter / OpenAI-compatible** -- remote API with daily budget caps, handles medium-complexity tasks (module summaries, cross-reference suggestions)
-- **Inherit** -- delegates to the primary coding agent for high-complexity tasks (architecture synthesis, contradiction detection)
+## Major Capability Layers
 
-A **task router** classifies each wiki maintenance task by complexity and routes it to the appropriate cascade tier. A **rate limiter** tracks daily spend per provider and applies adaptive batching delays as usage approaches the budget cap.
+### Wiki Memory Layer
 
-The **daemon** (`plexium daemon` or `plexium agent start`) runs a background poll loop that detects stale pages, lint issues, ingest candidates, and wiki-debt, then takes the configured action (log, create issue, or auto-fix in an isolated worktree).
+Plexium stores durable project understanding in `.wiki/`: architecture pages, module pages, ADRs, concepts, guides, log entries, contradictions, and raw source material. Agents read it before they work and write back to it after they work.
 
-```yaml
-# .plexium/config.yml
-assistiveAgent:
-  enabled: true
-  providers:
-    - name: local-ollama
-      enabled: true
-      type: ollama
-      endpoint: http://localhost:11434
-      model: llama3
-    - name: openrouter
-      enabled: true
-      type: openai-compatible
-      endpoint: https://openrouter.ai/api
-      model: meta-llama/llama-3.1-8b-instruct:free
-      apiKeyEnv: OPENROUTER_API_KEY
-  budget:
-    dailyUSD: 1.00
+### Retrieval Layer
 
-daemon:
-  enabled: true
-  runner: claude
-  tracker: github
-  pollInterval: 300
-  watches:
-    staleness:
-      enabled: true
-      action: create-issue
-      threshold: "7d"
-```
+Plexium includes a built-in retrieval engine over the wiki. You can query it directly from the CLI with `plexium retrieve "query"`, or expose the same engine over MCP with `plexium pageindex serve` so Claude, Codex, or other agents can pull relevant wiki context inside their own sessions. The marketplace/plugin bundles wrap that same retrieval surface instead of inventing a second system.
 
-| Command | Purpose |
-|---------|---------|
-| `plexium agent setup` | Interactive provider configuration |
-| `plexium agent start` | Launch daemon in background |
-| `plexium agent stop` | Stop background daemon |
-| `plexium agent status` | Show provider health, daemon state, daily spend |
-| `plexium agent test` | Test provider connectivity |
-| `plexium agent spend` | Show daily cost breakdown |
-| `plexium daemon` | Run daemon in foreground |
+### Automation Layer
 
----
+Plexium can stay passive, or it can stay alive while you code. Git hooks can enforce that wiki changes accompany source changes. CI can check coverage at PR time. The daemon can watch for stale pages, lint issues, and wiki debt. Claude and Codex integrations keep setup, verification, retrieval, and MCP wiring on a single happy path instead of making users memorize the raw commands.
+
+### Assistive Layer
+
+If you want autonomous wiki upkeep, Plexium can route maintenance work to local or remote model providers. Ollama is the zero-cost local path. OpenRouter or another OpenAI-compatible endpoint is the remote path. This layer is optional: the core wiki and retrieval workflow do not require a paid provider.
+
+### Transcript and Provenance Layer
+
+When Memento is enabled, Plexium can treat session transcripts as raw source material instead of letting rationale vanish after the commit lands. That gives the assistive layer access to design intent, tradeoffs, and decision history that ordinary code scans miss.
+
+## Why Plexium Is Different
+
+Plexium is shaped by the LLM Wiki idea, but it goes further in a few important ways:
+
+- It uses a deterministic manifest, compile, and lint model instead of relying on best-effort wiki generation alone.
+- It gives agents a native retrieval layer through CLI, MCP, and marketplace/plugin surfaces, not just static pages.
+- It can actively maintain knowledge through hooks, CI, and background automation instead of waiting for humans to remember.
+- It can ingest Memento session history so rationale and tradeoffs have a path into the wiki, not just the final code diff.
 
 ## Quick Start
 
 **Prerequisites:**
 - [Go 1.25+](https://go.dev/dl/)
 - Git
-- A GitHub repo (local or remote)
+- A Git repository
+
+### Binary-first
 
 ```bash
-# Install
 go install github.com/Clarit-AI/Plexium/cmd/plexium@latest
 
-# Initialize in your repo
 cd /path/to/your/repo
-plexium init
+plexium setup claude
+# or
+plexium setup codex
 
-# Validate the setup
-plexium doctor
-
-# Run structural lint
-plexium lint --deterministic
-
-# Generate navigation
-plexium compile
+plexium verify claude
+# or
+plexium verify codex
 ```
 
-For a complete walkthrough, see the [Getting Started](docs/getting-started.md) guide.
+Add `--write-config` if you want Plexium to run the native MCP configuration command for you.
 
----
+### Claude Code marketplace
 
-## Details
-
-### Architecture
-
-```
-Source Layer (immutable)
-  src/**, docs/**, README, ADRs
-        |
-State Manifest (.plexium/manifest.json)
-  Bidirectional source-to-wiki mapping, content hashes, ownership
-        |
-Wiki Layer (.wiki/)
-  _schema.md, _index.md, modules/, decisions/, concepts/
-        |
-Enforcement
-  _schema.md (soft) -> Git hooks (medium) -> CI/CD (hard)
+```text
+/plugin marketplace add /path/to/Plexium
+/plugin install plexium-tools@plexium-local
+/plexium-install
+/plexium-setup
 ```
 
-- The source layer is never modified by wiki operations.
-- The wiki layer is agent-maintained: agents own it, humans review it.
-- Enforcement escalates from schema guidance through hooks to CI checks.
+Use `/plexium-setup-auto` when you want the plugin to apply the Claude MCP configuration automatically.
 
-### Vault Structure
+### Codex marketplace
 
+Clone the repo somewhere local, restart Codex so it sees `.agents/plugins/marketplace.json`, install `Plexium Tools` from the `Plexium Local Plugins` source, then ask Codex to set up or verify Plexium in the current repository.
+
+For the full walkthrough, see [Getting Started](docs/getting-started.md).
+
+## Origins and Influences
+
+Plexium pulls together four ideas: Karpathy's LLM Wiki as the conceptual starting point, OpenAI Symphony as the orchestration influence, PageIndex as the retrieval pattern, and Memento as the provenance layer. The interesting part is not just that these projects are cited, but how Plexium combines them into one repo-native system.
+
+Read the full breakdown in [Inspirations](docs/inspirations.md).
+
+## Read More
+
+- [How Plexium Works](docs/how-it-works.md)
+- [Retrieval and MCP](docs/retrieval-and-mcp.md)
+- [Automation and Hooks](docs/automation-and-hooks.md)
+- [Memento Integration](docs/memento-integration.md)
+- [Inspirations](docs/inspirations.md)
+- [Getting Started](docs/getting-started.md)
+- [User Guide](docs/user-guide.md)
+- [CLI Reference](docs/cli-reference.md)
+- [Implementation Status](docs/status.md)
+
+## Secret Safety
+
+Never paste API keys, tokens, or other secrets into an AI chat window. In Plexium workflows, that is especially important when Memento is enabled, because session context can later be attached to commits as git notes or copied into raw transcript material.
+
+Prefer terminal-native flows such as:
+
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-..."
+plexium agent setup
 ```
-.wiki/
-  Home.md                 # Landing page
-  _schema.md              # Agent governance schema
-  _index.md               # Auto-generated page index
-  _Sidebar.md             # Auto-generated navigation
-  _log.md                 # Change log
-  architecture/           # System architecture pages
-  modules/                # Module documentation
-  decisions/              # Architecture Decision Records
-  patterns/               # Design patterns
-  concepts/               # Domain concepts
-  guides/                 # How-to guides
-  raw/                    # Unprocessed sources (meeting notes, transcripts)
-```
 
-### Proof
-
-Plexium has completed all 11 build phases and passed a comprehensive validation suite.
-
-| Metric | Value |
-|--------|-------|
-| Test functions | 540+ across 25 packages |
-| Safety invariants proven | 7 (source immutability, dry-run isolation, ownership protection, init non-destructiveness, compile scope, manifest preservation) |
-| Determinism guarantees | 6 (manifest sort stability, hash consistency, compile idempotency, lint stability, empty-manifest stability, JSON shape stability) |
-| Cross-phase contracts | 10 verified (struct fields, ownership values, exit codes, config validation) |
-| CLI commands | 22 commands and subcommands |
-| Go packages | 26 |
-| Blocking issues | 0 |
-
-Full details: [Implementation Status](docs/status.md)
-
-### Ownership Model
-
-| Mode | Meaning |
-|------|---------|
-| `managed` | Agent-regenerated from source. Human edits are overwritten on sync. |
-| `human-authored` | Locked from automated changes. Agents cannot overwrite. |
-| `co-maintained` | Both agents and humans edit. Agents append, do not rewrite. |
-
-### Key Commands
-
-| Command | Purpose |
-|---------|---------|
-| `plexium init` | Scaffold wiki and config |
-| `plexium sync` | Detect stale pages, update manifest |
-| `plexium convert` | Bootstrap wiki from existing repo |
-| `plexium lint` | Structural and semantic health checks |
-| `plexium compile` | Regenerate navigation files |
-| `plexium publish` | Push wiki to GitHub Wiki |
-| `plexium doctor` | Validate setup and config |
-| `plexium retrieve` | Query the wiki (built-in search engine) |
-
-Full reference: [CLI Reference](docs/cli-reference.md)
-
----
-
-## Inspirations
-
-Plexium synthesizes ideas from four projects:
-
-**[LLM-Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)** by Andrej Karpathy. The conceptual origin. Karpathy proposed that LLM coding agents should maintain a wiki inside the repository they work on, building a persistent knowledge layer that compounds over time instead of relying on stateless RAG. Plexium implements this idea as a complete system with enforcement, deterministic validation, and multi-agent coordination.
-
-**[Symphony](https://github.com/openai/symphony/blob/main/SPEC.md)** by OpenAI. The multi-agent orchestration pattern. Symphony's approach to task decomposition, agent roles, and workspace isolation informed Plexium's daemon, orchestrate command, and role-based capability model (coder, retriever, documenter, ingestor).
-
-**[Memento](https://github.com/mandel-macaque/memento)** by Manuel de la Pena. Git-native session provenance. Memento captures coding session context as git notes, creating an audit trail for every commit. Plexium integrates memento as both a build tool (session tracking during development) and a feature (transcript ingestion for decision extraction).
-
-**[PageIndex](https://github.com/VectifyAI/PageIndex)** by VectifyAI. Hierarchical document retrieval. PageIndex's approach to structured document search informed Plexium's `retrieve` command and the PageIndex MCP server, giving agents a queryable index of the wiki with BM25-scored relevance ranking and fallback strategies.
-
----
+If a secret was already pasted into chat, rewind that session if possible and do not commit its Memento note.
 
 ## Ecosystem
 
-Plexium is part of the [Clarit.AI](https://github.com/Clarit-AI) open-source ecosystem. Plexium solves agent amnesia at the repository knowledge layer: it gives agents a persistent, shared understanding of the codebase that compounds across sessions. [Engram](https://github.com/Clarit-AI/Engram) solves it at the model inference layer with persistent memory across conversations. [Synapse](https://github.com/Clarit-AI/Synapse) solves it at the hardware compute layer with hybrid NPU/CPU routing for edge devices.
-
----
+Plexium is part of the [Clarit.AI](https://github.com/Clarit-AI) open-source ecosystem. Plexium solves agent amnesia at the repository knowledge layer: it gives agents a persistent, shared understanding of the codebase that compounds across sessions. [Engram](https://github.com/Clarit-AI/Engram) approaches memory at the conversation and inference layer. [Synapse](https://github.com/Clarit-AI/Synapse) approaches it at the hardware layer with hybrid NPU/CPU routing for edge devices.
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, testing, and PR workflow.
-
----
-
-## License and Acknowledgements
-
-[Apache License 2.0](LICENSE)
-
-Copyright 2026 Clarit.AI
-
-### Upstream Projects
-
-- [Andrej Karpathy's LLM-Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) (conceptual origin)
-- [OpenAI Symphony](https://github.com/openai/symphony) (orchestration patterns)
-- [Memento](https://github.com/mandel-macaque/memento) (session provenance)
-- [PageIndex](https://github.com/VectifyAI/PageIndex) (hierarchical retrieval)
-- [cobra](https://github.com/spf13/cobra) (CLI framework)
-- [viper](https://github.com/spf13/viper) (configuration)

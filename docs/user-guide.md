@@ -2,6 +2,15 @@
 
 This guide covers Plexium workflows: how to set up, maintain, and publish a wiki, and how the system integrates with agents, CI, and task tracking.
 
+Use this guide for day-to-day operation. For the higher-level product map and subsystem deep dives, see:
+
+- [README](../README.md)
+- [How Plexium Works](how-it-works.md)
+- [Retrieval and MCP](retrieval-and-mcp.md)
+- [Automation and Hooks](automation-and-hooks.md)
+- [Memento Integration](memento-integration.md)
+- [Inspirations](inspirations.md)
+
 For command-level detail, see [CLI Reference](cli-reference.md). For stability information, see [Status](status.md).
 
 ---
@@ -286,7 +295,21 @@ The server exposes three tools:
 
 #### Wiring the MCP server to your agent
 
-Plexium can print the exact native setup command for the agents it supports:
+The canonical path is the higher-level setup command:
+
+```bash
+plexium setup claude
+plexium setup codex
+```
+
+Add `--write-config` to let Plexium apply the native MCP command automatically:
+
+```bash
+plexium setup claude --write-config
+plexium setup codex --write-config
+```
+
+If you only want the native MCP command itself, Plexium can print it directly:
 
 ```bash
 plexium pageindex connect claude
@@ -345,7 +368,14 @@ Links are stored in wiki page frontmatter as `beads-ids: [BD-42, BD-43]`. Linkin
 
 ## Plugin Adapters [Stable]
 
-Plexium generates agent-specific instruction files via plugins:
+Plexium generates agent-specific instruction files via plugins. Most users should prefer the higher-level onboarding command:
+
+```bash
+plexium setup claude
+plexium setup codex
+```
+
+If you want to manage adapters directly, the underlying plugin commands are still available:
 
 ```bash
 # List available plugins
@@ -464,13 +494,37 @@ Best for: higher-quality models, teams without local GPU, free-tier models for l
 
 1. Create an account at https://openrouter.ai and get an API key.
 
-2. Set the API key:
+2. Choose a setup path:
+
+**Security note:** Never paste API keys or other secrets into an AI chat window. They can become part of the model context stream, logs, or session transcripts. In repositories using memento, that context may later be attached to commits as git notes.
+
+If you already pasted a secret into chat:
+- stop and rotate the secret if needed
+- rewind the session if your client supports it
+- do not commit that session to memento or publish its notes
+
+Safe non-interactive setup through Plexium:
+
+```bash
+plexium agent setup --api-key-file /path/to/openrouter.key
+```
+
+Or feed the key through stdin without putting it in shell history:
+
+```bash
+printf '%s' "$OPENROUTER_API_KEY" | plexium agent setup --api-key-stdin
+```
+
+Or export the key in your terminal and let `plexium agent setup` pick it up automatically without ever placing the secret in chat:
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-v1-..."
+plexium agent setup
 ```
 
-3. Add to `.plexium/config.yml`:
+3. Plexium saves the key in `.plexium/credentials.json`, writes `.plexium/.env` for convenience, and updates `.plexium/config.yml`.
+
+If you prefer to wire the provider manually, the resulting config looks like:
 
 ```yaml
 assistiveAgent:
