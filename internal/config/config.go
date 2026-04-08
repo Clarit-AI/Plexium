@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 // Config represents the Plexium configuration.
@@ -31,15 +32,15 @@ type Config struct {
 
 // AssistiveAgent configures the LLM provider cascade for wiki maintenance tasks.
 type AssistiveAgent struct {
-	Enabled   bool               `yaml:"enabled"`
-	Providers []ProviderConfig   `yaml:"providers"`
-	Budget    BudgetConfig       `yaml:"budget"`
+	Enabled   bool             `yaml:"enabled"`
+	Providers []ProviderConfig `yaml:"providers"`
+	Budget    BudgetConfig     `yaml:"budget"`
 }
 
 type ProviderConfig struct {
 	Name      string `yaml:"name"`
 	Enabled   bool   `yaml:"enabled"`
-	Type      string `yaml:"type"`      // ollama | openai-compatible | inherit
+	Type      string `yaml:"type"` // ollama | openai-compatible | inherit
 	Endpoint  string `yaml:"endpoint"`
 	Model     string `yaml:"model"`
 	APIKeyEnv string `yaml:"apiKeyEnv"`
@@ -54,13 +55,13 @@ type BudgetConfig struct {
 
 // DaemonConfig configures the autonomous maintenance loop.
 type DaemonConfig struct {
-	Enabled       bool         `yaml:"enabled"`
-	PollInterval  int          `yaml:"pollInterval"` // seconds
-	MaxConcurrent int          `yaml:"maxConcurrent"`
-	Runner        string       `yaml:"runner"`      // claude | codex | gemini | noop
-	RunnerModel   string       `yaml:"runnerModel"` // optional model override for runner
-	Tracker       string       `yaml:"tracker"`     // github | linear | none
-	Watches       WatchConfig  `yaml:"watches"`
+	Enabled       bool        `yaml:"enabled"`
+	PollInterval  int         `yaml:"pollInterval"` // seconds
+	MaxConcurrent int         `yaml:"maxConcurrent"`
+	Runner        string      `yaml:"runner"`      // claude | codex | gemini | noop
+	RunnerModel   string      `yaml:"runnerModel"` // optional model override for runner
+	Tracker       string      `yaml:"tracker"`     // github | linear | none
+	Watches       WatchConfig `yaml:"watches"`
 }
 
 type WatchConfig struct {
@@ -113,27 +114,27 @@ type Wiki struct {
 }
 
 type Taxonomy struct {
-	Sections    []string `yaml:"sections"`
-	AutoClassify bool    `yaml:"autoClassify"`
+	Sections     []string `yaml:"sections"`
+	AutoClassify bool     `yaml:"autoClassify"`
 }
 
 type Publish struct {
-	Branch                string `yaml:"branch"`
-	Message               string `yaml:"message"`
-	AutoPush              bool   `yaml:"autoPush"`
-	PreserveUnmanagedPages bool  `yaml:"preserveUnmanagedPages"`
-	ManagedMarkerComment  bool   `yaml:"managedMarkerComment"`
+	Branch                 string `yaml:"branch"`
+	Message                string `yaml:"message"`
+	AutoPush               bool   `yaml:"autoPush"`
+	PreserveUnmanagedPages bool   `yaml:"preserveUnmanagedPages"`
+	ManagedMarkerComment   bool   `yaml:"managedMarkerComment"`
 }
 
 type Sync struct {
-	Mode              string   `yaml:"mode"` // incremental | full
-	AutoSync          bool     `yaml:"autoSync"`
-	OnCommit          bool     `yaml:"onCommit"`
-	OnPush            bool     `yaml:"onPush"`
-	RewriteHomeOnSync bool     `yaml:"rewriteHomeOnSync"`
-	RewriteSidebarOnSync bool  `yaml:"rewriteSidebarOnSync"`
-	Idempotent        bool     `yaml:"idempotent"`
-	Exclude           []string `yaml:"exclude"`
+	Mode                 string   `yaml:"mode"` // incremental | full
+	AutoSync             bool     `yaml:"autoSync"`
+	OnCommit             bool     `yaml:"onCommit"`
+	OnPush               bool     `yaml:"onPush"`
+	RewriteHomeOnSync    bool     `yaml:"rewriteHomeOnSync"`
+	RewriteSidebarOnSync bool     `yaml:"rewriteSidebarOnSync"`
+	Idempotent           bool     `yaml:"idempotent"`
+	Exclude              []string `yaml:"exclude"`
 }
 
 type Enforcement struct {
@@ -169,28 +170,28 @@ type GitHubWiki struct {
 }
 
 type Sensitivity struct {
-	Rules       string   `yaml:"rules"`
+	Rules        string   `yaml:"rules"`
 	NeverPublish []string `yaml:"neverPublish"`
-	MaxFileSize int64    `yaml:"maxFileSize"`
-	ExcludeExts []string `yaml:"excludeExtensions"`
+	MaxFileSize  int64    `yaml:"maxFileSize"`
+	ExcludeExts  []string `yaml:"excludeExtensions"`
 }
 
 // envBindings maps config keys to their environment variable overrides.
 // Viper's AutomaticEnv only works with explicit Bind calls when using Unmarshal.
 var envBindings = map[string]string{
-	"wiki.root":        "PLEXIUM_WIKI_ROOT",
-	"wiki.home":        "PLEXIUM_WIKI_HOME",
-	"wiki.sidebar":     "PLEXIUM_WIKI_SIDEBAR",
-	"wiki.footer":      "PLEXIUM_WIKI_FOOTER",
-	"wiki.log":         "PLEXIUM_WIKI_LOG",
-	"wiki.index":       "PLEXIUM_WIKI_INDEX",
-	"wiki.schema":      "PLEXIUM_WIKI_SCHEMA",
-	"repo.defaultBranch": "PLEXIUM_REPO_DEFAULT_BRANCH",
-	"repo.wikiEnabled":   "PLEXIUM_REPO_WIKI_ENABLED",
-	"sources.include":    "PLEXIUM_SOURCES_INCLUDE",
-	"sources.exclude":    "PLEXIUM_SOURCES_EXCLUDE",
-	"agents.strictness":  "PLEXIUM_AGENTS_STRICTNESS",
-	"sync.mode":          "PLEXIUM_SYNC_MODE",
+	"wiki.root":              "PLEXIUM_WIKI_ROOT",
+	"wiki.home":              "PLEXIUM_WIKI_HOME",
+	"wiki.sidebar":           "PLEXIUM_WIKI_SIDEBAR",
+	"wiki.footer":            "PLEXIUM_WIKI_FOOTER",
+	"wiki.log":               "PLEXIUM_WIKI_LOG",
+	"wiki.index":             "PLEXIUM_WIKI_INDEX",
+	"wiki.schema":            "PLEXIUM_WIKI_SCHEMA",
+	"repo.defaultBranch":     "PLEXIUM_REPO_DEFAULT_BRANCH",
+	"repo.wikiEnabled":       "PLEXIUM_REPO_WIKI_ENABLED",
+	"sources.include":        "PLEXIUM_SOURCES_INCLUDE",
+	"sources.exclude":        "PLEXIUM_SOURCES_EXCLUDE",
+	"agents.strictness":      "PLEXIUM_AGENTS_STRICTNESS",
+	"sync.mode":              "PLEXIUM_SYNC_MODE",
 	"enforcement.strictness": "PLEXIUM_ENFORCEMENT_STRICTNESS",
 	"githubWiki.enabled":     "PLEXIUM_GITHUB_WIKI_ENABLED",
 }
@@ -241,6 +242,28 @@ func Load(configPath string) (*Config, error) {
 func LoadFromDir(dir string) (*Config, error) {
 	configPath := filepath.Join(dir, ".plexium", "config.yml")
 	return Load(configPath)
+}
+
+// Save writes the config back to disk in YAML form.
+func Save(configPath string, cfg *Config) error {
+	if cfg == nil {
+		return fmt.Errorf("config is nil")
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	return nil
+}
+
+// SaveToDir writes .plexium/config.yml under the provided repository root.
+func SaveToDir(dir string, cfg *Config) error {
+	return Save(filepath.Join(dir, ".plexium", "config.yml"), cfg)
 }
 
 // MustLoad loads config or panics

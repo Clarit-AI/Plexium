@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Clarit-AI/Plexium/internal/config"
 )
 
 func TestSetupAgent_WriteConfigClaude(t *testing.T) {
@@ -17,7 +19,7 @@ func TestSetupAgent_WriteConfigClaude(t *testing.T) {
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	result, err := setupAgent(repoRoot, "claude", true)
+	result, err := setupAgent(repoRoot, "claude", setupAgentOptions{WriteConfig: true})
 	if err != nil {
 		t.Fatalf("setupAgent returned error: %v", err)
 	}
@@ -42,7 +44,7 @@ func TestSetupAgent_WriteConfigCodex(t *testing.T) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("HOME", homeDir)
 
-	result, err := setupAgent(repoRoot, "codex", true)
+	result, err := setupAgent(repoRoot, "codex", setupAgentOptions{WriteConfig: true})
 	if err != nil {
 		t.Fatalf("setupAgent returned error: %v", err)
 	}
@@ -51,5 +53,27 @@ func TestSetupAgent_WriteConfigCodex(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(homeDir, ".codex", "config.toml")); err != nil {
 		t.Fatalf("expected config.toml to exist: %v", err)
+	}
+}
+
+func TestEnableMementoInConfig(t *testing.T) {
+	repoRoot := t.TempDir()
+	if _, err := setupAgent(repoRoot, "claude", setupAgentOptions{}); err != nil {
+		t.Fatalf("setupAgent returned error: %v", err)
+	}
+
+	if err := enableMementoInConfig(repoRoot); err != nil {
+		t.Fatalf("enableMementoInConfig returned error: %v", err)
+	}
+
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !cfg.Integrations.Memento {
+		t.Fatalf("expected integrations.memento to be enabled")
+	}
+	if !cfg.Enforcement.MementoGate {
+		t.Fatalf("expected enforcement.mementoGate to be enabled")
 	}
 }

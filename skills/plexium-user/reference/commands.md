@@ -26,7 +26,7 @@ Full command reference for agents working in Plexium repositories.
 | Command | Purpose |
 |---------|---------|
 | `plexium init` | Scaffold `.wiki/`, `.plexium/`, config |
-| `plexium setup <agent>` | Canonical repo onboarding for Claude or Codex |
+| `plexium setup <agent>` | Canonical repo onboarding for Claude or Codex; add `--with-memento` for optional session provenance |
 | `plexium verify <agent>` | Verify that Plexium is ready for Claude or Codex |
 | `plexium convert` | Bootstrap wiki from existing source code |
 | `plexium migrate` | Apply schema version migrations |

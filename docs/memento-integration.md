@@ -4,6 +4,8 @@ Memento is one of the most distinctive parts of Plexium's story. Most systems in
 
 Plexium can use Memento to fill that gap.
 
+Memento is still optional. When you opt into it with `plexium init --with-memento` or `plexium setup <agent> --with-memento`, Plexium can offer to install `git-memento` first and then initialize it for the current repository.
+
 ---
 
 ## What Memento Adds

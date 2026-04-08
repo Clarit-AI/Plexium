@@ -206,15 +206,9 @@ func Init(opts InitOptions) (*InitResult, error) {
 		result.FilesCreated = append(result.FilesCreated, filepath.Join(wikiDir, "templates", "dataview-queries.md"))
 	}
 
-	// Set up optional integrations (--with-memento, --with-beads, --with-pageindex)
-	if opts.WithMemento && !opts.DryRun {
-		cmd := exec.Command("git", "memento", "init")
-		cmd.Dir = opts.RepoRoot
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: git memento init failed: %v\n", err)
-		}
-	}
-
+	// Set up optional integrations (--with-beads, --with-pageindex).
+	// Memento onboarding is handled by the CLI entrypoints so they can
+	// offer installation when git-memento is missing.
 	if opts.WithBeads && !opts.DryRun {
 		cmd := exec.Command("bd", "init")
 		cmd.Dir = opts.RepoRoot

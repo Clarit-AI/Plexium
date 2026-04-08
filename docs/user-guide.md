@@ -2,6 +2,8 @@
 
 This guide covers Plexium workflows: how to set up, maintain, and publish a wiki, and how the system integrates with agents, CI, and task tracking.
 
+Plexium is installed per repository. Install the CLI once on your machine, then initialize or set up each repository individually.
+
 Use this guide for day-to-day operation. For the higher-level product map and subsystem deep dives, see:
 
 - [README](../README.md)
@@ -49,6 +51,10 @@ For a repository with no existing wiki:
 ```bash
 # 1. Initialize
 plexium init
+# or use the agent-ready path
+plexium setup claude
+# or
+plexium setup codex
 
 # 2. Review and customize config
 $EDITOR .plexium/config.yml
@@ -67,6 +73,8 @@ plexium doctor
 - `sources.exclude`: patterns to skip (default: `vendor/**`, `.wiki/**`, `.plexium/**`)
 - `taxonomy.sections`: wiki section names (default: Architecture, Modules, Decisions, Patterns, Concepts, Guides)
 - `enforcement.strictness`: how aggressively hooks enforce wiki updates
+
+If you want session provenance for this repository, add `--with-memento`. Plexium will offer to install `git-memento` if it is not already available.
 
 ---
 
