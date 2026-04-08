@@ -2,6 +2,15 @@
 
 This guide covers Plexium workflows: how to set up, maintain, and publish a wiki, and how the system integrates with agents, CI, and task tracking.
 
+Use this guide for day-to-day operation. For the higher-level product map and subsystem deep dives, see:
+
+- [README](../README.md)
+- [How Plexium Works](how-it-works.md)
+- [Retrieval and MCP](retrieval-and-mcp.md)
+- [Automation and Hooks](automation-and-hooks.md)
+- [Memento Integration](memento-integration.md)
+- [Inspirations](inspirations.md)
+
 For command-level detail, see [CLI Reference](cli-reference.md). For stability information, see [Status](status.md).
 
 ---
