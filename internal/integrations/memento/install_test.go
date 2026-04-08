@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -30,9 +31,9 @@ func TestEnsureCLI_ReturnsAvailableWhenGitMementoExists(t *testing.T) {
 }
 
 func TestEnsureCLI_DeclineInstallLeavesToolUnavailable(t *testing.T) {
-	binDir := t.TempDir()
-	writeExecutable(t, filepath.Join(binDir, "curl"), "#!/bin/sh\nexit 0\n")
-	t.Setenv("PATH", binDir)
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("PATH", "/usr/bin:/bin")
 
 	stdout := &bytes.Buffer{}
 	result, err := EnsureCLI(EnsureCLIOptions{
@@ -55,9 +56,9 @@ func TestEnsureCLI_DeclineInstallLeavesToolUnavailable(t *testing.T) {
 }
 
 func TestEnsureCLI_EOFDoesNotCountAsConsent(t *testing.T) {
-	binDir := t.TempDir()
-	writeExecutable(t, filepath.Join(binDir, "curl"), "#!/bin/sh\nexit 0\n")
-	t.Setenv("PATH", binDir)
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("PATH", "/usr/bin:/bin")
 
 	result, err := EnsureCLI(EnsureCLIOptions{
 		Stdin:  bytes.NewBuffer(nil),
@@ -72,6 +73,46 @@ func TestEnsureCLI_EOFDoesNotCountAsConsent(t *testing.T) {
 	}
 	if result.Installed {
 		t.Fatalf("did not expect installation to run on EOF")
+	}
+}
+
+func TestEnsureCLI_DetectsExistingLocalInstallOutsidePath(t *testing.T) {
+	homeDir := t.TempDir()
+	localBin := filepath.Join(homeDir, ".local", "bin")
+	if err := os.MkdirAll(localBin, 0o755); err != nil {
+		t.Fatalf("create local bin: %v", err)
+	}
+	writeExecutable(t, filepath.Join(localBin, "git-memento"), "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  exit 0\nfi\nexit 1\n")
+
+	t.Setenv("HOME", homeDir)
+	t.Setenv("PATH", "/usr/bin:/bin")
+
+	result, err := EnsureCLI(EnsureCLIOptions{
+		Stdin:  bytes.NewBufferString(""),
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatalf("EnsureCLI returned error: %v", err)
+	}
+	if !result.Available {
+		t.Fatalf("expected git-memento to be detected from ~/.local/bin")
+	}
+	if !strings.Contains(result.Message, "added to PATH") {
+		t.Fatalf("expected message to mention PATH update, got %q", result.Message)
+	}
+	if !strings.Contains(os.Getenv("PATH"), localBin) {
+		t.Fatalf("expected PATH to include local bin after detection")
+	}
+}
+
+func TestPromptForInstall_ProcessesEOFAnswer(t *testing.T) {
+	confirmed, err := promptForInstall(bytes.NewBufferString("yes"), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("promptForInstall returned error: %v", err)
+	}
+	if !confirmed {
+		t.Fatalf("expected explicit yes without newline to be accepted")
 	}
 }
 
