@@ -107,8 +107,8 @@ Add `--write-config` if you want Plexium to run the native MCP configuration com
 ### Claude Code marketplace
 
 ```text
-/plugin marketplace add /path/to/Plexium
-/plugin install plexium-tools@plexium-local
+/plugin marketplace add Clarit-AI/Plexium
+/plugin install plexium-tools@clarit-ai
 /plexium-install
 /plexium-setup
 ```
@@ -117,7 +117,7 @@ Use `/plexium-setup-auto` when you want the plugin to apply the Claude MCP confi
 
 ### Codex marketplace
 
-Clone the repo somewhere local, restart Codex so it sees `.agents/plugins/marketplace.json`, install `Plexium Tools` from the `Plexium Local Plugins` source, then ask Codex to set up or verify Plexium in the current repository.
+Claude supports a true remote marketplace install from the Plexium GitHub repository today. Codex is not there yet: the current Codex plugin flow still uses the repo-local marketplace entry in `.agents/plugins/marketplace.json` until self-serve remote publishing to the official Codex Plugin Directory is available.
 
 For the full walkthrough, see [Getting Started](docs/getting-started.md).
 

@@ -219,11 +219,11 @@ plexium compile
 
 ### Claude Code
 
-Plexium ships a repo-local Claude marketplace entry:
+Plexium ships a GitHub-backed Claude marketplace entry:
 
 ```text
-/plugin marketplace add /path/to/Plexium
-/plugin install plexium-tools@plexium-local
+/plugin marketplace add Clarit-AI/Plexium
+/plugin install plexium-tools@clarit-ai
 ```
 
 The plugin provides:
@@ -237,7 +237,7 @@ The plugin provides:
 
 ### Codex
 
-Plexium also ships a repo-local Codex marketplace entry via `.agents/plugins/marketplace.json`. After cloning the repo and restarting Codex, install `Plexium Tools` from the `Plexium Local Plugins` source. The Codex plugin uses skills and starter prompts to keep users on the same `plexium setup codex` and `plexium verify codex` flow as the CLI.
+Codex does not yet have the same self-serve remote marketplace path in this repo that Claude does. Today, Plexium ships a repo-local Codex marketplace entry via `.agents/plugins/marketplace.json`, which is useful for repo teams and local testing. Once Codex self-serve remote publishing is available, this should move to the official remote Plugin Directory flow.
 
 ---
 

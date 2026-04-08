@@ -8,9 +8,9 @@ This plugin provides Claude Code commands for:
 - querying the wiki with `plexium retrieve`
 - showing or applying the native Claude MCP command
 
-Local install:
+Marketplace install:
 
 ```text
-/plugin marketplace add /path/to/Plexium
-/plugin install plexium-tools@plexium-local
+/plugin marketplace add Clarit-AI/Plexium
+/plugin install plexium-tools@clarit-ai
 ```
