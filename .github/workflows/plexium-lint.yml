@@ -29,24 +29,38 @@ jobs:
         run: ./plexium init
 
       - name: Deterministic lint
-        continue-on-error: true
+        id: deterministic_lint
         run: |
-          ./plexium lint --deterministic --ci --fail-on error
+          mkdir -p .plexium/reports
+          set +e
+          ./plexium lint --deterministic --ci --fail-on error 2>&1 | tee .plexium/reports/deterministic-lint.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
 
       - name: CI diff check
-        continue-on-error: true
+        id: ci_diff_check
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          mkdir -p .plexium/reports
+          set +e
           ./plexium ci check \
             --base "$BASE_SHA" \
             --head "$HEAD_SHA" \
-            --output .plexium/reports/ci-check.json
+            --output .plexium/reports/ci-check.json \
+            2>&1 | tee .plexium/reports/ci-check.log
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
 
       - name: Post results to PR
         if: always() && github.event_name == 'pull_request'
+        env:
+          DETERMINISTIC_LINT_EXIT_CODE: ${{ steps.deterministic_lint.outputs.exit_code }}
+          CI_DIFF_CHECK_EXIT_CODE: ${{ steps.ci_diff_check.outputs.exit_code }}
         uses: actions/github-script@v7
         with:
           script: |
@@ -59,8 +73,18 @@ jobs:
               report += `- **Wiki updated:** ${data.wikiUpdated ? 'Yes' : 'No'}\n`;
               report += `- **Wiki debt:** ${data.debtCount} entries\n`;
               report += `- **Result:** ${data.passes ? '✅ Passes' : '❌ Fails'}\n`;
+              if (process.env.CI_DIFF_CHECK_EXIT_CODE && process.env.CI_DIFF_CHECK_EXIT_CODE !== '0') {
+                report += `- **CI check exit code:** ${process.env.CI_DIFF_CHECK_EXIT_CODE}\n`;
+              }
+              if (process.env.DETERMINISTIC_LINT_EXIT_CODE && process.env.DETERMINISTIC_LINT_EXIT_CODE !== '0') {
+                report += `- **Deterministic lint:** emitted findings on the freshly initialized wiki; see workflow logs.\n`;
+              }
             } catch (e) {
-              report = '## Plexium Wiki Check\n\n⚠️ Could not read report file.\n';
+              let details = e.message;
+              try {
+                details = fs.readFileSync('.plexium/reports/ci-check.log', 'utf8').trim() || details;
+              } catch (_) {}
+              report = `## Plexium Wiki Check\n\n⚠️ Could not read report file.\n\n\`\`\`\n${details}\n\`\`\`\n`;
             }
             github.rest.issues.createComment({
               owner: context.repo.owner,
