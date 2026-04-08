@@ -146,12 +146,15 @@ func promptForInstall(stdin io.Reader, stdout io.Writer) (bool, error) {
 	fmt.Fprint(stdout, "Install git-memento now? [Y/n]: ")
 	reader := bufio.NewReader(stdin)
 	answer, err := reader.ReadString('\n')
-	if err != nil && err != io.EOF {
+	if err == io.EOF {
+		return false, nil
+	}
+	if err != nil {
 		return false, fmt.Errorf("read install confirmation: %w", err)
 	}
 
 	answer = strings.TrimSpace(strings.ToLower(answer))
-	return answer == "" || answer == "y" || answer == "yes", nil
+	return answer == "y" || answer == "yes", nil
 }
 
 func runInstallCommand(command string, stdout, stderr io.Writer) error {

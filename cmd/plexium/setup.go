@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -92,12 +93,19 @@ func runSetupCommand(cmd *cobra.Command, args []string) error {
 	withMemento, _ := cmd.Flags().GetBool("with-memento")
 	outputJSON, _ := cmd.Flags().GetBool("output-json")
 
+	setupStdout := cmd.OutOrStdout()
+	setupStderr := cmd.ErrOrStderr()
+	if outputJSON {
+		setupStdout = setupStderr
+		setupStderr = &bytes.Buffer{}
+	}
+
 	result, err := setupAgent(repoRoot, args[0], setupAgentOptions{
 		WriteConfig: writeConfig,
 		WithMemento: withMemento,
 		Stdin:       cmd.InOrStdin(),
-		Stdout:      cmd.OutOrStdout(),
-		Stderr:      cmd.ErrOrStderr(),
+		Stdout:      setupStdout,
+		Stderr:      setupStderr,
 	})
 	if err != nil {
 		return err
@@ -194,7 +202,7 @@ func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, e
 	if needsPlexiumInit(repoRoot) {
 		if _, err := wiki.Init(wiki.InitOptions{
 			RepoRoot:      repoRoot,
-			WithMemento:   opts.WithMemento,
+			WithMemento:   false,
 			WithPageIndex: true,
 		}); err != nil {
 			return nil, fmt.Errorf("initialize Plexium: %w", err)
@@ -202,15 +210,6 @@ func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, e
 		result.Steps = append(result.Steps, setupStep{Name: "init", Status: "pass", Message: "initialized Plexium scaffold"})
 	} else {
 		result.Steps = append(result.Steps, setupStep{Name: "init", Status: "pass", Message: "existing Plexium scaffold detected"})
-		if opts.WithMemento {
-			if err := enableMementoInConfig(repoRoot); err != nil {
-				result.Steps = append(result.Steps, setupStep{
-					Name:    "memento",
-					Status:  "warning",
-					Message: fmt.Sprintf("git-memento config could not be enabled in .plexium/config.yml: %v", err),
-				})
-			}
-		}
 	}
 
 	if _, err := compile.NewCompiler(repoRoot, false).Compile(); err != nil {

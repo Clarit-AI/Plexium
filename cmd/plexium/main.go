@@ -188,9 +188,13 @@ var initCmd = &cobra.Command{
 
 		var mementoResult *memento.EnsureCLIResult
 		if withMemento && !dryRun {
+			mementoStdout := cmd.OutOrStdout()
+			if outputJSON {
+				mementoStdout = cmd.ErrOrStderr()
+			}
 			mementoResult, err = memento.EnsureCLI(memento.EnsureCLIOptions{
 				Stdin:  cmd.InOrStdin(),
-				Stdout: cmd.OutOrStdout(),
+				Stdout: mementoStdout,
 				Stderr: cmd.ErrOrStderr(),
 			})
 			if err != nil {

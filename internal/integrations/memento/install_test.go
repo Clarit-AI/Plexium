@@ -54,6 +54,27 @@ func TestEnsureCLI_DeclineInstallLeavesToolUnavailable(t *testing.T) {
 	}
 }
 
+func TestEnsureCLI_EOFDoesNotCountAsConsent(t *testing.T) {
+	binDir := t.TempDir()
+	writeExecutable(t, filepath.Join(binDir, "curl"), "#!/bin/sh\nexit 0\n")
+	t.Setenv("PATH", binDir)
+
+	result, err := EnsureCLI(EnsureCLIOptions{
+		Stdin:  bytes.NewBuffer(nil),
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatalf("EnsureCLI returned error: %v", err)
+	}
+	if result.Available {
+		t.Fatalf("expected EOF to leave git-memento unavailable")
+	}
+	if result.Installed {
+		t.Fatalf("did not expect installation to run on EOF")
+	}
+}
+
 func TestIsInitializedChecksLocalGitConfig(t *testing.T) {
 	repoRoot := t.TempDir()
 	runGit(t, repoRoot, "init")

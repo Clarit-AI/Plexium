@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -75,5 +76,49 @@ func TestEnableMementoInConfig(t *testing.T) {
 	}
 	if !cfg.Enforcement.MementoGate {
 		t.Fatalf("expected enforcement.mementoGate to be enabled")
+	}
+}
+
+func TestSetupAgent_WithMementoDeclined_DoesNotPersistConfigFlags(t *testing.T) {
+	repoRoot := t.TempDir()
+	binDir := t.TempDir()
+
+	stub := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(binDir, "curl"), []byte(stub), 0o755); err != nil {
+		t.Fatalf("write curl stub: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+"/usr/bin:/bin:/opt/homebrew/bin")
+
+	result, err := setupAgent(repoRoot, "claude", setupAgentOptions{
+		WithMemento: true,
+		Stdin:       bytes.NewBufferString("n\n"),
+		Stdout:      &bytes.Buffer{},
+		Stderr:      &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatalf("setupAgent returned error: %v", err)
+	}
+
+	foundWarning := false
+	for _, step := range result.Steps {
+		if step.Name == "memento" && step.Status == "warning" {
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("expected a warning memento step when installation is declined")
+	}
+
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Integrations.Memento {
+		t.Fatalf("expected integrations.memento to remain disabled")
+	}
+	if cfg.Enforcement.MementoGate {
+		t.Fatalf("expected enforcement.mementoGate to remain disabled")
 	}
 }
