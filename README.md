@@ -40,7 +40,7 @@ The wiki is browsable as an [Obsidian](https://obsidian.md) vault, publishable a
 
 ### Retrieval
 
-Plexium includes a built-in search engine queryable via CLI (`plexium retrieve "query"`) or MCP (`plexium pageindex serve`). The engine uses BM25-style scoring across page titles, sections, summaries, content, and wiki-links. CLI retrieval works immediately after `plexium init`. The MCP server exposes the same engine over JSON-RPC 2.0 stdio for agents that support the Model Context Protocol. Use `plexium pageindex connect claude` or `plexium pageindex connect codex` to see the native MCP setup command for each agent.
+Plexium includes a built-in search engine queryable via CLI (`plexium retrieve "query"`) or MCP (`plexium pageindex serve`). The engine uses BM25-style scoring across page titles, sections, summaries, content, and wiki-links. CLI retrieval works immediately after `plexium init`. The MCP server exposes the same engine over JSON-RPC 2.0 stdio for agents that support the Model Context Protocol. Use `plexium setup claude` or `plexium setup codex` for the full onboarding flow, or `plexium pageindex connect <agent>` when you only want the native MCP command.
 
 ### Assistive Agent
 
@@ -104,23 +104,35 @@ daemon:
 - Git
 - A GitHub repo (local or remote)
 
+### Binary-first
+
 ```bash
-# Install
+# Install Plexium
 go install github.com/Clarit-AI/Plexium/cmd/plexium@latest
 
-# Initialize in your repo
+# Set up the current repo for your agent
 cd /path/to/your/repo
-plexium init
-
-# Validate the setup
-plexium doctor
-
-# Run structural lint
-plexium lint --deterministic
-
-# Generate navigation
-plexium compile
+plexium setup claude
+# or
+plexium setup codex
 ```
+
+Add `--write-config` if you want Plexium to run the native MCP command for you.
+
+### Claude Code marketplace
+
+```text
+/plugin marketplace add /path/to/Plexium
+/plugin install plexium-tools@plexium-local
+/plexium-install
+/plexium-setup
+```
+
+Use `/plexium-setup-auto` when you want the plugin to apply the Claude MCP config automatically.
+
+### Codex marketplace
+
+Clone the Plexium repo somewhere local, restart Codex so it sees `.agents/plugins/marketplace.json`, install `Plexium Tools` from the `Plexium Local Plugins` source, then ask Codex to set up or verify Plexium in the current repository.
 
 For a complete walkthrough, see the [Getting Started](docs/getting-started.md) guide.
 
@@ -195,6 +207,8 @@ Full details: [Implementation Status](docs/status.md)
 | Command | Purpose |
 |---------|---------|
 | `plexium init` | Scaffold wiki and config |
+| `plexium setup <agent>` | Canonical repo onboarding for Claude or Codex |
+| `plexium verify <agent>` | Agent-specific readiness check |
 | `plexium sync` | Detect stale pages, update manifest |
 | `plexium convert` | Bootstrap wiki from existing repo |
 | `plexium lint` | Structural and semantic health checks |

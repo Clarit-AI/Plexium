@@ -286,7 +286,21 @@ The server exposes three tools:
 
 #### Wiring the MCP server to your agent
 
-Plexium can print the exact native setup command for the agents it supports:
+The canonical path is the higher-level setup command:
+
+```bash
+plexium setup claude
+plexium setup codex
+```
+
+Add `--write-config` to let Plexium apply the native MCP command automatically:
+
+```bash
+plexium setup claude --write-config
+plexium setup codex --write-config
+```
+
+If you only want the native MCP command itself, Plexium can print it directly:
 
 ```bash
 plexium pageindex connect claude
@@ -345,7 +359,14 @@ Links are stored in wiki page frontmatter as `beads-ids: [BD-42, BD-43]`. Linkin
 
 ## Plugin Adapters [Stable]
 
-Plexium generates agent-specific instruction files via plugins:
+Plexium generates agent-specific instruction files via plugins. Most users should prefer the higher-level onboarding command:
+
+```bash
+plexium setup claude
+plexium setup codex
+```
+
+If you want to manage adapters directly, the underlying plugin commands are still available:
 
 ```bash
 # List available plugins

@@ -1,0 +1,18 @@
+{
+  "name": "plexium-local",
+  "description": "Development marketplace for the Plexium Claude plugin",
+  "owner": {
+    "name": "Clarit AI"
+  },
+  "plugins": [
+    {
+      "name": "plexium-tools",
+      "description": "Install, set up, and verify Plexium repositories from inside Claude Code",
+      "version": "0.1.0",
+      "source": "./",
+      "author": {
+        "name": "Clarit AI"
+      }
+    }
+  ]
+}

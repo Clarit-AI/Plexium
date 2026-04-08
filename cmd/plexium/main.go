@@ -183,7 +183,10 @@ var initCmd = &cobra.Command{
 		}
 
 		if outputJSON {
-			data, _ := json.MarshalIndent(result, "", "  ")
+			data, err := json.MarshalIndent(result, "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshal init result to JSON: %w", err)
+			}
 			fmt.Println(string(data))
 			return nil
 		}
@@ -196,15 +199,14 @@ var initCmd = &cobra.Command{
 			fmt.Printf("Created %d directories and %d files\n", len(result.DirsCreated), len(result.FilesCreated))
 
 			fmt.Println("\nNext steps:")
-			fmt.Println("  1. Run 'plexium doctor' to validate the setup")
-			fmt.Println("  2. Run 'plexium convert' to bootstrap wiki from existing code")
-			fmt.Println("  3. Run 'plexium lint --deterministic' to check wiki health")
+			fmt.Println("  1. Run 'plexium setup claude' or 'plexium setup codex' for agent-ready onboarding")
+			fmt.Println("  2. Run 'plexium doctor' to validate the setup")
+			fmt.Println("  3. Run 'plexium convert' to bootstrap wiki from existing code")
 
 			if withPageIndex {
 				fmt.Println("\nPageIndex MCP server ready.")
-				fmt.Println("  Connect Claude Code: plexium pageindex connect claude")
-				fmt.Println("  Connect Codex:       plexium pageindex connect codex")
-				fmt.Println("  Add --write-config to let Plexium run the native MCP command for you.")
+				fmt.Println("  Finish setup for Claude: plexium setup claude --write-config")
+				fmt.Println("  Finish setup for Codex:  plexium setup codex --write-config")
 				fmt.Println("  Or query directly: plexium retrieve \"<query>\"")
 			}
 		}

@@ -45,9 +45,6 @@ func TestE2E_InitCompileLint(t *testing.T) {
 	report, err := linter.RunDeterministic()
 	require.NoError(t, err)
 
-	// Log the results for visibility. A fresh init may have frontmatter errors
-	// because scaffolded pages have minimal frontmatter (title + ownership + last-updated)
-	// but the lint validator may require additional fields.
 	t.Logf("Fresh init lint: %d errors, %d warnings", report.Summary.Errors, report.Summary.Warnings)
 	if len(report.Deterministic.BrokenLinks) > 0 {
 		t.Logf("Broken links: %v", report.Deterministic.BrokenLinks)
@@ -55,23 +52,12 @@ func TestE2E_InitCompileLint(t *testing.T) {
 	if len(report.Deterministic.ManifestDrift) > 0 {
 		t.Logf("Manifest drift: %v", report.Deterministic.ManifestDrift)
 	}
-
-	// FINDING: _schema.md contains [[wiki-links]] and [[links]] as documentation
-	// of syntax rules, not as actual cross-references. The link crawler flags
-	// these as broken. This is a lint false positive in _schema.md.
-	// Filter out _schema.md broken links for the core invariant check.
-	var nonSchemaLinks []lint.BrokenLinkReport
-	for _, bl := range report.Deterministic.BrokenLinks {
-		if bl.PagePath != "_schema.md" {
-			nonSchemaLinks = append(nonSchemaLinks, bl)
-		}
-	}
-	assert.Empty(t, nonSchemaLinks,
-		"freshly initialized repo should have no broken links outside _schema.md")
-
-	// Manifest should be consistent
-	assert.Empty(t, report.Deterministic.ManifestDrift,
-		"freshly initialized repo should have no manifest drift")
+	assert.Zero(t, report.Summary.Errors, "freshly initialized repo should have no lint errors")
+	assert.Zero(t, report.Summary.Warnings, "freshly initialized repo should have no lint warnings")
+	assert.Empty(t, report.Deterministic.BrokenLinks, "freshly initialized repo should have no broken links")
+	assert.Empty(t, report.Deterministic.ManifestDrift, "freshly initialized repo should have no manifest drift")
+	assert.Empty(t, report.Deterministic.OrphanPages, "freshly initialized repo should have no orphan pages")
+	assert.Empty(t, report.Deterministic.FrontmatterIssues, "freshly initialized repo should have no frontmatter issues")
 }
 
 // =============================================================================

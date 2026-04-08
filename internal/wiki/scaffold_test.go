@@ -140,6 +140,23 @@ func TestInit_HomeFromREADME(t *testing.T) {
 	content := string(data)
 	assert.Contains(t, content, "My Project")
 	assert.Contains(t, content, "This is my project")
+	assert.Contains(t, content, "[[architecture/overview|Architecture Overview]]")
+	assert.Contains(t, content, "[[_log|Activity Log]]")
+}
+
+func TestInit_StarterScaffoldIsLintFriendly(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := Init(InitOptions{RepoRoot: dir})
+	require.NoError(t, err)
+
+	logContent, err := os.ReadFile(filepath.Join(dir, ".wiki", "_log.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(logContent), `title: "Activity Log"`)
+
+	sidebarContent, err := os.ReadFile(filepath.Join(dir, ".wiki", "_Sidebar.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(sidebarContent), "[[onboarding|Onboarding Guide]]")
 }
 
 func TestInit_SchemaContent(t *testing.T) {

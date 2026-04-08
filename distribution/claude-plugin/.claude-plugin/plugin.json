@@ -1,0 +1,13 @@
+{
+  "name": "plexium-tools",
+  "version": "0.1.0",
+  "description": "Install, set up, and verify Plexium repositories from inside Claude Code.",
+  "author": {
+    "name": "Clarit AI",
+    "url": "https://github.com/Clarit-AI"
+  },
+  "homepage": "https://github.com/Clarit-AI/Plexium",
+  "repository": "https://github.com/Clarit-AI/Plexium",
+  "license": "Apache-2.0",
+  "keywords": ["plexium", "wiki", "claude-code", "mcp"]
+}
