@@ -340,12 +340,12 @@ func startCallbackServer(codeCh chan<- string, errCh chan<- error) (*http.Server
 		if code != "" {
 			w.Header().Set("Content-Type", "text/html")
 			w.WriteHeader(200)
-			fmt.Fprint(w, "<html><body><h2>Plexium authorized!</h2><p>You can close this tab.</p></body></html>")
+			fmt.Fprint(w, renderCallbackPage("Plexium connected", "Authorization complete", "Your OpenRouter key has been saved. You can close this tab and return to the CLI."))
 			codeCh <- code
 		} else {
 			w.Header().Set("Content-Type", "text/html")
 			w.WriteHeader(400)
-			fmt.Fprint(w, "<html><body><h2>Authorization failed.</h2><p>No code received.</p></body></html>")
+			fmt.Fprint(w, renderCallbackPage("Authorization failed", "No code received", "Plexium did not receive an authorization code from OpenRouter. Close this tab and retry the setup flow from the terminal."))
 		}
 	})
 
@@ -366,6 +366,70 @@ func startCallbackServer(codeCh chan<- string, errCh chan<- error) (*http.Server
 	}()
 
 	return server, nil
+}
+
+func renderCallbackPage(title, heading, body string) string {
+	return fmt.Sprintf(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>%s</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f7fafc 0%%, #edf2f7 100%%);
+      color: #0f172a;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    main {
+      width: min(100%%, 460px);
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid #dbe4ee;
+      border-radius: 18px;
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+      padding: 28px 24px;
+    }
+    .badge {
+      display: inline-block;
+      margin-bottom: 14px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #e0f2fe;
+      color: #075985;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 26px;
+      line-height: 1.15;
+    }
+    p {
+      margin: 0;
+      color: #475569;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="badge">Plexium OAuth</div>
+    <h1>%s</h1>
+    <p>%s</p>
+  </main>
+</body>
+</html>`, title, heading, body)
 }
 
 func stopCallbackServer(server *http.Server) {

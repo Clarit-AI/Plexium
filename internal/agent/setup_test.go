@@ -166,6 +166,10 @@ func TestCallbackServerHandler(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, 200, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "Authorization complete")
+	assert.Contains(t, string(body), "Plexium OAuth")
 
 	code := <-codeCh
 	assert.Equal(t, "test-auth-code", code)
@@ -182,6 +186,10 @@ func TestCallbackServerNoCode(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, 400, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "Authorization failed")
+	assert.Contains(t, string(body), "No code received")
 }
 
 func TestStopCallbackServer_AllowsInFlightRequestToComplete(t *testing.T) {
