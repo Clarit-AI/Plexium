@@ -91,7 +91,7 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 		}
 		fmt.Fprintln(stdout, "OK")
 
-		if err := SaveCredentials(repoRoot, opts.APIKey); err != nil {
+		if err := SaveCredentials(repoRoot, opts.APIKey, stdout, stderr); err != nil {
 			return nil, fmt.Errorf("saving credentials: %w", err)
 		}
 
@@ -149,7 +149,7 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 		switch choice {
 		case "1", "":
 			fmt.Fprintln(stdout)
-			apiKey, err = RunOAuthFlow(client, oauthAppName)
+			apiKey, err = RunOAuthFlow(client, oauthAppName, stdout, stderr)
 			if err != nil {
 				fmt.Fprintf(stdout, "OAuth failed: %v\n", err)
 				fmt.Fprintln(stdout, "Falling back to manual entry...")
@@ -175,7 +175,7 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 				fmt.Fprintln(stdout, "Key not saved. Check the key and try again.")
 			} else {
 				fmt.Fprintln(stdout, "OK")
-				if err := SaveCredentials(repoRoot, apiKey); err != nil {
+				if err := SaveCredentials(repoRoot, apiKey, stdout, stderr); err != nil {
 					return nil, fmt.Errorf("saving credentials: %w", err)
 				}
 
@@ -225,8 +225,14 @@ func generatePKCEPair() (string, string, error) {
 
 // RunOAuthFlow runs the PKCE OAuth flow for OpenRouter.
 // Returns the API key on success.
-func RunOAuthFlow(client *http.Client, appName string) (string, error) {
+func RunOAuthFlow(client *http.Client, appName string, stdout, stderr io.Writer) (string, error) {
 	client = clientOrDefault(client)
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	if stderr == nil {
+		stderr = os.Stderr
+	}
 
 	if !portAvailable(callbackPort) {
 		return "", fmt.Errorf("port %d is in use (required by OpenRouter OAuth callback)", callbackPort)
@@ -256,15 +262,15 @@ func RunOAuthFlow(client *http.Client, appName string) (string, error) {
 		}
 
 		if attempt == 1 {
-			fmt.Println("Opening browser for OpenRouter authorization...")
-			fmt.Printf("  %s\n", authURL)
-			fmt.Println()
+			fmt.Fprintln(stdout, "Opening browser for OpenRouter authorization...")
+			fmt.Fprintf(stdout, "  %s\n", authURL)
+			fmt.Fprintln(stdout)
 			openBrowser(authURL)
 		} else {
-			fmt.Printf("Attempt %d of %d — open this URL in your browser:\n", attempt, maxAttempts)
-			fmt.Printf("  %s\n\n", authURL)
+			fmt.Fprintf(stdout, "Attempt %d of %d — open this URL in your browser:\n", attempt, maxAttempts)
+			fmt.Fprintf(stdout, "  %s\n\n", authURL)
 		}
-		fmt.Printf("Waiting up to %ds for authorization...\n", int(oauthTimeout.Seconds()))
+		fmt.Fprintf(stdout, "Waiting up to %ds for authorization...\n", int(oauthTimeout.Seconds()))
 
 		// Wait for callback or timeout
 		var code string
@@ -280,25 +286,25 @@ func RunOAuthFlow(client *http.Client, appName string) (string, error) {
 		}
 		server.Close()
 
-		fmt.Print("Exchanging code for API key... ")
+		fmt.Fprint(stdout, "Exchanging code for API key... ")
 		apiKey, err := exchangeCode(client, code, codeVerifier)
 		if err != nil {
 			if attempt < maxAttempts && strings.Contains(err.Error(), "400") {
-				fmt.Printf("FAILED (%v)\nRetrying with fresh PKCE pair...\n", err)
+				fmt.Fprintf(stdout, "FAILED (%v)\nRetrying with fresh PKCE pair...\n", err)
 				continue
 			}
-			fmt.Println("FAILED")
+			fmt.Fprintln(stdout, "FAILED")
 			return "", err
 		}
-		fmt.Println("OK")
+		fmt.Fprintln(stdout, "OK")
 
 		// Validate
-		fmt.Print("Validating key... ")
+		fmt.Fprint(stdout, "Validating key... ")
 		label, err := validateKey(client, apiKey)
 		if err != nil {
-			fmt.Println("SKIPPED (network error)")
+			fmt.Fprintln(stderr, "SKIPPED (network error)")
 		} else {
-			fmt.Printf("OK (%s)\n", label)
+			fmt.Fprintf(stdout, "OK (%s)\n", label)
 		}
 
 		return apiKey, nil
@@ -458,7 +464,13 @@ func clientOrDefault(client *http.Client) *http.Client {
 // --- Credential Storage ---
 
 // SaveCredentials writes the API key to .plexium/credentials.json with mode 0600.
-func SaveCredentials(repoRoot string, key string) error {
+func SaveCredentials(repoRoot string, key string, stdout, stderr io.Writer) error {
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	if stderr == nil {
+		stderr = os.Stderr
+	}
 	credDir := filepath.Join(repoRoot, ".plexium")
 	if err := os.MkdirAll(credDir, 0o755); err != nil {
 		return fmt.Errorf("creating .plexium directory: %w", err)
@@ -470,7 +482,7 @@ func SaveCredentials(repoRoot string, key string) error {
 	existing := make(map[string]string)
 	if data, err := os.ReadFile(credPath); err == nil {
 		if err := json.Unmarshal(data, &existing); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: existing credentials.json is malformed, will be overwritten\n")
+			fmt.Fprintf(stderr, "Warning: existing credentials.json is malformed, will be overwritten\n")
 		}
 	}
 
@@ -491,7 +503,7 @@ func SaveCredentials(repoRoot string, key string) error {
 		return fmt.Errorf("renaming credentials: %w", err)
 	}
 
-	fmt.Printf("Key saved to %s\n", credPath)
+	fmt.Fprintf(stdout, "Key saved to %s\n", credPath)
 	return nil
 }
 
@@ -597,8 +609,11 @@ func promptYesNo(reader *bufio.Reader, stdout io.Writer, question string, defaul
 		hint = "[y/N]"
 	}
 	fmt.Fprintf(stdout, "%s %s: ", question, hint)
-	answer, _ := reader.ReadString('\n')
+	answer, err := reader.ReadString('\n')
 	answer = strings.TrimSpace(strings.ToLower(answer))
+	if err != nil && answer == "" {
+		return false
+	}
 	if answer == "" {
 		return defaultYes
 	}

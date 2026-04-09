@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -44,7 +46,7 @@ func TestSaveCredentials(t *testing.T) {
 	plexDir := filepath.Join(dir, ".plexium")
 	require.NoError(t, os.MkdirAll(plexDir, 0o755))
 
-	err := SaveCredentials(dir, "sk-test-key-123")
+	err := SaveCredentials(dir, "sk-test-key-123", io.Discard, io.Discard)
 	require.NoError(t, err)
 
 	// Verify file exists with correct permissions
@@ -72,7 +74,7 @@ func TestSaveCredentialsMergesExisting(t *testing.T) {
 	data, _ := json.Marshal(existing)
 	require.NoError(t, os.WriteFile(filepath.Join(plexDir, "credentials.json"), data, 0o600))
 
-	err := SaveCredentials(dir, "sk-new-key")
+	err := SaveCredentials(dir, "sk-new-key", io.Discard, io.Discard)
 	require.NoError(t, err)
 
 	// Verify both keys present
@@ -262,6 +264,13 @@ func TestRunInteractiveSetup_UsesEnvVarFallback(t *testing.T) {
 
 	assert.Equal(t, []string{"openrouter"}, result.ProvidersConfigured)
 	assert.True(t, result.ConfigUpdated)
+}
+
+func TestPromptYesNo_EOFWithoutAnswerReturnsFalse(t *testing.T) {
+	reader := bufio.NewReader(bytes.NewBuffer(nil))
+	if promptYesNo(reader, io.Discard, "Configure OpenRouter?", true) {
+		t.Fatalf("expected EOF without answer to return false")
+	}
 }
 
 func stubOpenRouterValidation(t *testing.T) (*http.Client, func()) {

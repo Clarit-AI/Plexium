@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -43,8 +44,12 @@ function resolveClaudeBin() {
 }
 
 function getProjectDir() {
+  const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir();
+  if (!homeDir) {
+    throw new Error('Could not determine a home directory for Claude session lookup.');
+  }
   const cwd = process.cwd().replace(/[^a-zA-Z0-9]/g, '-');
-  return path.join(process.env.HOME, '.claude', 'projects', cwd);
+  return path.join(homeDir, '.claude', 'projects', cwd);
 }
 
 function main() {
@@ -116,7 +121,9 @@ function main() {
               createdAt: item.timestamp,
             });
           }
-        } catch (e) {}
+        } catch (e) {
+          console.error(`Ignoring malformed Claude session line: ${line}`);
+        }
       }
 
       const stat = fs.statSync(filePath);

@@ -129,6 +129,31 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "sources.include is required",
 		},
+		{
+			name: "invalid capability profile",
+			cfg: Config{
+				Version: 1,
+				Wiki:    Wiki{Root: ".wiki"},
+				Sources: Sources{Include: []string{"**/*.go"}},
+				AssistiveAgent: AssistiveAgent{
+					Providers: []ProviderConfig{{CapabilityProfile: "extreme"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "capabilityProfile",
+		},
+		{
+			name: "valid capability profile is normalized",
+			cfg: Config{
+				Version: 1,
+				Wiki:    Wiki{Root: ".wiki"},
+				Sources: Sources{Include: []string{"**/*.go"}},
+				AssistiveAgent: AssistiveAgent{
+					Providers: []ProviderConfig{{CapabilityProfile: " Frontier-Large-Context "}},
+				},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -139,6 +164,9 @@ func TestConfig_Validate(t *testing.T) {
 				assert.Contains(t, err.Error(), tt.errMsg)
 			} else {
 				assert.NoError(t, err)
+				if tt.name == "valid capability profile is normalized" {
+					assert.Equal(t, "frontier-large-context", tt.cfg.AssistiveAgent.Providers[0].CapabilityProfile)
+				}
 			}
 		})
 	}

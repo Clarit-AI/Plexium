@@ -73,7 +73,7 @@ function findSessionFileById(requestedId) {
     return null;
   }
 
-  let fallback = null;
+  const candidates = [];
   const stack = [sessionsRoot];
   while (stack.length > 0) {
     const current = stack.pop();
@@ -88,15 +88,20 @@ function findSessionFileById(requestedId) {
         continue;
       }
 
-      if (entry.name.includes(requestedId)) {
+      candidates.push(fullPath);
+      if (requestedId && entry.name.includes(requestedId)) {
         return fullPath;
-      }
-      if (!fallback) {
-        fallback = fullPath;
       }
     }
   }
-  return fallback;
+  if (requestedId) {
+    return null;
+  }
+  if (candidates.length === 0) {
+    return null;
+  }
+  candidates.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+  return candidates[0];
 }
 
 function parseSessionMeta(filePath) {

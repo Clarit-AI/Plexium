@@ -94,7 +94,9 @@ func Init(opts InitOptions) (*InitResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("materializing prompt pack: %w", err)
 		}
-		result.FilesCreated = append(result.FilesCreated, createdPrompts...)
+		for _, p := range createdPrompts {
+			result.FilesCreated = append(result.FilesCreated, repoRelativePath(opts.RepoRoot, p))
+		}
 	}
 
 	// Generate _schema.md using tech-stack-aware SchemaGenerator
@@ -191,7 +193,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 		if err := mgr.Save(manifest.NewEmptyManifest()); err != nil {
 			return nil, fmt.Errorf("saving initial manifest: %w", err)
 		}
-		result.FilesCreated = append(result.FilesCreated, manifest.DefaultPath(opts.RepoRoot))
+		result.FilesCreated = append(result.FilesCreated, repoRelativePath(opts.RepoRoot, manifest.DefaultPath(opts.RepoRoot)))
 	} else {
 		dr.Report("would create manifest.json")
 	}
@@ -204,7 +206,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 			return nil, err
 		}
 		for _, f := range obsidianCfg.FilesCreated() {
-			result.FilesCreated = append(result.FilesCreated, f)
+			result.FilesCreated = append(result.FilesCreated, repoRelativePath(opts.RepoRoot, f))
 		}
 
 		// Create templates directory with dataview queries
@@ -212,7 +214,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 			return nil, err
 		}
 		result.DirsCreated = append(result.DirsCreated, filepath.Join(wikiDir, "templates"))
-		result.FilesCreated = append(result.FilesCreated, filepath.Join(wikiDir, "templates", "dataview-queries.md"))
+		result.FilesCreated = append(result.FilesCreated, repoRelativePath(opts.RepoRoot, filepath.Join(wikiDir, "templates", "dataview-queries.md")))
 	}
 
 	// Set up optional integrations (--with-beads, --with-pageindex).
@@ -231,7 +233,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to write PageIndex MCP config: %v\n", err)
 		} else if created {
-			result.FilesCreated = append(result.FilesCreated, mcpPath)
+			result.FilesCreated = append(result.FilesCreated, repoRelativePath(opts.RepoRoot, mcpPath))
 		}
 	}
 
@@ -258,6 +260,18 @@ func writeFile(dr *manifest.DryRunner, path string, content string, result *Init
 
 	result.FilesCreated = append(result.FilesCreated, relPath)
 	return nil
+}
+
+func repoRelativePath(repoRoot, path string) string {
+	relPath, err := filepath.Rel(repoRoot, path)
+	if err != nil {
+		return path
+	}
+	relPath = filepath.ToSlash(relPath)
+	if strings.HasPrefix(relPath, ".") {
+		return relPath
+	}
+	return "./" + relPath
 }
 
 func generateDefaultSchema(opts InitOptions) string {

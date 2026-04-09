@@ -157,7 +157,7 @@ plexium init --strictness strict
 
 The CLI retrieval command (`plexium retrieve`) works regardless of whether `--with-pageindex` was passed. The flag enables the PageIndex integration in config but the built-in search engine is always available.
 
-**A note on `--with-memento`:** This flag is also per-repository. If `git-memento` is already installed, Plexium initializes it for the current repo. If it is missing, Plexium can offer to install it with the official installer script before running `git memento init`. On Claude and Codex, Plexium additionally configures the temporary compatibility shim automatically.
+**A note on `--with-memento`:** This flag is also per-repository. If `git-memento` is already installed, Plexium initializes it for the current repo. If it is missing, Plexium can offer to download the pinned release asset and install the `git-memento` binary before running `git memento init`. On Claude and Codex, Plexium additionally configures the temporary compatibility shim automatically.
 
 ### Preview first
 

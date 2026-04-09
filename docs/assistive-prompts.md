@@ -49,7 +49,7 @@ Plexium applies the matching profile overlay on top of the base prompt.
 Typical defaults:
 
 - Ollama -> `constrained-local`
-- OpenRouter -> `balanced`
+- `openai-compatible` providers -> `balanced` (for example, OpenRouter when it is exposed through its OpenAI-compatible API)
 
 You can override those values manually in `.plexium/config.yml`.
 

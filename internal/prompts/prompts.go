@@ -92,9 +92,6 @@ func Render(repoRoot, name, profile string, data any) (string, error) {
 	}
 
 	profile = NormalizeProfile(profile)
-	if profile == "" {
-		profile = DefaultProfile
-	}
 
 	overlay, err := loadPrompt(repoRoot, filepath.ToSlash(filepath.Join("profiles", profile+".md")))
 	if err != nil {

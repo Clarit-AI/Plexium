@@ -272,9 +272,10 @@ func TestCodexBridgeHandlesSessionsListAndGet(t *testing.T) {
 	if err := os.WriteFile(bridgePath, []byte(codexBridgeScript), 0o755); err != nil {
 		t.Fatalf("write bridge: %v", err)
 	}
+	t.Setenv("HOME", homeDir)
+	t.Setenv("CODEX_HOME", codexHome)
 
 	listCmd := exec.Command(nodePath, bridgePath, "sessions", "list", "--json")
-	listCmd.Env = append(os.Environ(), "HOME="+homeDir, "CODEX_HOME="+codexHome)
 	listOutput, err := listCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("bridge sessions list failed: %v\n%s", err, listOutput)
@@ -292,7 +293,6 @@ func TestCodexBridgeHandlesSessionsListAndGet(t *testing.T) {
 	}
 
 	getCmd := exec.Command(nodePath, bridgePath, "sessions", "get", sessionID, "--json")
-	getCmd.Env = append(os.Environ(), "HOME="+homeDir, "CODEX_HOME="+codexHome)
 	getOutput, err := getCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("bridge sessions get failed: %v\n%s", err, getOutput)

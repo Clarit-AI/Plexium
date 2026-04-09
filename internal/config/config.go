@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
@@ -286,6 +287,15 @@ func (c *Config) Validate() error {
 	}
 	if c.Sources.Include == nil {
 		return fmt.Errorf("sources.include is required")
+	}
+	for i := range c.AssistiveAgent.Providers {
+		profile := strings.TrimSpace(strings.ToLower(c.AssistiveAgent.Providers[i].CapabilityProfile))
+		switch profile {
+		case "", "balanced", "constrained-local", "frontier-large-context":
+			c.AssistiveAgent.Providers[i].CapabilityProfile = profile
+		default:
+			return fmt.Errorf("assistiveAgent.providers[%d].capabilityProfile %q is invalid (expected one of: balanced, constrained-local, frontier-large-context)", i, c.AssistiveAgent.Providers[i].CapabilityProfile)
+		}
 	}
 	return nil
 }

@@ -221,34 +221,53 @@ func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, e
 	}
 
 	if needsPlexiumInit(repoRoot) {
-		if _, err := wiki.Init(wiki.InitOptions{
+		initResult, err := wiki.Init(wiki.InitOptions{
 			RepoRoot:      repoRoot,
 			WithMemento:   false,
 			WithPageIndex: true,
-		}); err != nil {
+		})
+		if err != nil {
 			return nil, fmt.Errorf("initialize Plexium: %w", err)
 		}
 		result.Steps = append(result.Steps, setupStep{Name: "init", Status: "pass", Message: "initialized Plexium scaffold"})
+		promptFiles := 0
+		for _, path := range initResult.FilesCreated {
+			if strings.HasPrefix(path, ".plexium/prompts/") {
+				promptFiles++
+			}
+		}
+		if promptFiles > 0 {
+			result.Steps = append(result.Steps, setupStep{
+				Name:    "prompts",
+				Status:  "pass",
+				Message: fmt.Sprintf("materialized editable prompt pack in %s", relativeToRepo(repoRoot, filepath.Join(repoRoot, ".plexium", "prompts"))),
+			})
+		} else {
+			result.Steps = append(result.Steps, setupStep{
+				Name:    "prompts",
+				Status:  "pass",
+				Message: "editable prompt pack already present",
+			})
+		}
 	} else {
 		result.Steps = append(result.Steps, setupStep{Name: "init", Status: "pass", Message: "existing Plexium scaffold detected"})
-	}
-
-	createdPrompts, err := prompts.EnsureRepoPack(repoRoot)
-	if err != nil {
-		return nil, fmt.Errorf("materialize prompt pack: %w", err)
-	}
-	if len(createdPrompts) > 0 {
-		result.Steps = append(result.Steps, setupStep{
-			Name:    "prompts",
-			Status:  "pass",
-			Message: fmt.Sprintf("materialized editable prompt pack in %s", relativeToRepo(repoRoot, filepath.Join(repoRoot, ".plexium", "prompts"))),
-		})
-	} else {
-		result.Steps = append(result.Steps, setupStep{
-			Name:    "prompts",
-			Status:  "pass",
-			Message: "editable prompt pack already present",
-		})
+		createdPrompts, err := prompts.EnsureRepoPack(repoRoot)
+		if err != nil {
+			return nil, fmt.Errorf("materialize prompt pack: %w", err)
+		}
+		if len(createdPrompts) > 0 {
+			result.Steps = append(result.Steps, setupStep{
+				Name:    "prompts",
+				Status:  "pass",
+				Message: fmt.Sprintf("materialized editable prompt pack in %s", relativeToRepo(repoRoot, filepath.Join(repoRoot, ".plexium", "prompts"))),
+			})
+		} else {
+			result.Steps = append(result.Steps, setupStep{
+				Name:    "prompts",
+				Status:  "pass",
+				Message: "editable prompt pack already present",
+			})
+		}
 	}
 
 	if _, err := compile.NewCompiler(repoRoot, false).Compile(); err != nil {
@@ -443,7 +462,12 @@ func maybeConfigureAssistiveProvider(repoRoot, agentName string, opts setupAgent
 	fmt.Fprintln(opts.Stdout)
 	fmt.Fprintln(opts.Stdout, "No assistive provider is configured yet.")
 	fmt.Fprintln(opts.Stdout, "Plexium works without one, but autonomous upkeep, LLM lint, and maintenance helpers need Ollama or OpenRouter.")
-	if !promptYesNo(opts.Stdin, opts.Stdout, "Configure an assistive provider now?", false) {
+	input := opts.Stdin
+	if input == nil {
+		input = os.Stdin
+	}
+	reader := bufio.NewReader(input)
+	if !promptYesNo(reader, opts.Stdout, "Configure an assistive provider now?", false) {
 		return setupStep{
 			Name:    "assistive",
 			Status:  "warning",
@@ -452,7 +476,7 @@ func maybeConfigureAssistiveProvider(repoRoot, agentName string, opts setupAgent
 	}
 
 	setupResult, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{
-		Stdin:  opts.Stdin,
+		Stdin:  reader,
 		Stdout: opts.Stdout,
 		Stderr: opts.Stderr,
 	})
@@ -711,15 +735,17 @@ func isInteractiveReader(r io.Reader) bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
-func promptYesNo(r io.Reader, w io.Writer, question string, defaultYes bool) bool {
-	reader := bufio.NewReader(r)
+func promptYesNo(reader *bufio.Reader, w io.Writer, question string, defaultYes bool) bool {
 	hint := "[Y/n]"
 	if !defaultYes {
 		hint = "[y/N]"
 	}
 	fmt.Fprintf(w, "%s %s: ", question, hint)
-	answer, _ := reader.ReadString('\n')
+	answer, err := reader.ReadString('\n')
 	answer = strings.TrimSpace(strings.ToLower(answer))
+	if err != nil && answer == "" {
+		return false
+	}
 	if answer == "" {
 		return defaultYes
 	}
