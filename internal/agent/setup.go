@@ -27,6 +27,7 @@ const (
 	openRouterAuthURL  = "https://openrouter.ai/auth"
 	openRouterTokenURL = "https://openrouter.ai/api/v1/auth/keys"
 	openRouterKeyURL   = "https://openrouter.ai/api/v1/auth/key"
+	pkceMethodS256     = "S256"
 	callbackPort       = 3000
 	callbackURL        = "http://localhost:3000"
 	oauthAppName       = "Plexium"
@@ -266,7 +267,7 @@ func RunOAuthFlow(client *http.Client, appName string, stdout, stderr io.Writer)
 		params := url.Values{
 			"callback_url":          {callbackURL},
 			"code_challenge":        {codeChallenge},
-			"code_challenge_method": {"S256"},
+			"code_challenge_method": {pkceMethodS256},
 			"app_name":              {appName},
 		}
 		authURL := openRouterAuthURL + "?" + params.Encode()
@@ -370,8 +371,9 @@ func exchangeCode(client *http.Client, code, codeVerifier string) (string, error
 	client = clientOrDefault(client)
 
 	payload, _ := json.Marshal(map[string]string{
-		"code":          code,
-		"code_verifier": codeVerifier,
+		"code":                  code,
+		"code_verifier":         codeVerifier,
+		"code_challenge_method": pkceMethodS256,
 	})
 
 	resp, err := client.Post(openRouterTokenURL, "application/json", strings.NewReader(string(payload)))

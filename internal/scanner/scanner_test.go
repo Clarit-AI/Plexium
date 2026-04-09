@@ -1,8 +1,10 @@
 package scanner
 
 import (
+	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -126,6 +128,38 @@ func TestScanner_Scan_DeterministicOrder(t *testing.T) {
 
 	// Should be sorted alphabetically
 	assert.Equal(t, []string{"src/a-file.go", "src/m-file.go", "src/z-file.go"}, filepaths(results))
+}
+
+func TestScanner_Scan_SkipsUnixSocket(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix sockets are not supported on Windows")
+	}
+
+	tmpDir, err := os.MkdirTemp("/tmp", "plexium-scan-")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tmpDir)
+	})
+
+	err = os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0o755)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# Readme"), 0o644)
+	require.NoError(t, err)
+
+	socketPath := filepath.Join(tmpDir, ".beads", "bd.sock")
+	listener, err := net.Listen("unix", socketPath)
+	require.NoError(t, err)
+	defer listener.Close()
+
+	s, err := New([]string{"**/*"}, nil)
+	require.NoError(t, err)
+
+	results, err := s.Scan(tmpDir)
+	require.NoError(t, err)
+
+	paths := filepaths(results)
+	assert.Contains(t, paths, "README.md")
+	assert.NotContains(t, paths, ".beads/bd.sock")
 }
 
 func TestExpandHome(t *testing.T) {

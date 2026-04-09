@@ -289,3 +289,47 @@ func TestSetupAgent_ExistingAssistiveProvider_IsReported(t *testing.T) {
 		t.Fatalf("expected configured assistive provider to be reported as pass")
 	}
 }
+
+func TestFormatSetupSummary_GroupsOutputIntoSections(t *testing.T) {
+	result := &setupResult{
+		Agent:    "claude",
+		RepoRoot: "/tmp/example",
+		ConnectPlan: &pageindexConnectPlan{
+			Command: "claude mcp add --scope project plexium-wiki -- plexium pageindex serve",
+		},
+		Steps: []setupStep{
+			{Name: "init", Message: "initialized Plexium scaffold"},
+			{Name: "assistive", Message: "configured assistive provider(s): openrouter (profile balanced)"},
+		},
+		Verify: &verifyResult{
+			Ready:      true,
+			Configured: false,
+			Checks: []verifyCheck{
+				{Status: "pass"},
+				{Status: "pass"},
+				{Status: "warning"},
+			},
+		},
+		NextSteps: []string{
+			"Run `plexium convert` to replace the starter scaffold with grounded project pages.",
+		},
+	}
+
+	summary := formatSetupSummary(result, false)
+
+	if !strings.Contains(summary, "Completed\n") {
+		t.Fatalf("expected Completed section, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Verification\n  2 pass, 1 warning, 0 fail\n") {
+		t.Fatalf("expected verification section, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Connect\n  claude mcp add --scope project plexium-wiki -- plexium pageindex serve\n") {
+		t.Fatalf("expected connect section, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Next Steps\n  1. Run `plexium convert`") {
+		t.Fatalf("expected next steps section, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Plexium tooling is wired.") {
+		t.Fatalf("expected ready message, got:\n%s", summary)
+	}
+}

@@ -126,31 +126,50 @@ func runSetupCommand(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Printf("Plexium setup for %s\n", capitalizeFirst(result.Agent))
-	fmt.Printf("Repository: %s\n", result.RepoRoot)
-	for _, step := range result.Steps {
-		fmt.Printf("- %s: %s\n", step.Name, step.Message)
-	}
-
-	passCount, warnCount, failCount := result.Verify.summary()
-	fmt.Printf("Verification: %d pass, %d warning, %d fail\n", passCount, warnCount, failCount)
-	if !result.Verify.Configured {
-		fmt.Printf("Native MCP command: %s\n", result.ConnectPlan.Command)
-		if !writeConfig {
-			fmt.Println("Run the command above or rerun with --write-config to apply it for you.")
-		}
-	}
-	if len(result.NextSteps) > 0 {
-		fmt.Println("What to do next:")
-		for i, step := range result.NextSteps {
-			fmt.Printf("  %d. %s\n", i+1, step)
-		}
-	}
+	fmt.Print(formatSetupSummary(result, writeConfig))
 	if result.Verify.Ready {
-		fmt.Println("Plexium tooling is wired. The wiki scaffold is intentionally minimal until you run `plexium convert` and let an agent enrich it.")
 		return nil
 	}
 	return fmt.Errorf("setup completed with verification failures")
+}
+
+func formatSetupSummary(result *setupResult, writeConfig bool) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "Plexium setup for %s\n", capitalizeFirst(result.Agent))
+	fmt.Fprintf(&b, "Repository: %s\n", result.RepoRoot)
+
+	if len(result.Steps) > 0 {
+		b.WriteString("\nCompleted\n")
+		for _, step := range result.Steps {
+			fmt.Fprintf(&b, "  - %-10s %s\n", step.Name+":", step.Message)
+		}
+	}
+
+	passCount, warnCount, failCount := result.Verify.summary()
+	b.WriteString("\nVerification\n")
+	fmt.Fprintf(&b, "  %d pass, %d warning, %d fail\n", passCount, warnCount, failCount)
+
+	if !result.Verify.Configured {
+		b.WriteString("\nConnect\n")
+		fmt.Fprintf(&b, "  %s\n", result.ConnectPlan.Command)
+		if !writeConfig {
+			b.WriteString("  Run the command above or rerun with --write-config to apply it for you.\n")
+		}
+	}
+
+	if len(result.NextSteps) > 0 {
+		b.WriteString("\nNext Steps\n")
+		for i, step := range result.NextSteps {
+			fmt.Fprintf(&b, "  %d. %s\n", i+1, step)
+		}
+	}
+
+	if result.Verify.Ready {
+		b.WriteString("\nPlexium tooling is wired. The wiki scaffold is intentionally minimal until you run `plexium convert` and let an agent enrich it.\n")
+	}
+
+	return b.String()
 }
 
 func runVerifyCommand(cmd *cobra.Command, args []string) error {

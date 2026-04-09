@@ -118,6 +118,40 @@ func TestDetectOllamaEmptyModels(t *testing.T) {
 	assert.Empty(t, models)
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestExchangeCodeIncludesCodeChallengeMethod(t *testing.T) {
+	var payload map[string]string
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			assert.Equal(t, "POST", req.Method)
+			assert.Equal(t, openRouterTokenURL, req.URL.String())
+
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.NoError(t, req.Body.Close())
+			require.NoError(t, json.Unmarshal(body, &payload))
+
+			return &http.Response{
+				StatusCode: 200,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(bytes.NewBufferString(`{"key":"sk-test-key"}`)),
+			}, nil
+		}),
+	}
+
+	key, err := exchangeCode(client, "test-auth-code", "test-verifier")
+	require.NoError(t, err)
+	assert.Equal(t, "sk-test-key", key)
+	assert.Equal(t, "test-auth-code", payload["code"])
+	assert.Equal(t, "test-verifier", payload["code_verifier"])
+	assert.Equal(t, pkceMethodS256, payload["code_challenge_method"])
+}
+
 func TestCallbackServerHandler(t *testing.T) {
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
