@@ -35,6 +35,23 @@ mv plexium /usr/local/bin/
 go install github.com/Clarit-AI/Plexium/cmd/plexium@latest
 ```
 
+`go install` prints little or no output on success. The binary is written to `GOBIN` if set, otherwise `$(go env GOPATH)/bin`.
+
+If `plexium` is not found immediately after install, add the Go bin directory to your shell `PATH`:
+
+```bash
+BIN_DIR="${GOBIN:-$(go env GOPATH)/bin}"
+export PATH="$BIN_DIR:$PATH"
+hash -r
+```
+
+To persist that change for future `zsh` sessions:
+
+```bash
+echo 'export PATH="${GOBIN:-$(go env GOPATH)/bin}:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
 ### Verify
 
 ```bash

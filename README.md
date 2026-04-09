@@ -108,6 +108,12 @@ daemon:
 # Install
 go install github.com/Clarit-AI/Plexium/cmd/plexium@latest
 
+# Go install is quiet on success. If `plexium` is not found, add Go's bin dir to PATH.
+BIN_DIR="${GOBIN:-$(go env GOPATH)/bin}"
+export PATH="$BIN_DIR:$PATH"
+hash -r
+plexium --version
+
 # Initialize in your repo
 cd /path/to/your/repo
 plexium init
