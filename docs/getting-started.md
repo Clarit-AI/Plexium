@@ -99,6 +99,14 @@ If no assistive provider is configured yet, `plexium setup <agent>` now offers t
 - skip for now and use `plexium convert` plus your coding agent
 
 For the initial bulk population pass, prefer Claude agent teams or Codex sub-agents when your primary coding agent supports them.
+If you want the remote assistive-provider path, `plexium agent setup` now includes a curated OpenRouter model picker after OAuth or API-key validation. Scripted flows can skip the prompt:
+
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-..."
+plexium agent setup --model google/gemma-4-31b-it
+```
+
+Plexium recommends `google/gemma-4-31b-it` by default and also offers `qwen/qwen3.5-35b-a3b`, `openai/gpt-5.4-nano`, `nvidia/nemotron-3-super-120b-a12b`, or a custom OpenRouter model id.
 
 ---
 
@@ -158,6 +166,7 @@ plexium init --strictness strict
 The CLI retrieval command (`plexium retrieve`) works regardless of whether `--with-pageindex` was passed. The flag enables the PageIndex integration in config but the built-in search engine is always available.
 
 **A note on `--with-memento`:** This flag is also per-repository. If `git-memento` is already installed, Plexium initializes it for the current repo. If it is missing, Plexium can offer to download the pinned release asset and install the `git-memento` binary before running `git memento init`. On Claude and Codex, Plexium additionally configures the temporary compatibility shim automatically.
+**A note on `--with-memento`:** This flag is also per-repository. If `git-memento` is already installed, Plexium initializes it for the current repo. If it is missing, Plexium can offer to download a pinned release asset and install the `git-memento` binary before running `git memento init`. On Claude and Codex, Plexium additionally configures the temporary compatibility shim automatically.
 
 ### Preview first
 

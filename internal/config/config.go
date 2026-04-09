@@ -45,10 +45,10 @@ type ProviderConfig struct {
 	Endpoint          string `yaml:"endpoint"`
 	Model             string `yaml:"model"`
 	APIKeyEnv         string `yaml:"apiKeyEnv"`
+	CapabilityProfile string `yaml:"capabilityProfile"`
 	RPM               int    `yaml:"requestsPerMinute"`
 	RPD               int    `yaml:"requestsPerDay"`
 	Tier              string `yaml:"tier"` // free | budget — only for openai-compatible type
-	CapabilityProfile string `yaml:"capabilityProfile"`
 }
 
 type BudgetConfig struct {

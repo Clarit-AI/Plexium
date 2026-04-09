@@ -21,3 +21,7 @@ func Normalize(profile string) string {
 		return ""
 	}
 }
+
+func IsValid(profile string) bool {
+	return Normalize(profile) != ""
+}

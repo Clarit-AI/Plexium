@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Clarit-AI/Plexium/internal/capabilityprofile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -100,6 +101,21 @@ func TestConfig_Validate(t *testing.T) {
 				Version: 1,
 				Wiki:    Wiki{Root: ".wiki"},
 				Sources: Sources{Include: []string{"**/*.go"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid capability profile",
+			cfg: Config{
+				Version: 1,
+				Wiki:    Wiki{Root: ".wiki"},
+				Sources: Sources{Include: []string{"**/*.go"}},
+				AssistiveAgent: AssistiveAgent{
+					Providers: []ProviderConfig{{
+						Name:              "openrouter",
+						CapabilityProfile: capabilityprofile.FrontierLargeContext,
+					}},
+				},
 			},
 			wantErr: false,
 		},

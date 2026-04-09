@@ -118,6 +118,7 @@ func init() {
 	agentCmd.AddCommand(agentSetupCmd)
 	agentSetupCmd.Flags().String("api-key-file", "", "Read OpenRouter API key from a file")
 	agentSetupCmd.Flags().Bool("api-key-stdin", false, "Read OpenRouter API key from stdin")
+	agentSetupCmd.Flags().String("model", "", "Select the OpenRouter model to write into assistiveAgent config")
 	agentTestCmd.Flags().String("provider", "", "Test a specific provider")
 
 	// Register subcommands
@@ -1694,6 +1695,7 @@ var agentSetupCmd = &cobra.Command{
 		result, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{
 			APIKey: apiKey,
 			Stdin:  cmd.InOrStdin(),
+			Model:  strings.TrimSpace(mustGetString(cmd, "model")),
 			Stdout: cmd.OutOrStdout(),
 			Stderr: cmd.ErrOrStderr(),
 		})
@@ -1749,12 +1751,17 @@ func resolveSetupAPIKey(cmd *cobra.Command, stdin io.Reader) (string, error) {
 		}
 		key := strings.TrimSpace(string(data))
 		if key == "" {
-			return "", fmt.Errorf("stdin did not contain an API key")
+			return "", fmt.Errorf("--api-key-stdin requires piped input")
 		}
 		return key, nil
 	}
 
 	return "", nil
+}
+
+func mustGetString(cmd *cobra.Command, name string) string {
+	value, _ := cmd.Flags().GetString(name)
+	return value
 }
 
 func main() {

@@ -81,7 +81,7 @@ Plexium can stay passive, or it can stay alive while you code. Git hooks can enf
 
 ### Assistive Layer
 
-If you want autonomous wiki upkeep, Plexium can route maintenance work to local or remote model providers. Ollama is the zero-cost local path. OpenRouter or another OpenAI-compatible endpoint is the remote path. This layer is optional: the core wiki and retrieval workflow do not require a paid provider. We recomend using highly capable - low cost models that work well be it in the cloud or on-prem. Our current top picks are google/gemma-4-26B-A4B-it, Qwen/Qwen3.5-35B-A3B and nvidia/Nemotron-Cascade-2-30B-A3B.
+If you want autonomous wiki upkeep, Plexium can route maintenance work to local or remote model providers. Ollama is the zero-cost local path. OpenRouter or another OpenAI-compatible endpoint is the remote path. This layer is optional: the core wiki and retrieval workflow do not require a paid provider. Our current OpenRouter picks balance long context, quality, and cost: `google/gemma-4-31b-it`, `qwen/qwen3.5-35b-a3b`, `openai/gpt-5.4-nano`, and `nvidia/nemotron-3-super-120b-a12b`.
 
 Plexium now stores assistive behavior in an editable prompt pack under `.plexium/prompts/`, with simple capability profiles such as `constrained-local`, `balanced`, and `frontier-large-context`. That lets teams tune how aggressive or conservative the assistive layer should be without editing Go code.
 
@@ -179,6 +179,8 @@ Prefer terminal-native flows such as:
 ```bash
 export OPENROUTER_API_KEY="sk-or-v1-..."
 plexium agent setup
+# or script the exact model you want:
+plexium agent setup --model google/gemma-4-31b-it
 ```
 
 If a secret was already pasted into chat, rewind that session if possible and do not commit its Memento note.

@@ -210,8 +210,10 @@ daemon:
 	require.NoError(t, os.WriteFile(configPath, []byte(initial), 0o644))
 
 	result := &SetupResult{
-		ProvidersConfigured: []string{"openrouter"},
-		OpenRouterKeyPath:   "/tmp/creds.json",
+		ProvidersConfigured:         []string{"openrouter"},
+		OpenRouterKeyPath:           "/tmp/creds.json",
+		OpenRouterModel:             "google/gemma-4-31b-it",
+		OpenRouterCapabilityProfile: "balanced",
 	}
 
 	err := writeAssistiveAgentConfig(configPath, result)
@@ -224,6 +226,8 @@ daemon:
 	assert.Contains(t, content, "assistiveAgent:")
 	assert.Contains(t, content, "enabled: true")
 	assert.Contains(t, content, "openrouter")
+	assert.Contains(t, content, "model: google/gemma-4-31b-it")
+	assert.Contains(t, content, "capabilityProfile: balanced")
 	// Daemon section should be preserved
 	assert.Contains(t, content, "daemon:")
 }
@@ -240,11 +244,16 @@ func TestRunInteractiveSetup_WithAPIKeyOption(t *testing.T) {
 	result, err := RunInteractiveSetup(dir, SetupOptions{
 		APIKey:     "sk-or-v1-test",
 		HTTPClient: client,
+		Stdin:      bytes.NewBuffer(nil),
+		Stdout:     io.Discard,
+		Stderr:     io.Discard,
 	})
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"openrouter"}, result.ProvidersConfigured)
 	assert.True(t, result.ConfigUpdated)
+	assert.Equal(t, "google/gemma-4-31b-it", result.OpenRouterModel)
+	assert.Equal(t, "balanced", result.OpenRouterCapabilityProfile)
 	assert.FileExists(t, filepath.Join(dir, ".plexium", "credentials.json"))
 	assert.FileExists(t, filepath.Join(dir, ".plexium", ".env"))
 }
@@ -259,11 +268,66 @@ func TestRunInteractiveSetup_UsesEnvVarFallback(t *testing.T) {
 	defer cleanup()
 	t.Setenv("OPENROUTER_API_KEY", "sk-or-v1-env")
 
-	result, err := RunInteractiveSetup(dir, SetupOptions{HTTPClient: client})
+	result, err := RunInteractiveSetup(dir, SetupOptions{
+		HTTPClient: client,
+		Stdin:      bytes.NewBuffer(nil),
+		Stdout:     io.Discard,
+		Stderr:     io.Discard,
+	})
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"openrouter"}, result.ProvidersConfigured)
 	assert.True(t, result.ConfigUpdated)
+	assert.Equal(t, "google/gemma-4-31b-it", result.OpenRouterModel)
+}
+
+func TestRunInteractiveSetup_WithExplicitModel(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".plexium", "config.yml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	require.NoError(t, os.WriteFile(configPath, []byte("sources:\n  include:\n    - \"**/*.go\"\n"), 0o644))
+
+	client, cleanup := stubOpenRouterValidation(t)
+	defer cleanup()
+
+	result, err := RunInteractiveSetup(dir, SetupOptions{
+		APIKey:     "sk-or-v1-test",
+		Model:      "openai/gpt-5.4-nano",
+		HTTPClient: client,
+		Stdin:      bytes.NewBuffer(nil),
+		Stdout:     io.Discard,
+		Stderr:     io.Discard,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "openai/gpt-5.4-nano", result.OpenRouterModel)
+	assert.Equal(t, "frontier-large-context", result.OpenRouterCapabilityProfile)
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "model: openai/gpt-5.4-nano")
+	assert.Contains(t, string(data), "capabilityProfile: frontier-large-context")
+}
+
+func TestResolveOpenRouterModelChoice_InteractiveSelection(t *testing.T) {
+	reader := bufio.NewReader(bytes.NewBufferString("2\n"))
+	model, profile, err := resolveOpenRouterModelChoice(reader, io.Discard, "", true)
+	require.NoError(t, err)
+	assert.Equal(t, "qwen/qwen3.5-35b-a3b", model)
+	assert.Equal(t, "balanced", profile)
+}
+
+func TestResolveOpenRouterModelChoice_Custom(t *testing.T) {
+	reader := bufio.NewReader(bytes.NewBufferString("5\nanthropic/claude-sonnet-4\n"))
+	model, profile, err := resolveOpenRouterModelChoice(reader, io.Discard, "", true)
+	require.NoError(t, err)
+	assert.Equal(t, "anthropic/claude-sonnet-4", model)
+	assert.Equal(t, "balanced", profile)
+}
+
+func TestResolveOpenRouterModelChoice_CustomEOF(t *testing.T) {
+	reader := bufio.NewReader(bytes.NewBufferString("5\n"))
+	_, _, err := resolveOpenRouterModelChoice(reader, io.Discard, "", true)
+	require.ErrorIs(t, err, io.EOF)
 }
 
 func TestPromptYesNo_EOFWithoutAnswerReturnsFalse(t *testing.T) {
