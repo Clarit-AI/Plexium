@@ -19,6 +19,7 @@ type DaemonOpts struct {
 	RepoRoot      string
 	PollInterval  time.Duration // default 5m
 	MaxConcurrent int           // default 2
+	RunnerName    string
 	Watches       WatchOpts
 }
 
@@ -86,8 +87,8 @@ func NewDaemon(opts DaemonOpts, workspace *WorkspaceMgr, tracker TrackerAdapter,
 // Run starts the poll loop. It executes one tick immediately, then ticks on
 // every PollInterval. It exits when ctx is cancelled or Stop() is called.
 func (d *Daemon) Run(ctx context.Context) error {
-	// Initial tick.
-	d.tick()
+	d.writeLifecycleSnapshot("running")
+	d.runTick()
 
 	ticker := time.NewTicker(d.pollInterval)
 	defer ticker.Stop()
@@ -99,7 +100,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		case <-d.stopCh:
 			return nil
 		case <-ticker.C:
-			d.tick()
+			d.runTick()
 		}
 	}
 }
@@ -130,6 +131,13 @@ func (d *Daemon) tick() []TickAction {
 	}
 
 	return actions
+}
+
+func (d *Daemon) runTick() {
+	startedAt := time.Now()
+	d.writeTickStarted(startedAt)
+	actions := d.tick()
+	d.writeTickCompleted(startedAt, actions)
 }
 
 // ---------------------------------------------------------------------------
@@ -372,4 +380,97 @@ func parseIntThreshold(s string, defaultVal int) int {
 		return n
 	}
 	return defaultVal
+}
+
+func (d *Daemon) writeLifecycleSnapshot(state string) {
+	snapshot, _ := LoadStatusSnapshot(d.config.RepoRoot)
+	if snapshot == nil {
+		snapshot = &StatusSnapshot{}
+	}
+
+	if snapshot.StartedAt.IsZero() {
+		snapshot.StartedAt = time.Now()
+	}
+	snapshot.State = state
+	snapshot.Runner = d.config.RunnerName
+	snapshot.PollIntervalSeconds = int(d.pollInterval / time.Second)
+	snapshot.MaxConcurrent = d.maxConcurrent
+	snapshot.Watches = []WatchSnapshot{
+		{Name: "staleness", Enabled: d.config.Watches.Staleness.Enabled, Action: d.config.Watches.Staleness.Action, Threshold: d.config.Watches.Staleness.Threshold},
+		{Name: "lint", Enabled: d.config.Watches.Lint.Enabled, Action: d.config.Watches.Lint.Action, Threshold: d.config.Watches.Lint.Threshold},
+		{Name: "ingest", Enabled: d.config.Watches.Ingest.Enabled, Action: d.config.Watches.Ingest.Action, Threshold: d.config.Watches.Ingest.Threshold},
+		{Name: "debt", Enabled: d.config.Watches.Debt.Enabled, Action: d.config.Watches.Debt.Action, Threshold: d.config.Watches.Debt.Threshold},
+	}
+	_ = saveStatusSnapshot(d.config.RepoRoot, snapshot)
+}
+
+func (d *Daemon) writeTickStarted(startedAt time.Time) {
+	snapshot, _ := LoadStatusSnapshot(d.config.RepoRoot)
+	if snapshot == nil {
+		snapshot = &StatusSnapshot{}
+	}
+	if snapshot.StartedAt.IsZero() {
+		snapshot.StartedAt = startedAt
+	}
+	snapshot.State = "ticking"
+	snapshot.Runner = d.config.RunnerName
+	snapshot.PollIntervalSeconds = int(d.pollInterval / time.Second)
+	snapshot.MaxConcurrent = d.maxConcurrent
+	snapshot.LastTickStartedAt = startedAt
+	snapshot.Watches = []WatchSnapshot{
+		{Name: "staleness", Enabled: d.config.Watches.Staleness.Enabled, Action: d.config.Watches.Staleness.Action, Threshold: d.config.Watches.Staleness.Threshold},
+		{Name: "lint", Enabled: d.config.Watches.Lint.Enabled, Action: d.config.Watches.Lint.Action, Threshold: d.config.Watches.Lint.Threshold},
+		{Name: "ingest", Enabled: d.config.Watches.Ingest.Enabled, Action: d.config.Watches.Ingest.Action, Threshold: d.config.Watches.Ingest.Threshold},
+		{Name: "debt", Enabled: d.config.Watches.Debt.Enabled, Action: d.config.Watches.Debt.Action, Threshold: d.config.Watches.Debt.Threshold},
+	}
+	_ = saveStatusSnapshot(d.config.RepoRoot, snapshot)
+}
+
+func (d *Daemon) writeTickCompleted(startedAt time.Time, actions []TickAction) {
+	snapshot, _ := LoadStatusSnapshot(d.config.RepoRoot)
+	if snapshot == nil {
+		snapshot = &StatusSnapshot{}
+	}
+
+	completedAt := time.Now()
+	failures := 0
+	recorded := make([]RecordedTickAction, 0, len(actions))
+	for _, action := range actions {
+		if !action.Success {
+			failures++
+		}
+		recorded = append(recorded, RecordedTickAction{
+			At:      completedAt,
+			Watch:   action.Watch,
+			Action:  action.Action,
+			Target:  action.Target,
+			Success: action.Success,
+			Error:   action.Error,
+		})
+	}
+
+	snapshot.State = "idle"
+	snapshot.Runner = d.config.RunnerName
+	snapshot.PollIntervalSeconds = int(d.pollInterval / time.Second)
+	snapshot.MaxConcurrent = d.maxConcurrent
+	if snapshot.StartedAt.IsZero() {
+		snapshot.StartedAt = startedAt
+	}
+	snapshot.LastTickStartedAt = startedAt
+	snapshot.LastTickCompletedAt = completedAt
+	snapshot.LastTickDurationMs = completedAt.Sub(startedAt).Milliseconds()
+	snapshot.LastTickActionCount = len(actions)
+	snapshot.LastTickFailureCount = failures
+	snapshot.TickCount++
+	snapshot.RecentActions = append(recorded, snapshot.RecentActions...)
+	if len(snapshot.RecentActions) > maxRecentActions {
+		snapshot.RecentActions = snapshot.RecentActions[:maxRecentActions]
+	}
+	snapshot.Watches = []WatchSnapshot{
+		{Name: "staleness", Enabled: d.config.Watches.Staleness.Enabled, Action: d.config.Watches.Staleness.Action, Threshold: d.config.Watches.Staleness.Threshold},
+		{Name: "lint", Enabled: d.config.Watches.Lint.Enabled, Action: d.config.Watches.Lint.Action, Threshold: d.config.Watches.Lint.Threshold},
+		{Name: "ingest", Enabled: d.config.Watches.Ingest.Enabled, Action: d.config.Watches.Ingest.Action, Threshold: d.config.Watches.Ingest.Threshold},
+		{Name: "debt", Enabled: d.config.Watches.Debt.Enabled, Action: d.config.Watches.Debt.Action, Threshold: d.config.Watches.Debt.Threshold},
+	}
+	_ = saveStatusSnapshot(d.config.RepoRoot, snapshot)
 }

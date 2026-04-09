@@ -119,6 +119,7 @@ func init() {
 	agentSetupCmd.Flags().String("api-key-file", "", "Read OpenRouter API key from a file")
 	agentSetupCmd.Flags().Bool("api-key-stdin", false, "Read OpenRouter API key from stdin")
 	agentSetupCmd.Flags().String("model", "", "Select the OpenRouter model to write into assistiveAgent config")
+	agentSetupCmd.Flags().Float64("daily-budget-usd", 0, "Optional daily assistive-provider budget in USD (0 = unlimited)")
 	agentTestCmd.Flags().String("provider", "", "Test a specific provider")
 
 	// Register subcommands
@@ -947,6 +948,7 @@ var daemonCmd = &cobra.Command{
 			RepoRoot:      repoRoot,
 			PollInterval:  time.Duration(pollInterval) * time.Second,
 			MaxConcurrent: maxConcurrent,
+			RunnerName:    runnerType,
 		}
 
 		if cfg != nil {
@@ -1226,64 +1228,17 @@ var agentStatusCmd = &cobra.Command{
 
 		cfg, _ := config.LoadFromDir(repoRoot)
 		outputJSON, _ := cmd.Flags().GetBool("output-json")
-
-		cascade, rateTracker := buildCascadeFromConfig(cfg)
-
-		type providerStatus struct {
-			Name      string  `json:"name"`
-			Available bool    `json:"available"`
-			CostUSD   float64 `json:"dailyCostUSD"`
-			Requests  int     `json:"dailyRequests"`
-		}
-
-		var statuses []providerStatus
-		enabled := cfg != nil && cfg.AssistiveAgent.Enabled
-		for _, pc := range cfg.AssistiveAgent.Providers {
-			if !pc.Enabled {
-				continue
-			}
-			usage, _ := rateTracker.GetDailyUsage(pc.Name)
-			statuses = append(statuses, providerStatus{
-				Name:      pc.Name,
-				Available: true,
-				CostUSD:   usage.CostUSD,
-				Requests:  usage.Requests,
-			})
-		}
-
-		status := struct {
-			Enabled   bool             `json:"enabled"`
-			Providers []providerStatus `json:"providers"`
-			Budget    float64          `json:"dailyBudgetUSD"`
-		}{
-			Enabled:   enabled,
-			Providers: statuses,
-			Budget:    cfg.AssistiveAgent.Budget.DailyUSD,
+		status, err := collectAgentStatus(repoRoot, cfg)
+		if err != nil {
+			return err
 		}
 
 		if outputJSON {
-			data, _ := json.MarshalIndent(status, "", "  ")
-			fmt.Println(string(data))
+			fmt.Println(marshalAgentStatus(status))
 			return nil
 		}
 
-		fmt.Printf("Assistive Agent: %s\n", map[bool]string{true: "enabled", false: "disabled"}[enabled])
-
-		// Show daemon status
-		pidFile := filepath.Join(repoRoot, ".plexium", "daemon.pid")
-		if pid, pidErr := readPIDFile(pidFile); pidErr == nil && processAlive(pid) {
-			fmt.Printf("Daemon: running (PID %d)\n", pid)
-		} else {
-			fmt.Println("Daemon: stopped")
-		}
-
-		fmt.Printf("Daily budget: $%.2f\n\n", status.Budget)
-		fmt.Println("Providers:")
-		for _, s := range statuses {
-			fmt.Printf("  %s: available=%v requests=%d cost=$%.4f\n", s.Name, s.Available, s.Requests, s.CostUSD)
-		}
-
-		_ = cascade // cascade built for future health check expansion
+		fmt.Print(formatAgentStatus(status))
 		return nil
 	},
 }
@@ -1696,6 +1651,7 @@ var agentSetupCmd = &cobra.Command{
 			APIKey: apiKey,
 			Stdin:  cmd.InOrStdin(),
 			Model:  strings.TrimSpace(mustGetString(cmd, "model")),
+			DailyBudgetUSD: resolveSetupBudget(cmd),
 			Stdout: cmd.OutOrStdout(),
 			Stderr: cmd.ErrOrStderr(),
 		})
@@ -1757,6 +1713,14 @@ func resolveSetupAPIKey(cmd *cobra.Command, stdin io.Reader) (string, error) {
 	}
 
 	return "", nil
+}
+
+func resolveSetupBudget(cmd *cobra.Command) *float64 {
+	if !cmd.Flags().Changed("daily-budget-usd") {
+		return nil
+	}
+	value, _ := cmd.Flags().GetFloat64("daily-budget-usd")
+	return &value
 }
 
 func mustGetString(cmd *cobra.Command, name string) string {

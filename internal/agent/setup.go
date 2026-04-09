@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +44,8 @@ type SetupResult struct {
 	OpenRouterKeyPath           string
 	OpenRouterModel             string
 	OpenRouterCapabilityProfile string
+	DailyBudgetUSD              float64
+	BudgetConfigured            bool
 	ConfigUpdated               bool
 }
 
@@ -57,6 +60,9 @@ type SetupOptions struct {
 	HTTPClient *http.Client
 	// Model optionally selects an OpenRouter model non-interactively.
 	Model  string
+	// DailyBudgetUSD configures an optional daily provider budget. Nil means
+	// leave it unlimited unless the interactive flow asks the user to set one.
+	DailyBudgetUSD *float64
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
@@ -116,6 +122,12 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 			return nil, fmt.Errorf("select OpenRouter model: %w", err)
 		}
 		setOpenRouterSelection(result, model, profile)
+		applyBudgetSelection(result, opts.DailyBudgetUSD)
+		if interactive && opts.DailyBudgetUSD == nil {
+			if err := promptBudgetChoice(reader, stdout, result); err != nil {
+				return nil, fmt.Errorf("choose daily budget: %w", err)
+			}
+		}
 		result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
 		result.ProvidersConfigured = append(result.ProvidersConfigured, "openrouter")
 		if err := writeAssistiveAgentConfig(configPath, result); err != nil {
@@ -206,6 +218,12 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 					return nil, fmt.Errorf("select OpenRouter model: %w", err)
 				}
 				setOpenRouterSelection(result, model, profile)
+				applyBudgetSelection(result, opts.DailyBudgetUSD)
+				if interactive && opts.DailyBudgetUSD == nil {
+					if err := promptBudgetChoice(reader, stdout, result); err != nil {
+						return nil, fmt.Errorf("choose daily budget: %w", err)
+					}
+				}
 				result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
 				result.ProvidersConfigured = append(result.ProvidersConfigured, "openrouter")
 			}
@@ -643,8 +661,8 @@ func writeAssistiveAgentConfig(configPath string, result *SetupResult) error {
   enabled: true
   providers:
 %s  budget:
-    dailyUSD: 1.00
-`, providers.String())
+    dailyUSD: %s
+`, providers.String(), formatBudgetValue(result))
 
 	// Replace existing assistiveAgent block or append
 	if strings.Contains(content, "assistiveAgent:") {
@@ -742,6 +760,35 @@ func promptManualKey(reader *bufio.Reader, stdout io.Writer) (string, error) {
 		return "", fmt.Errorf("no key entered")
 	}
 	return key, nil
+}
+
+func promptBudgetChoice(reader *bufio.Reader, stdout io.Writer, result *SetupResult) error {
+	for {
+		fmt.Fprintln(stdout)
+		fmt.Fprint(stdout, "Optional daily assistive-provider budget in USD [blank for unlimited]: ")
+		answer, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return err
+		}
+		answer = strings.TrimSpace(answer)
+		if answer == "" {
+			result.BudgetConfigured = false
+			result.DailyBudgetUSD = 0
+			return nil
+		}
+
+		value, parseErr := strconv.ParseFloat(answer, 64)
+		if parseErr == nil && value >= 0 {
+			result.BudgetConfigured = true
+			result.DailyBudgetUSD = value
+			return nil
+		}
+
+		if err == io.EOF {
+			return fmt.Errorf("invalid budget %q", answer)
+		}
+		fmt.Fprintln(stdout, "Enter a number like 2.5, or press Enter for unlimited.")
+	}
 }
 
 type openRouterModelOption struct {
@@ -842,6 +889,23 @@ func capabilityProfileForModel(model string) string {
 func setOpenRouterSelection(result *SetupResult, model, profile string) {
 	result.OpenRouterModel = model
 	result.OpenRouterCapabilityProfile = profile
+}
+
+func applyBudgetSelection(result *SetupResult, budget *float64) {
+	if budget == nil {
+		result.BudgetConfigured = false
+		result.DailyBudgetUSD = 0
+		return
+	}
+	result.BudgetConfigured = true
+	result.DailyBudgetUSD = *budget
+}
+
+func formatBudgetValue(result *SetupResult) string {
+	if result == nil || !result.BudgetConfigured || result.DailyBudgetUSD <= 0 {
+		return "0"
+	}
+	return strconv.FormatFloat(result.DailyBudgetUSD, 'f', -1, 64)
 }
 
 func yamlQuoteString(value string) string {

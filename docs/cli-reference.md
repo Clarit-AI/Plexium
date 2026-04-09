@@ -538,13 +538,13 @@ plexium pageindex connect codex --write-config
 
 ### `plexium agent status` [Stable]
 
-Show provider cascade health and cost tracking.
+Show daemon activity, provider health, and cost tracking.
 
 ```bash
 plexium agent status
 ```
 
-Displays each configured provider's health, daily request counts, spend, and rate limit state from `.plexium/agent-state.json`.
+Displays the daemon runner, watches, recent activity, worktree counts, and each configured provider's health plus daily usage from `.plexium/agent-state.json`.
 
 ---
 
@@ -572,7 +572,7 @@ Show daily spend per provider.
 plexium agent spend
 ```
 
-Loads state from `.plexium/agent-state.json` and compares spend against the configured daily budget.
+Loads state from `.plexium/agent-state.json` and compares spend against the configured daily budget when one is set. A budget of `0` means unlimited.
 
 ---
 

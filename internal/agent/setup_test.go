@@ -285,6 +285,7 @@ func TestWriteAssistiveAgentConfig(t *testing.T) {
 	assert.Contains(t, content, "ollama")
 	assert.Contains(t, content, "http://localhost:11434")
 	assert.Contains(t, content, "llama3.2:3b")
+	assert.Contains(t, content, "dailyUSD: 0")
 	// Original content preserved
 	assert.Contains(t, content, "sources:")
 }
@@ -375,6 +376,8 @@ func TestRunInteractiveSetup_WithAPIKeyOption(t *testing.T) {
 	assert.True(t, result.ConfigUpdated)
 	assert.Equal(t, "google/gemma-4-31b-it", result.OpenRouterModel)
 	assert.Equal(t, "balanced", result.OpenRouterCapabilityProfile)
+	assert.False(t, result.BudgetConfigured)
+	assert.Equal(t, 0.0, result.DailyBudgetUSD)
 	assert.FileExists(t, filepath.Join(dir, ".plexium", "credentials.json"))
 	assert.FileExists(t, filepath.Join(dir, ".plexium", ".env"))
 }
@@ -427,6 +430,34 @@ func TestRunInteractiveSetup_WithExplicitModel(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "model: \"openai/gpt-5.4-nano\"")
 	assert.Contains(t, string(data), "capabilityProfile: \"frontier-large-context\"")
+	assert.Contains(t, string(data), "dailyUSD: 0")
+}
+
+func TestRunInteractiveSetup_WithExplicitBudget(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".plexium", "config.yml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	require.NoError(t, os.WriteFile(configPath, []byte("sources:\n  include:\n    - \"**/*.go\"\n"), 0o644))
+
+	client, cleanup := stubOpenRouterValidation(t)
+	defer cleanup()
+	budget := 2.5
+
+	result, err := RunInteractiveSetup(dir, SetupOptions{
+		APIKey:         "sk-or-v1-test",
+		HTTPClient:     client,
+		DailyBudgetUSD: &budget,
+		Stdin:          bytes.NewBuffer(nil),
+		Stdout:         io.Discard,
+		Stderr:         io.Discard,
+	})
+	require.NoError(t, err)
+
+	assert.True(t, result.BudgetConfigured)
+	assert.Equal(t, 2.5, result.DailyBudgetUSD)
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "dailyUSD: 2.5")
 }
 
 func TestResolveOpenRouterModelChoice_InteractiveSelection(t *testing.T) {
@@ -457,6 +488,39 @@ func TestPromptYesNo_EOFWithoutAnswerReturnsFalse(t *testing.T) {
 		t.Fatalf("expected EOF without answer to return false")
 	}
 }
+
+func TestPromptBudgetChoice_BlankMeansUnlimited(t *testing.T) {
+	reader := bufio.NewReader(bytes.NewBufferString("\n"))
+	result := &SetupResult{}
+	require.NoError(t, promptBudgetChoice(reader, io.Discard, result))
+	assert.False(t, result.BudgetConfigured)
+	assert.Equal(t, 0.0, result.DailyBudgetUSD)
+}
+
+func TestPromptBudgetChoice_ParsesValue(t *testing.T) {
+	reader := bufio.NewReader(bytes.NewBufferString("3.75\n"))
+	result := &SetupResult{}
+	require.NoError(t, promptBudgetChoice(reader, io.Discard, result))
+	assert.True(t, result.BudgetConfigured)
+	assert.Equal(t, 3.75, result.DailyBudgetUSD)
+}
+
+func TestPromptBudgetChoice_InvalidValueFails(t *testing.T) {
+	reader := bufio.NewReader(bytes.NewBufferString("abc"))
+	result := &SetupResult{}
+	require.Error(t, promptBudgetChoice(reader, io.Discard, result))
+}
+
+func TestPromptBudgetChoice_InvalidThenValidRetries(t *testing.T) {
+	reader := bufio.NewReader(bytes.NewBufferString("abc\n1.5\n"))
+	var stdout bytes.Buffer
+	result := &SetupResult{}
+	require.NoError(t, promptBudgetChoice(reader, &stdout, result))
+	assert.True(t, result.BudgetConfigured)
+	assert.Equal(t, 1.5, result.DailyBudgetUSD)
+	assert.Contains(t, stdout.String(), "Enter a number like 2.5")
+}
+
 func stubOpenRouterValidation(t *testing.T) (*http.Client, func()) {
 	t.Helper()
 

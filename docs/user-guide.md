@@ -559,6 +559,8 @@ plexium agent setup --model openai/gpt-5.4-nano
 
 Plexium then saves the key in `.plexium/credentials.json`, writes `.plexium/.env` for convenience, and updates `.plexium/config.yml`.
 
+During interactive setup, Plexium also asks for an optional daily assistive-provider budget in USD. Leave it blank to keep the provider budget unlimited. In scripted setup, use `plexium agent setup --daily-budget-usd 2.5` if you want a cap.
+
 If you prefer to wire the provider manually, the resulting config looks like:
 
 ```yaml
@@ -573,7 +575,7 @@ assistiveAgent:
       apiKeyEnv: OPENROUTER_API_KEY
       capabilityProfile: balanced
   budget:
-    dailyUSD: 0.50
+    dailyUSD: 0    # unlimited
 ```
 
 4. Verify:
@@ -606,7 +608,7 @@ assistiveAgent:
       apiKeyEnv: OPENROUTER_API_KEY
       capabilityProfile: balanced
   budget:
-    dailyUSD: 1.00
+    dailyUSD: 0    # unlimited unless you set a cap
 ```
 
 The cascade sorts providers by cost (Ollama = $0, so it always goes first). If Ollama is down or fails, the request falls through to OpenRouter.
@@ -617,11 +619,11 @@ The `openai-compatible` type works with any API that speaks the OpenAI `/v1/chat
 
 ### Budget Controls
 
-The rate limiter tracks daily spend per provider and persists it to `.plexium/agent-state.json`. When usage approaches the budget cap, the daemon applies adaptive batching delays (backs off requests) rather than hard-cutting.
+The rate limiter tracks daily spend per provider and persists it to `.plexium/agent-state.json`. Budget caps are optional. A configured `dailyUSD` greater than zero enables adaptive batching delays as usage approaches the cap; `dailyUSD: 0` means unlimited.
 
 ```bash
 plexium agent spend       # Show daily cost breakdown
-plexium agent status      # Show provider health and budget usage
+plexium agent status      # Show daemon activity, provider health, and budget state
 ```
 
 ### Task Routing
