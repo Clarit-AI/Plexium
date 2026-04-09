@@ -32,6 +32,7 @@ const (
 	callbackURL        = "http://localhost:3000"
 	oauthAppName       = "Plexium"
 	oauthTimeout       = 180 * time.Second
+	callbackShutdownTimeout = 2 * time.Second
 )
 
 // SetupResult holds the outcome of the interactive setup.
@@ -297,13 +298,13 @@ func RunOAuthFlow(client *http.Client, appName string, stdout, stderr io.Writer)
 		case code = <-codeCh:
 			// got the code
 		case err := <-errCh:
-			server.Close()
+			stopCallbackServer(server)
 			return "", fmt.Errorf("callback server: %w", err)
 		case <-time.After(oauthTimeout):
-			server.Close()
+			stopCallbackServer(server)
 			return "", fmt.Errorf("timed out waiting for authorization")
 		}
-		server.Close()
+		stopCallbackServer(server)
 
 		fmt.Fprint(stdout, "Exchanging code for API key... ")
 		apiKey, err := exchangeCode(client, code, codeVerifier)
@@ -365,6 +366,19 @@ func startCallbackServer(codeCh chan<- string, errCh chan<- error) (*http.Server
 	}()
 
 	return server, nil
+}
+
+func stopCallbackServer(server *http.Server) {
+	if server == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), callbackShutdownTimeout)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		_ = server.Close()
+	}
 }
 
 func exchangeCode(client *http.Client, code, codeVerifier string) (string, error) {

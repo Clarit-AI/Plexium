@@ -11,7 +11,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -180,6 +182,59 @@ func TestCallbackServerNoCode(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, 400, resp.StatusCode)
+}
+
+func TestStopCallbackServer_AllowsInFlightRequestToComplete(t *testing.T) {
+	started := make(chan struct{})
+	server := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(200)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			close(started)
+			time.Sleep(50 * time.Millisecond)
+			_, _ = io.WriteString(w, "ok")
+		}),
+	}
+
+	listener, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	defer listener.Close()
+
+	go func() {
+		_ = server.Serve(listener)
+	}()
+
+	resultCh := make(chan error, 1)
+	go func() {
+		resp, err := http.Get("http://" + listener.Addr().String())
+		if err != nil {
+			resultCh <- err
+			return
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			resultCh <- err
+			return
+		}
+		if resp.StatusCode != 200 {
+			resultCh <- fmt.Errorf("unexpected status %d", resp.StatusCode)
+			return
+		}
+		if strings.TrimSpace(string(body)) != "ok" {
+			resultCh <- fmt.Errorf("unexpected body %q", string(body))
+			return
+		}
+		resultCh <- nil
+	}()
+
+	<-started
+	stopCallbackServer(server)
+	require.NoError(t, <-resultCh)
 }
 
 func TestPortAvailable(t *testing.T) {
