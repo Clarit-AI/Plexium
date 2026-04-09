@@ -113,6 +113,13 @@ Plexium is shaped by the LLM Wiki idea, but it goes further in a few important w
 ```bash
 go install github.com/Clarit-AI/Plexium/cmd/plexium@latest
 
+# Go install is quiet on success. If `plexium` is not found, add Go's bin dir to PATH.
+BIN_DIR="${GOBIN:-$(go env GOPATH)/bin}"
+export PATH="$BIN_DIR:$PATH"
+hash -r
+plexium --version
+
+# Run setup inside your repo
 cd /path/to/your/repo
 plexium setup claude
 # or
