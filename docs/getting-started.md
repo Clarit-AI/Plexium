@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide takes you from zero to a working Plexium wiki. The fastest path is now `plexium setup <agent>`, which prepares the repo, installs the right instruction file, and tells you whether any native MCP step is still outstanding.
+This guide takes you from zero to a working Plexium wiki. The fastest path is now `plexium setup <agent>`, which prepares the repo, installs the right instruction file, materializes the editable prompt pack, and tells you whether any native MCP step is still outstanding.
 
 Plexium is a per-repository system. Install the `plexium` binary once, then run `plexium init` or `plexium setup <agent>` inside each repository you want Plexium to manage.
 
@@ -79,6 +79,23 @@ After setup, verify readiness explicitly:
 plexium verify claude
 plexium verify codex
 ```
+
+Then do the real first-pass population work:
+
+```bash
+plexium convert
+plexium retrieve "what does this project do?"
+```
+
+Setup means the tooling is wired. It does not mean the wiki is already rich. The scaffold is intentionally minimal until `convert` and an agent-driven first pass fill it in.
+
+If no assistive provider is configured yet, `plexium setup <agent>` now offers three paths:
+
+- configure Ollama now
+- configure OpenRouter now
+- skip for now and use `plexium convert` plus your coding agent
+
+For the initial bulk population pass, prefer Claude agent teams or Codex sub-agents when your primary coding agent supports them.
 
 ---
 
@@ -159,6 +176,8 @@ plexium verify codex
 ```
 
 `plexium doctor` validates the general Plexium install. `plexium verify <agent>` adds agent-specific checks for the compiled navigation files, generated instruction file, PageIndex reference, deterministic lint status, and MCP configuration state.
+
+The generated `CLAUDE.md` and `AGENTS.md` files now also point to `.plexium/prompts/assistive/initial-wiki-population.md` and the role prompts in `.plexium/prompts/assistive/` so the first wiki build follows a consistent, editable contract.
 
 For a direct MCP-only path without the rest of setup, use:
 

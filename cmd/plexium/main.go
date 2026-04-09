@@ -231,8 +231,10 @@ var initCmd = &cobra.Command{
 
 			fmt.Println("\nNext steps:")
 			fmt.Println("  1. Run 'plexium setup claude' or 'plexium setup codex' for agent-ready onboarding")
-			fmt.Println("  2. Run 'plexium doctor' to validate the setup")
-			fmt.Println("  3. Run 'plexium convert' to bootstrap wiki from existing code")
+			fmt.Println("  2. Run 'plexium convert' to replace the starter scaffold with grounded project pages")
+			fmt.Println("  3. Run 'plexium retrieve \"what does this project do?\"' to inspect early wiki coverage")
+			fmt.Println("  4. Run 'plexium doctor' or 'plexium lint --deterministic' to validate the setup")
+			fmt.Println("  5. For the first bulk wiki build, prefer agent teams/sub-agents when your coding agent supports them")
 
 			if withPageIndex {
 				fmt.Println("\nPageIndex MCP server ready.")
@@ -1689,7 +1691,12 @@ var agentSetupCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		result, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{APIKey: apiKey})
+		result, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{
+			APIKey: apiKey,
+			Stdin:  cmd.InOrStdin(),
+			Stdout: cmd.OutOrStdout(),
+			Stderr: cmd.ErrOrStderr(),
+		})
 		if err != nil {
 			return fmt.Errorf("setup failed: %w", err)
 		}

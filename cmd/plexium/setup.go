@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,12 +12,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Clarit-AI/Plexium/internal/agent"
 	"github.com/Clarit-AI/Plexium/internal/compile"
 	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/integrations/memento"
 	"github.com/Clarit-AI/Plexium/internal/integrations/pageindex"
 	"github.com/Clarit-AI/Plexium/internal/lint"
 	"github.com/Clarit-AI/Plexium/internal/plugins"
+	"github.com/Clarit-AI/Plexium/internal/prompts"
 	"github.com/Clarit-AI/Plexium/internal/wiki"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
@@ -35,6 +38,7 @@ type setupResult struct {
 	ConnectPlan *pageindexConnectPlan `json:"connectPlan"`
 	Steps       []setupStep           `json:"steps"`
 	Verify      *verifyResult         `json:"verify"`
+	NextSteps   []string              `json:"nextSteps,omitempty"`
 }
 
 type verifyCheck struct {
@@ -54,11 +58,12 @@ type verifyResult struct {
 }
 
 type setupAgentOptions struct {
-	WriteConfig bool
-	WithMemento bool
-	Stdin       io.Reader
-	Stdout      io.Writer
-	Stderr      io.Writer
+	WriteConfig        bool
+	WithMemento        bool
+	Stdin              io.Reader
+	Stdout             io.Writer
+	Stderr             io.Writer
+	PromptForAssistive bool
 }
 
 var setupCmd = &cobra.Command{
@@ -101,11 +106,12 @@ func runSetupCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	result, err := setupAgent(repoRoot, args[0], setupAgentOptions{
-		WriteConfig: writeConfig,
-		WithMemento: withMemento,
-		Stdin:       cmd.InOrStdin(),
-		Stdout:      setupStdout,
-		Stderr:      setupStderr,
+		WriteConfig:        writeConfig,
+		WithMemento:        withMemento,
+		Stdin:              cmd.InOrStdin(),
+		Stdout:             setupStdout,
+		Stderr:             setupStderr,
+		PromptForAssistive: !outputJSON,
 	})
 	if err != nil {
 		return err
@@ -134,8 +140,14 @@ func runSetupCommand(cmd *cobra.Command, args []string) error {
 			fmt.Println("Run the command above or rerun with --write-config to apply it for you.")
 		}
 	}
+	if len(result.NextSteps) > 0 {
+		fmt.Println("What to do next:")
+		for i, step := range result.NextSteps {
+			fmt.Printf("  %d. %s\n", i+1, step)
+		}
+	}
 	if result.Verify.Ready {
-		fmt.Println("Plexium is ready for use.")
+		fmt.Println("Plexium tooling is wired. The wiki scaffold is intentionally minimal until you run `plexium convert` and let an agent enrich it.")
 		return nil
 	}
 	return fmt.Errorf("setup completed with verification failures")
@@ -187,6 +199,15 @@ func runVerifyCommand(cmd *cobra.Command, args []string) error {
 
 func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, error) {
 	normalizedAgent := normalizeAgentName(agent)
+	if opts.Stdin == nil {
+		opts.Stdin = os.Stdin
+	}
+	if opts.Stdout == nil {
+		opts.Stdout = os.Stdout
+	}
+	if opts.Stderr == nil {
+		opts.Stderr = os.Stderr
+	}
 	plan, err := buildPageIndexConnectPlan(normalizedAgent)
 	if err != nil {
 		return nil, err
@@ -210,6 +231,24 @@ func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, e
 		result.Steps = append(result.Steps, setupStep{Name: "init", Status: "pass", Message: "initialized Plexium scaffold"})
 	} else {
 		result.Steps = append(result.Steps, setupStep{Name: "init", Status: "pass", Message: "existing Plexium scaffold detected"})
+	}
+
+	createdPrompts, err := prompts.EnsureRepoPack(repoRoot)
+	if err != nil {
+		return nil, fmt.Errorf("materialize prompt pack: %w", err)
+	}
+	if len(createdPrompts) > 0 {
+		result.Steps = append(result.Steps, setupStep{
+			Name:    "prompts",
+			Status:  "pass",
+			Message: fmt.Sprintf("materialized editable prompt pack in %s", relativeToRepo(repoRoot, filepath.Join(repoRoot, ".plexium", "prompts"))),
+		})
+	} else {
+		result.Steps = append(result.Steps, setupStep{
+			Name:    "prompts",
+			Status:  "pass",
+			Message: "editable prompt pack already present",
+		})
 	}
 
 	if _, err := compile.NewCompiler(repoRoot, false).Compile(); err != nil {
@@ -268,10 +307,13 @@ func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, e
 		})
 	}
 
+	result.Steps = append(result.Steps, maybeConfigureAssistiveProvider(repoRoot, normalizedAgent, opts))
+
 	result.Verify, err = verifyAgent(repoRoot, normalizedAgent)
 	if err != nil {
 		return nil, err
 	}
+	result.NextSteps = buildSetupNextSteps(result)
 
 	return result, nil
 }
@@ -357,6 +399,70 @@ func configureMemento(repoRoot, agent string, opts setupAgentOptions) setupStep 
 		message += " with the temporary Claude compatibility shim"
 	}
 	return setupStep{Name: "memento", Status: "pass", Message: message}
+}
+
+func maybeConfigureAssistiveProvider(repoRoot, agentName string, opts setupAgentOptions) setupStep {
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		return setupStep{
+			Name:    "assistive",
+			Status:  "warning",
+			Message: "assistive provider setup is available after the Plexium config can be loaded",
+		}
+	}
+
+	providers := configuredProviderNames(cfg)
+	if len(providers) > 0 {
+		return setupStep{
+			Name:    "assistive",
+			Status:  "pass",
+			Message: fmt.Sprintf("assistive provider already configured (%s, profile %s)", strings.Join(providers, ", "), prompts.ProfileFromConfig(cfg)),
+		}
+	}
+
+	if !opts.PromptForAssistive || !isInteractiveReader(opts.Stdin) {
+		return setupStep{
+			Name:    "assistive",
+			Status:  "warning",
+			Message: fmt.Sprintf("no assistive provider configured yet; run `plexium convert`, then use %s, or run `plexium agent setup` to add Ollama/OpenRouter", initialPopulationMode(agentName)),
+		}
+	}
+
+	fmt.Fprintln(opts.Stdout)
+	fmt.Fprintln(opts.Stdout, "No assistive provider is configured yet.")
+	fmt.Fprintln(opts.Stdout, "Plexium works without one, but autonomous upkeep, LLM lint, and maintenance helpers need Ollama or OpenRouter.")
+	if !promptYesNo(opts.Stdin, opts.Stdout, "Configure an assistive provider now?", false) {
+		return setupStep{
+			Name:    "assistive",
+			Status:  "warning",
+			Message: fmt.Sprintf("skipped assistive provider setup; run `plexium convert` first, then use %s to enrich the wiki", initialPopulationMode(agentName)),
+		}
+	}
+
+	setupResult, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{
+		Stdin:  opts.Stdin,
+		Stdout: opts.Stdout,
+		Stderr: opts.Stderr,
+	})
+	if err != nil {
+		return setupStep{
+			Name:    "assistive",
+			Status:  "warning",
+			Message: fmt.Sprintf("assistive provider setup did not complete: %v", err),
+		}
+	}
+	if len(setupResult.ProvidersConfigured) == 0 {
+		return setupStep{
+			Name:    "assistive",
+			Status:  "warning",
+			Message: fmt.Sprintf("no assistive provider configured; fallback is `plexium convert` plus %s", initialPopulationMode(agentName)),
+		}
+	}
+	return setupStep{
+		Name:    "assistive",
+		Status:  "pass",
+		Message: fmt.Sprintf("configured assistive provider(s): %s (profile %s)", strings.Join(setupResult.ProvidersConfigured, ", "), prompts.ProfileFromConfig(loadConfigOrNil(repoRoot))),
+	}
 }
 
 func enableMementoInConfig(repoRoot string) error {
@@ -526,6 +632,86 @@ func (r *verifyResult) summary() (passCount, warnCount, failCount int) {
 		}
 	}
 	return
+}
+
+func buildSetupNextSteps(result *setupResult) []string {
+	steps := []string{
+		"Run `plexium convert` to replace the starter scaffold with grounded project pages.",
+		"Run `plexium retrieve \"what does this project do?\"` to inspect what the wiki currently knows.",
+		fmt.Sprintf("Run `plexium verify %s` or `plexium doctor` after major changes.", result.Agent),
+	}
+
+	assistiveConfigured := false
+	for _, step := range result.Steps {
+		if step.Name == "assistive" && step.Status == "pass" {
+			assistiveConfigured = true
+			break
+		}
+	}
+	if assistiveConfigured {
+		steps = append(steps, fmt.Sprintf("For the first wiki build, prefer %s and use `.plexium/prompts/assistive/initial-wiki-population.md` as the operating contract.", initialPopulationMode(result.Agent)))
+	} else {
+		steps = append(steps, fmt.Sprintf("If you want autonomous upkeep, run `plexium agent setup` to add Ollama or OpenRouter. Otherwise, use `plexium convert` first and then %s.", initialPopulationMode(result.Agent)))
+	}
+	return steps
+}
+
+func configuredProviderNames(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	var names []string
+	for _, provider := range cfg.AssistiveAgent.Providers {
+		if provider.Enabled {
+			names = append(names, provider.Name)
+		}
+	}
+	return names
+}
+
+func initialPopulationMode(agentName string) string {
+	if normalizeAgentName(agentName) == "claude" {
+		return "Claude agent teams (retriever, documenter, optional validator)"
+	}
+	return "Codex sub-agents (retriever, documenter, optional validator)"
+}
+
+func loadConfigOrNil(repoRoot string) *config.Config {
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		return nil
+	}
+	return cfg
+}
+
+func isInteractiveReader(r io.Reader) bool {
+	if r == nil {
+		return false
+	}
+	file, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+func promptYesNo(r io.Reader, w io.Writer, question string, defaultYes bool) bool {
+	reader := bufio.NewReader(r)
+	hint := "[Y/n]"
+	if !defaultYes {
+		hint = "[y/N]"
+	}
+	fmt.Fprintf(w, "%s %s: ", question, hint)
+	answer, _ := reader.ReadString('\n')
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	if answer == "" {
+		return defaultYes
+	}
+	return answer == "y" || answer == "yes"
 }
 
 func verifyCompiledNavigation(repoRoot string) verifyCheck {

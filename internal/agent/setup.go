@@ -48,6 +48,9 @@ type SetupOptions struct {
 	// HTTPClient allows tests to inject a request transport without mutating the
 	// package-level shared client.
 	HTTPClient *http.Client
+	Stdin      io.Reader
+	Stdout     io.Writer
+	Stderr     io.Writer
 }
 
 // RunInteractiveSetup runs the full interactive provider setup flow.
@@ -59,22 +62,34 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 	}
 
 	result := &SetupResult{}
-	reader := bufio.NewReader(os.Stdin)
+	stdin := opts.Stdin
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	stdout := opts.Stdout
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	stderr := opts.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+	reader := bufio.NewReader(stdin)
 	client := clientOrDefault(opts.HTTPClient)
 
 	if opts.APIKey == "" {
 		opts.APIKey = os.Getenv("OPENROUTER_API_KEY")
 	}
 	if opts.APIKey != "" {
-		fmt.Println("Plexium Agent Setup")
-		fmt.Println("===================")
-		fmt.Println()
-		fmt.Print("Validating provided API key... ")
+		fmt.Fprintln(stdout, "Plexium Agent Setup")
+		fmt.Fprintln(stdout, "===================")
+		fmt.Fprintln(stdout)
+		fmt.Fprint(stdout, "Validating provided API key... ")
 		if _, err := validateKey(client, opts.APIKey); err != nil {
-			fmt.Printf("FAILED (%v)\n", err)
+			fmt.Fprintf(stdout, "FAILED (%v)\n", err)
 			return nil, fmt.Errorf("key validation failed: %w", err)
 		}
-		fmt.Println("OK")
+		fmt.Fprintln(stdout, "OK")
 
 		if err := SaveCredentials(repoRoot, opts.APIKey); err != nil {
 			return nil, fmt.Errorf("saving credentials: %w", err)
@@ -83,83 +98,83 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 		envPath := filepath.Join(repoRoot, ".plexium", ".env")
 		envContent := fmt.Sprintf("# Source this file: source .plexium/.env\nexport OPENROUTER_API_KEY=%q\n", opts.APIKey)
 		if err := os.WriteFile(envPath, []byte(envContent), 0o600); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not write %s: %v\n", envPath, err)
+			fmt.Fprintf(stderr, "Warning: could not write %s: %v\n", envPath, err)
 		}
 
 		result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
 		result.ProvidersConfigured = append(result.ProvidersConfigured, "openrouter")
 		if err := writeAssistiveAgentConfig(configPath, result); err != nil {
-			fmt.Printf("Warning: could not update config: %v\n", err)
+			fmt.Fprintf(stdout, "Warning: could not update config: %v\n", err)
 		} else {
 			result.ConfigUpdated = true
 		}
-		fmt.Println("OpenRouter configured.")
+		fmt.Fprintln(stdout, "OpenRouter configured.")
 		return result, nil
 	}
 
-	fmt.Println("Plexium Agent Setup")
-	fmt.Println("===================")
-	fmt.Println()
+	fmt.Fprintln(stdout, "Plexium Agent Setup")
+	fmt.Fprintln(stdout, "===================")
+	fmt.Fprintln(stdout)
 
 	// Ollama detection
 	ollamaEndpoint := "http://localhost:11434"
 	models, err := DetectOllama(client, ollamaEndpoint)
 	if err == nil && len(models) > 0 {
-		fmt.Printf("Checking for Ollama... found (%s)\n", ollamaEndpoint)
-		fmt.Printf("Available models: %s\n\n", strings.Join(models, ", "))
+		fmt.Fprintf(stdout, "Checking for Ollama... found (%s)\n", ollamaEndpoint)
+		fmt.Fprintf(stdout, "Available models: %s\n\n", strings.Join(models, ", "))
 
-		if promptYesNo(reader, "Configure Ollama?", true) {
-			model := promptChoice(reader, "Select model", models[0], models)
+		if promptYesNo(reader, stdout, "Configure Ollama?", true) {
+			model := promptChoice(reader, stdout, "Select model", models[0], models)
 			result.OllamaEndpoint = ollamaEndpoint
 			result.OllamaModel = model
 			result.ProvidersConfigured = append(result.ProvidersConfigured, "ollama")
 		}
 	} else {
-		fmt.Println("Checking for Ollama... not found")
-		fmt.Println("  Install from https://ollama.ai to use local models")
-		fmt.Println()
+		fmt.Fprintln(stdout, "Checking for Ollama... not found")
+		fmt.Fprintln(stdout, "  Install from https://ollama.ai to use local models")
+		fmt.Fprintln(stdout)
 	}
 
 	// OpenRouter setup
-	if promptYesNo(reader, "Configure OpenRouter?", true) {
-		fmt.Println()
-		fmt.Println("Choose setup method:")
-		fmt.Println("  1. Browser OAuth (recommended)")
-		fmt.Println("  2. Manual API key")
-		fmt.Print("> ")
+	if promptYesNo(reader, stdout, "Configure OpenRouter?", true) {
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Choose setup method:")
+		fmt.Fprintln(stdout, "  1. Browser OAuth (recommended)")
+		fmt.Fprintln(stdout, "  2. Manual API key")
+		fmt.Fprint(stdout, "> ")
 		choice, _ := reader.ReadString('\n')
 		choice = strings.TrimSpace(choice)
 
 		var apiKey string
 		switch choice {
 		case "1", "":
-			fmt.Println()
+			fmt.Fprintln(stdout)
 			apiKey, err = RunOAuthFlow(client, oauthAppName)
 			if err != nil {
-				fmt.Printf("OAuth failed: %v\n", err)
-				fmt.Println("Falling back to manual entry...")
-				apiKey, err = promptManualKey(reader)
+				fmt.Fprintf(stdout, "OAuth failed: %v\n", err)
+				fmt.Fprintln(stdout, "Falling back to manual entry...")
+				apiKey, err = promptManualKey(reader, stdout)
 				if err != nil {
 					return nil, fmt.Errorf("manual key entry: %w", err)
 				}
 			}
 		case "2":
-			apiKey, err = promptManualKey(reader)
+			apiKey, err = promptManualKey(reader, stdout)
 			if err != nil {
 				return nil, fmt.Errorf("manual key entry: %w", err)
 			}
 		default:
-			fmt.Println("Skipping OpenRouter.")
+			fmt.Fprintln(stdout, "Skipping OpenRouter.")
 		}
 
 		if apiKey != "" {
 			// Validate key before persisting
-			fmt.Print("Validating key... ")
+			fmt.Fprint(stdout, "Validating key... ")
 			if _, vErr := validateKey(client, apiKey); vErr != nil {
-				fmt.Printf("FAILED (%v)\n", vErr)
-				fmt.Println("Key not saved. Check the key and try again.")
+				fmt.Fprintf(stdout, "FAILED (%v)\n", vErr)
+				fmt.Fprintln(stdout, "Key not saved. Check the key and try again.")
 			} else {
-				fmt.Println("OK")
+				fmt.Fprintln(stdout, "OK")
 				if err := SaveCredentials(repoRoot, apiKey); err != nil {
 					return nil, fmt.Errorf("saving credentials: %w", err)
 				}
@@ -168,7 +183,7 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 				envPath := filepath.Join(repoRoot, ".plexium", ".env")
 				envContent := fmt.Sprintf("# Source this file: source .plexium/.env\nexport OPENROUTER_API_KEY=%q\n", apiKey)
 				if envErr := os.WriteFile(envPath, []byte(envContent), 0o600); envErr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not write %s: %v\n", envPath, envErr)
+					fmt.Fprintf(stderr, "Warning: could not write %s: %v\n", envPath, envErr)
 				}
 
 				result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
@@ -179,11 +194,11 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 
 	// Update config
 	if len(result.ProvidersConfigured) > 0 {
-		fmt.Println()
-		fmt.Println("Updating .plexium/config.yml...")
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Updating .plexium/config.yml...")
 		if err := writeAssistiveAgentConfig(configPath, result); err != nil {
-			fmt.Printf("Warning: could not update config: %v\n", err)
-			fmt.Println("You may need to update .plexium/config.yml manually.")
+			fmt.Fprintf(stdout, "Warning: could not update config: %v\n", err)
+			fmt.Fprintln(stdout, "You may need to update .plexium/config.yml manually.")
 		} else {
 			result.ConfigUpdated = true
 		}
@@ -500,6 +515,7 @@ func writeAssistiveAgentConfig(configPath string, result *SetupResult) error {
       type: ollama
       endpoint: %s
       model: %s
+      capabilityProfile: constrained-local
 `, result.OllamaEndpoint, result.OllamaModel))
 		case "openrouter":
 			providers.WriteString(`    - name: openrouter
@@ -508,6 +524,7 @@ func writeAssistiveAgentConfig(configPath string, result *SetupResult) error {
       endpoint: https://openrouter.ai/api
       model: meta-llama/llama-3.1-8b-instruct:free
       apiKeyEnv: OPENROUTER_API_KEY
+      capabilityProfile: balanced
 `)
 		}
 	}
@@ -574,12 +591,12 @@ func openBrowser(url string) {
 	_ = cmd.Start()
 }
 
-func promptYesNo(reader *bufio.Reader, question string, defaultYes bool) bool {
+func promptYesNo(reader *bufio.Reader, stdout io.Writer, question string, defaultYes bool) bool {
 	hint := "[Y/n]"
 	if !defaultYes {
 		hint = "[y/N]"
 	}
-	fmt.Printf("%s %s: ", question, hint)
+	fmt.Fprintf(stdout, "%s %s: ", question, hint)
 	answer, _ := reader.ReadString('\n')
 	answer = strings.TrimSpace(strings.ToLower(answer))
 	if answer == "" {
@@ -588,8 +605,8 @@ func promptYesNo(reader *bufio.Reader, question string, defaultYes bool) bool {
 	return answer == "y" || answer == "yes"
 }
 
-func promptChoice(reader *bufio.Reader, label, defaultVal string, options []string) string {
-	fmt.Printf("%s [%s]: ", label, defaultVal)
+func promptChoice(reader *bufio.Reader, stdout io.Writer, label, defaultVal string, options []string) string {
+	fmt.Fprintf(stdout, "%s [%s]: ", label, defaultVal)
 	answer, _ := reader.ReadString('\n')
 	answer = strings.TrimSpace(answer)
 	if answer == "" {
@@ -604,8 +621,8 @@ func promptChoice(reader *bufio.Reader, label, defaultVal string, options []stri
 	return defaultVal
 }
 
-func promptManualKey(reader *bufio.Reader) (string, error) {
-	fmt.Print("Enter OpenRouter API key: ")
+func promptManualKey(reader *bufio.Reader, stdout io.Writer) (string, error) {
+	fmt.Fprint(stdout, "Enter OpenRouter API key: ")
 	key, _ := reader.ReadString('\n')
 	key = strings.TrimSpace(key)
 	if key == "" {

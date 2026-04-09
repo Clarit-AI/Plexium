@@ -38,15 +38,16 @@ type AssistiveAgent struct {
 }
 
 type ProviderConfig struct {
-	Name      string `yaml:"name"`
-	Enabled   bool   `yaml:"enabled"`
-	Type      string `yaml:"type"` // ollama | openai-compatible | inherit
-	Endpoint  string `yaml:"endpoint"`
-	Model     string `yaml:"model"`
-	APIKeyEnv string `yaml:"apiKeyEnv"`
-	RPM       int    `yaml:"requestsPerMinute"`
-	RPD       int    `yaml:"requestsPerDay"`
-	Tier      string `yaml:"tier"` // free | budget — only for openai-compatible type
+	Name              string `yaml:"name"`
+	Enabled           bool   `yaml:"enabled"`
+	Type              string `yaml:"type"` // ollama | openai-compatible | inherit
+	Endpoint          string `yaml:"endpoint"`
+	Model             string `yaml:"model"`
+	APIKeyEnv         string `yaml:"apiKeyEnv"`
+	RPM               int    `yaml:"requestsPerMinute"`
+	RPD               int    `yaml:"requestsPerDay"`
+	Tier              string `yaml:"tier"` // free | budget — only for openai-compatible type
+	CapabilityProfile string `yaml:"capabilityProfile"`
 }
 
 type BudgetConfig struct {

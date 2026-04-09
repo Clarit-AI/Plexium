@@ -11,6 +11,7 @@ import (
 	"github.com/Clarit-AI/Plexium/internal/integrations/pageindex"
 	"github.com/Clarit-AI/Plexium/internal/manifest"
 	"github.com/Clarit-AI/Plexium/internal/plugins"
+	"github.com/Clarit-AI/Plexium/internal/prompts"
 )
 
 // InitOptions holds options for plexium init
@@ -86,6 +87,14 @@ func Init(opts InitOptions) (*InitResult, error) {
 			return nil, fmt.Errorf("creating directory %s: %w", dir, err)
 		}
 		result.DirsCreated = append(result.DirsCreated, dir)
+	}
+
+	if !opts.DryRun {
+		createdPrompts, err := prompts.EnsureRepoPack(opts.RepoRoot)
+		if err != nil {
+			return nil, fmt.Errorf("materializing prompt pack: %w", err)
+		}
+		result.FilesCreated = append(result.FilesCreated, createdPrompts...)
 	}
 
 	// Generate _schema.md using tech-stack-aware SchemaGenerator

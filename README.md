@@ -83,6 +83,8 @@ Plexium can stay passive, or it can stay alive while you code. Git hooks can enf
 
 If you want autonomous wiki upkeep, Plexium can route maintenance work to local or remote model providers. Ollama is the zero-cost local path. OpenRouter or another OpenAI-compatible endpoint is the remote path. This layer is optional: the core wiki and retrieval workflow do not require a paid provider. We recomend using highly capable - low cost models that work well be it in the cloud or on-prem. Our current top picks are google/gemma-4-26B-A4B-it, Qwen/Qwen3.5-35B-A3B and nvidia/Nemotron-Cascade-2-30B-A3B.
 
+Plexium now stores assistive behavior in an editable prompt pack under `.plexium/prompts/`, with simple capability profiles such as `constrained-local`, `balanced`, and `frontier-large-context`. That lets teams tune how aggressive or conservative the assistive layer should be without editing Go code.
+
 ### Transcript and Provenance Layer
 
 When Memento is enabled, Plexium can treat session transcripts as raw source material instead of letting rationale vanish after the commit lands. That gives the assistive layer access to design intent, tradeoffs, and decision history that ordinary code scans miss.
@@ -128,6 +130,8 @@ plexium setup claude --write-config --with-memento
 plexium setup codex --write-config --with-memento
 ```
 
+After setup, the next default move is `plexium convert`. Setup wires the tooling, retrieval, MCP path, and agent instructions; `convert` turns the starter scaffold into a useful first-pass wiki. If no assistive provider is configured yet, Plexium now offers Ollama/OpenRouter setup during onboarding and otherwise falls back cleanly to `convert` plus your main coding agent.
+
 For Claude Code, Plexium also installs a temporary repo-local Memento compatibility shim while upstream `git-memento` catches up with Claude's current session model.
 
 ### Claude Code marketplace
@@ -158,6 +162,7 @@ Read the full breakdown in [Inspirations](docs/inspirations.md).
 - [How Plexium Works](docs/how-it-works.md)
 - [Retrieval and MCP](docs/retrieval-and-mcp.md)
 - [Automation and Hooks](docs/automation-and-hooks.md)
+- [Assistive Prompts](docs/assistive-prompts.md)
 - [Memento Integration](docs/memento-integration.md)
 - [Inspirations](docs/inspirations.md)
 - [Getting Started](docs/getting-started.md)

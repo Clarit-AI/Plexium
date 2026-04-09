@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Clarit-AI/Plexium/internal/markdown"
+	"github.com/Clarit-AI/Plexium/internal/prompts"
 )
 
 // LLMClient is the interface for making LLM API calls.
@@ -22,6 +23,7 @@ type LLMAnalyzer struct {
 	Client    LLMClient
 	WikiRoot  string
 	RateLimit int // max pages per run (0 = unlimited)
+	Profile   string
 }
 
 // LLMAnalysisResult contains all semantic analysis findings.
@@ -58,6 +60,7 @@ func NewLLMAnalyzer(client LLMClient, wikiRoot string) *LLMAnalyzer {
 		Client:    client,
 		WikiRoot:  wikiRoot,
 		RateLimit: DefaultRateLimit,
+		Profile:   prompts.DefaultProfile,
 	}
 }
 
@@ -281,7 +284,15 @@ func (a *LLMAnalyzer) detectContradictions(pages []pageContent) ([]Contradiction
 			}
 			seen[pairKey] = true
 
-			prompt := fmt.Sprintf(contradictionPrompt, page.title, page.content, other.title, other.content)
+			prompt, err := prompts.Render(filepath.Dir(a.WikiRoot), prompts.PromptContradiction, a.Profile, map[string]string{
+				"Page1Title":   page.title,
+				"Page1Content": page.content,
+				"Page2Title":   other.title,
+				"Page2Content": other.content,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("render contradiction prompt: %w", err)
+			}
 			response, err := a.Client.Complete(prompt)
 			if err != nil {
 				return nil, fmt.Errorf("LLM call for contradiction check: %w", err)
@@ -324,7 +335,12 @@ func (a *LLMAnalyzer) suggestMissingPages(pages []pageContent) ([]string, error)
 		sb.WriteString(fmt.Sprintf("## %s (%s)\n%s\n\n", p.title, p.path, p.content))
 	}
 
-	prompt := fmt.Sprintf(conceptExtractionPrompt, sb.String())
+	prompt, err := prompts.Render(filepath.Dir(a.WikiRoot), prompts.PromptMissingConcepts, a.Profile, map[string]string{
+		"Pages": sb.String(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("render missing concept prompt: %w", err)
+	}
 	response, err := a.Client.Complete(prompt)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call for concept extraction: %w", err)
@@ -362,7 +378,12 @@ func (a *LLMAnalyzer) suggestCrossRefs(pages []pageContent) ([]MissingCrossRefRe
 			p.title, p.path, strings.Join(p.links, ", "), p.content))
 	}
 
-	prompt := fmt.Sprintf(crossRefPrompt, sb.String())
+	prompt, err := prompts.Render(filepath.Dir(a.WikiRoot), prompts.PromptCrossReference, a.Profile, map[string]string{
+		"Pages": sb.String(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("render cross-reference prompt: %w", err)
+	}
 	response, err := a.Client.Complete(prompt)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call for cross-ref suggestion: %w", err)
@@ -422,7 +443,13 @@ func (a *LLMAnalyzer) detectSemanticStaleness(pages []pageContent) ([]SemanticSt
 	var results []SemanticStalePage
 
 	for _, page := range pages {
-		prompt := fmt.Sprintf(stalenessPrompt, page.title, page.content)
+		prompt, err := prompts.Render(filepath.Dir(a.WikiRoot), prompts.PromptStaleness, a.Profile, map[string]string{
+			"PageTitle":   page.title,
+			"PageContent": page.content,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("render staleness prompt: %w", err)
+		}
 		response, err := a.Client.Complete(prompt)
 		if err != nil {
 			return nil, fmt.Errorf("LLM call for staleness check on %s: %w", page.path, err)
