@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bufio"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const (
@@ -51,12 +53,13 @@ type EnsureCLIResult struct {
 	Installed      bool
 	InstallCommand string
 	ProjectURL     string
+	ReleaseURL     string
 	Message        string
 }
 
 // EnsureCLI checks whether git-memento is available and optionally offers to install it.
 func EnsureCLI(opts EnsureCLIOptions) (*EnsureCLIResult, error) {
-	result := &EnsureCLIResult{ProjectURL: projectURL}
+	result := &EnsureCLIResult{ProjectURL: projectURL, ReleaseURL: releaseURL}
 	stdout, stderr := resolveInstallWriters(opts)
 
 	localInstallPath, addedToPath := addInstalledPathToEnv()
@@ -74,7 +77,6 @@ func EnsureCLI(opts EnsureCLIOptions) (*EnsureCLIResult, error) {
 	}
 
 	plan, ok := detectInstallPlan()
-	result.InstallCommand = releaseURL
 	if !ok {
 		result.Message = "git-memento is not installed and Plexium could not find a supported installer"
 		return result, nil
@@ -294,13 +296,28 @@ func runInstallPlan(plan installPlan, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "Installed git-memento to %s\n", plan.installDir)
 	if !pathContainsDir(plan.installDir) {
 		fmt.Fprintf(stderr, "%s is not currently in your PATH.\n", plan.installDir)
-		fmt.Fprintf(stderr, "Add it for this shell session:\n  export PATH=\"%s:$PATH\"\n", plan.installDir)
+		if runtime.GOOS == "windows" {
+			fmt.Fprintf(stderr, "Add it for this PowerShell session:\n  $env:Path = \"%s;$env:Path\"\n", plan.installDir)
+			fmt.Fprintf(stderr, "Temporary cmd.exe session alternative:\n  set PATH=%s;%%PATH%%\n", plan.installDir)
+			fmt.Fprintf(stderr, "Persist it for future sessions:\n  setx PATH \"%%PATH%%;%s\"\n", plan.installDir)
+		} else {
+			fmt.Fprintf(stderr, "Add it for this shell session:\n  export PATH=\"%s:$PATH\"\n", plan.installDir)
+		}
 	}
 	return nil
 }
 
 func downloadReleaseAsset(url, destination string) error {
-	response, err := http.Get(url)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
 	if err != nil {
 		return err
 	}

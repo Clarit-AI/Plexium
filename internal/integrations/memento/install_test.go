@@ -5,11 +5,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestEnsureCLI_ReturnsAvailableWhenGitMementoExists(t *testing.T) {
+	skipOnWindows(t)
+
 	binDir := t.TempDir()
 	writeExecutable(t, filepath.Join(binDir, "git"), "#!/bin/sh\nif [ \"$1\" = \"memento\" ] && [ \"$2\" = \"--version\" ]; then\n  exit 0\nfi\nexit 1\n")
 	t.Setenv("PATH", binDir)
@@ -31,6 +34,8 @@ func TestEnsureCLI_ReturnsAvailableWhenGitMementoExists(t *testing.T) {
 }
 
 func TestEnsureCLI_DeclineInstallLeavesToolUnavailable(t *testing.T) {
+	skipOnWindows(t)
+
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	t.Setenv("PATH", "/usr/bin:/bin")
@@ -47,8 +52,8 @@ func TestEnsureCLI_DeclineInstallLeavesToolUnavailable(t *testing.T) {
 	if result.Available {
 		t.Fatalf("expected git-memento to remain unavailable")
 	}
-	if result.InstallCommand == "" {
-		t.Fatalf("expected install command guidance")
+	if result.ReleaseURL == "" {
+		t.Fatalf("expected release guidance")
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte("Install git-memento now? [y/N]: ")) {
 		t.Fatalf("expected install prompt in stdout")
@@ -56,6 +61,8 @@ func TestEnsureCLI_DeclineInstallLeavesToolUnavailable(t *testing.T) {
 }
 
 func TestEnsureCLI_EOFDoesNotCountAsConsent(t *testing.T) {
+	skipOnWindows(t)
+
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	t.Setenv("PATH", "/usr/bin:/bin")
@@ -77,6 +84,8 @@ func TestEnsureCLI_EOFDoesNotCountAsConsent(t *testing.T) {
 }
 
 func TestEnsureCLI_DetectsExistingLocalInstallOutsidePath(t *testing.T) {
+	skipOnWindows(t)
+
 	homeDir := t.TempDir()
 	localBin := filepath.Join(homeDir, ".local", "bin")
 	if err := os.MkdirAll(localBin, 0o755); err != nil {
@@ -117,6 +126,8 @@ func TestPromptForInstall_ProcessesEOFAnswer(t *testing.T) {
 }
 
 func TestIsInitializedChecksLocalGitConfig(t *testing.T) {
+	skipOnWindows(t)
+
 	repoRoot := t.TempDir()
 	runGit(t, repoRoot, "init")
 	runGit(t, repoRoot, "config", "user.email", "test@example.com")
@@ -141,6 +152,8 @@ func TestIsInitializedChecksLocalGitConfig(t *testing.T) {
 }
 
 func TestConfiguredProviderReadsLocalGitConfig(t *testing.T) {
+	skipOnWindows(t)
+
 	repoRoot := t.TempDir()
 	runGit(t, repoRoot, "init")
 
@@ -163,6 +176,8 @@ func TestConfiguredProviderReadsLocalGitConfig(t *testing.T) {
 }
 
 func TestConfigureClaudeShimWritesLocalGitConfig(t *testing.T) {
+	skipOnWindows(t)
+
 	repoRoot := t.TempDir()
 	runGit(t, repoRoot, "init")
 
@@ -205,5 +220,12 @@ func runGit(t *testing.T, repoRoot string, args ...string) {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, output)
+	}
+}
+
+func skipOnWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell stubs are not supported on Windows")
 	}
 }

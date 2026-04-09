@@ -297,6 +297,8 @@ func configureMemento(repoRoot, agent string, opts setupAgentOptions) setupStep 
 		message := "git-memento is still optional and not configured yet"
 		if result.InstallCommand != "" {
 			message = fmt.Sprintf("%s; install later with `%s`", message, result.InstallCommand)
+		} else if result.ReleaseURL != "" {
+			message = fmt.Sprintf("%s; install from %s", message, result.ReleaseURL)
 		} else if result.ProjectURL != "" {
 			message = fmt.Sprintf("%s; install from %s", message, result.ProjectURL)
 		}

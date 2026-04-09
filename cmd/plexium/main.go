@@ -249,6 +249,8 @@ var initCmd = &cobra.Command{
 					fmt.Println("  git-memento is available and ready for repo-local initialization.")
 				case mementoResult != nil && mementoResult.InstallCommand != "":
 					fmt.Printf("  Install later with: %s\n", mementoResult.InstallCommand)
+				case mementoResult != nil && mementoResult.ReleaseURL != "":
+					fmt.Printf("  Install later from: %s\n", mementoResult.ReleaseURL)
 				default:
 					fmt.Println("  Install git-memento from https://github.com/mandel-macaque/memento when you want session provenance.")
 				}
