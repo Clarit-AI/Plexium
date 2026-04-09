@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Clarit-AI/Plexium/internal/capabilityprofile"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -554,7 +555,7 @@ func writeAssistiveAgentConfig(configPath string, result *SetupResult) error {
       model: %s
       apiKeyEnv: OPENROUTER_API_KEY
       capabilityProfile: %s
-`, result.OpenRouterModel, result.OpenRouterCapabilityProfile))
+`, yamlQuoteString(result.OpenRouterModel), yamlQuoteString(result.OpenRouterCapabilityProfile)))
 		}
 	}
 
@@ -761,6 +762,20 @@ func capabilityProfileForModel(model string) string {
 func setOpenRouterSelection(result *SetupResult, model, profile string) {
 	result.OpenRouterModel = model
 	result.OpenRouterCapabilityProfile = profile
+}
+
+func yamlQuoteString(value string) string {
+	var node yaml.Node
+	node.Kind = yaml.ScalarNode
+	node.Tag = "!!str"
+	node.Value = value
+	node.Style = yaml.DoubleQuotedStyle
+
+	data, err := yaml.Marshal(&node)
+	if err != nil {
+		return `""`
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func isInteractiveInput(r io.Reader) bool {

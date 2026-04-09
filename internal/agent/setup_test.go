@@ -226,10 +226,34 @@ daemon:
 	assert.Contains(t, content, "assistiveAgent:")
 	assert.Contains(t, content, "enabled: true")
 	assert.Contains(t, content, "openrouter")
-	assert.Contains(t, content, "model: google/gemma-4-31b-it")
-	assert.Contains(t, content, "capabilityProfile: balanced")
+	assert.Contains(t, content, "model: \"google/gemma-4-31b-it\"")
+	assert.Contains(t, content, "capabilityProfile: \"balanced\"")
 	// Daemon section should be preserved
 	assert.Contains(t, content, "daemon:")
+}
+
+func TestWriteAssistiveAgentConfig_QuotesOpenRouterValues(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yml")
+
+	initial := "sources:\n  include:\n    - \"**/*.go\"\n"
+	require.NoError(t, os.WriteFile(configPath, []byte(initial), 0o644))
+
+	result := &SetupResult{
+		ProvidersConfigured:         []string{"openrouter"},
+		OpenRouterModel:             "vendor/model:beta#1",
+		OpenRouterCapabilityProfile: "frontier-large-context",
+	}
+
+	err := writeAssistiveAgentConfig(configPath, result)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	content := string(data)
+
+	assert.Contains(t, content, "model: \"vendor/model:beta#1\"")
+	assert.Contains(t, content, "capabilityProfile: \"frontier-large-context\"")
 }
 
 func TestRunInteractiveSetup_WithAPIKeyOption(t *testing.T) {
@@ -304,8 +328,8 @@ func TestRunInteractiveSetup_WithExplicitModel(t *testing.T) {
 	assert.Equal(t, "frontier-large-context", result.OpenRouterCapabilityProfile)
 	data, err := os.ReadFile(configPath)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), "model: openai/gpt-5.4-nano")
-	assert.Contains(t, string(data), "capabilityProfile: frontier-large-context")
+	assert.Contains(t, string(data), "model: \"openai/gpt-5.4-nano\"")
+	assert.Contains(t, string(data), "capabilityProfile: \"frontier-large-context\"")
 }
 
 func TestResolveOpenRouterModelChoice_InteractiveSelection(t *testing.T) {
