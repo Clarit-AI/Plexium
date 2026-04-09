@@ -18,6 +18,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/Clarit-AI/Plexium/internal/capabilityprofile"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -32,11 +35,13 @@ const (
 
 // SetupResult holds the outcome of the interactive setup.
 type SetupResult struct {
-	ProvidersConfigured []string
-	OllamaEndpoint      string
-	OllamaModel         string
-	OpenRouterKeyPath   string
-	ConfigUpdated       bool
+	ProvidersConfigured         []string
+	OllamaEndpoint              string
+	OllamaModel                 string
+	OpenRouterKeyPath           string
+	OpenRouterModel             string
+	OpenRouterCapabilityProfile string
+	ConfigUpdated               bool
 }
 
 // SetupOptions controls non-interactive setup behavior.
@@ -48,9 +53,11 @@ type SetupOptions struct {
 	// HTTPClient allows tests to inject a request transport without mutating the
 	// package-level shared client.
 	HTTPClient *http.Client
-	Stdin      io.Reader
-	Stdout     io.Writer
-	Stderr     io.Writer
+	// Model optionally selects an OpenRouter model non-interactively.
+	Model  string
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 // RunInteractiveSetup runs the full interactive provider setup flow.
@@ -66,6 +73,7 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 	if stdin == nil {
 		stdin = os.Stdin
 	}
+	reader := bufio.NewReader(stdin)
 	stdout := opts.Stdout
 	if stdout == nil {
 		stdout = os.Stdout
@@ -74,8 +82,8 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	reader := bufio.NewReader(stdin)
 	client := clientOrDefault(opts.HTTPClient)
+	interactive := isInteractiveInput(stdin)
 
 	if opts.APIKey == "" {
 		opts.APIKey = os.Getenv("OPENROUTER_API_KEY")
@@ -101,6 +109,11 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 			fmt.Fprintf(stderr, "Warning: could not write %s: %v\n", envPath, err)
 		}
 
+		model, profile, err := resolveOpenRouterModelChoice(reader, stdout, opts.Model, interactive)
+		if err != nil {
+			return nil, fmt.Errorf("select OpenRouter model: %w", err)
+		}
+		setOpenRouterSelection(result, model, profile)
 		result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
 		result.ProvidersConfigured = append(result.ProvidersConfigured, "openrouter")
 		if err := writeAssistiveAgentConfig(configPath, result); err != nil {
@@ -186,6 +199,11 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 					fmt.Fprintf(stderr, "Warning: could not write %s: %v\n", envPath, envErr)
 				}
 
+				model, profile, err := resolveOpenRouterModelChoice(reader, stdout, opts.Model, interactive)
+				if err != nil {
+					return nil, fmt.Errorf("select OpenRouter model: %w", err)
+				}
+				setOpenRouterSelection(result, model, profile)
 				result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
 				result.ProvidersConfigured = append(result.ProvidersConfigured, "openrouter")
 			}
@@ -530,14 +548,14 @@ func writeAssistiveAgentConfig(configPath string, result *SetupResult) error {
       capabilityProfile: constrained-local
 `, result.OllamaEndpoint, result.OllamaModel))
 		case "openrouter":
-			providers.WriteString(`    - name: openrouter
+			providers.WriteString(fmt.Sprintf(`    - name: openrouter
       enabled: true
       type: openai-compatible
       endpoint: https://openrouter.ai/api
-      model: meta-llama/llama-3.1-8b-instruct:free
+      model: %s
       apiKeyEnv: OPENROUTER_API_KEY
-      capabilityProfile: balanced
-`)
+      capabilityProfile: %s
+`, yamlQuoteString(result.OpenRouterModel), yamlQuoteString(result.OpenRouterCapabilityProfile)))
 		}
 	}
 
@@ -644,4 +662,130 @@ func promptManualKey(reader *bufio.Reader, stdout io.Writer) (string, error) {
 		return "", fmt.Errorf("no key entered")
 	}
 	return key, nil
+}
+
+type openRouterModelOption struct {
+	Label             string
+	Model             string
+	CapabilityProfile string
+}
+
+var curatedOpenRouterModels = []openRouterModelOption{
+	{
+		Label:             "google/gemma-4-31b-it — 262K context — $0.14/M input — $0.40/M output (recommended)",
+		Model:             "google/gemma-4-31b-it",
+		CapabilityProfile: capabilityprofile.Balanced,
+	},
+	{
+		Label:             "qwen/qwen3.5-35b-a3b — 262K context — $0.1625/M input — $1.30/M output",
+		Model:             "qwen/qwen3.5-35b-a3b",
+		CapabilityProfile: capabilityprofile.Balanced,
+	},
+	{
+		Label:             "openai/gpt-5.4-nano — 400K context — $0.20/M input — $1.25/M output",
+		Model:             "openai/gpt-5.4-nano",
+		CapabilityProfile: capabilityprofile.FrontierLargeContext,
+	},
+	{
+		Label:             "nvidia/nemotron-3-super-120b-a12b — 262K context — $0.10/M input — $0.50/M output",
+		Model:             "nvidia/nemotron-3-super-120b-a12b",
+		CapabilityProfile: capabilityprofile.Balanced,
+	},
+}
+
+func resolveOpenRouterModelChoice(reader *bufio.Reader, stdout io.Writer, requested string, interactive bool) (string, string, error) {
+	if requested != "" {
+		model := strings.TrimSpace(requested)
+		if model != "" {
+			return model, capabilityProfileForModel(model), nil
+		}
+	}
+
+	defaultOption := curatedOpenRouterModels[0]
+	if !interactive {
+		return defaultOption.Model, defaultOption.CapabilityProfile, nil
+	}
+
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "Choose an OpenRouter model:")
+	for idx, option := range curatedOpenRouterModels {
+		fmt.Fprintf(stdout, "  %d. %s\n", idx+1, option.Label)
+	}
+	fmt.Fprintf(stdout, "  %d. Custom model…\n", len(curatedOpenRouterModels)+1)
+	fmt.Fprintf(stdout, "Select model [%d]: ", 1)
+
+	answer, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", "", err
+	}
+	answer = strings.TrimSpace(answer)
+	if answer == "" || answer == "1" {
+		if err == io.EOF && answer == "" {
+			return "", "", io.EOF
+		}
+		return defaultOption.Model, defaultOption.CapabilityProfile, nil
+	}
+	if answer == fmt.Sprintf("%d", len(curatedOpenRouterModels)+1) {
+		for {
+			fmt.Fprint(stdout, "Enter OpenRouter model id: ")
+			custom, err := reader.ReadString('\n')
+			if err != nil && err != io.EOF {
+				return "", "", err
+			}
+			custom = strings.TrimSpace(custom)
+			if custom != "" {
+				return custom, capabilityProfileForModel(custom), nil
+			}
+			if err == io.EOF {
+				return "", "", io.EOF
+			}
+			fmt.Fprintln(stdout, "Model id cannot be empty.")
+		}
+	}
+	for idx, option := range curatedOpenRouterModels {
+		if answer == fmt.Sprintf("%d", idx+1) {
+			return option.Model, option.CapabilityProfile, nil
+		}
+	}
+	return defaultOption.Model, defaultOption.CapabilityProfile, nil
+}
+
+func capabilityProfileForModel(model string) string {
+	for _, option := range curatedOpenRouterModels {
+		if model == option.Model {
+			return option.CapabilityProfile
+		}
+	}
+	return capabilityprofile.Balanced
+}
+
+func setOpenRouterSelection(result *SetupResult, model, profile string) {
+	result.OpenRouterModel = model
+	result.OpenRouterCapabilityProfile = profile
+}
+
+func yamlQuoteString(value string) string {
+	var node yaml.Node
+	node.Kind = yaml.ScalarNode
+	node.Tag = "!!str"
+	node.Value = value
+	node.Style = yaml.DoubleQuotedStyle
+
+	data, err := yaml.Marshal(&node)
+	if err != nil {
+		return `""`
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func isInteractiveInput(r io.Reader) bool {
+	file, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
 }

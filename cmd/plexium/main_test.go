@@ -5,21 +5,18 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestResolveSetupAPIKey_UsesInjectedReader(t *testing.T) {
-	cmd := &cobra.Command{Use: "setup"}
+func TestResolveSetupAPIKey_FromInjectedStdin(t *testing.T) {
+	cmd := &cobra.Command{}
 	cmd.Flags().String("api-key-file", "", "")
 	cmd.Flags().Bool("api-key-stdin", false, "")
-	if err := cmd.Flags().Set("api-key-stdin", "true"); err != nil {
-		t.Fatalf("set api-key-stdin flag: %v", err)
-	}
+	require.NoError(t, cmd.Flags().Set("api-key-stdin", "true"))
+	cmd.SetIn(bytes.NewBufferString("sk-or-v1-test\n"))
 
-	key, err := resolveSetupAPIKey(cmd, bytes.NewBufferString("sk-or-v1-test\n"))
-	if err != nil {
-		t.Fatalf("resolveSetupAPIKey returned error: %v", err)
-	}
-	if key != "sk-or-v1-test" {
-		t.Fatalf("expected injected key, got %q", key)
-	}
+	key, err := resolveSetupAPIKey(cmd, cmd.InOrStdin())
+	require.NoError(t, err)
+	assert.Equal(t, "sk-or-v1-test", key)
 }

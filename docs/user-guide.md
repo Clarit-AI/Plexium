@@ -506,9 +506,9 @@ assistiveAgent:
 plexium agent test
 ```
 
-### Option B: OpenRouter (Remote, Free Tier Available)
+### Option B: OpenRouter (Remote, Curated Model Picker)
 
-Best for: higher-quality models, teams without local GPU, free-tier models for light usage.
+Best for: higher-quality models, teams without local GPU, and long-context assistive maintenance.
 
 1. Create an account at https://openrouter.ai and get an API key.
 
@@ -540,7 +540,24 @@ export OPENROUTER_API_KEY="sk-or-v1-..."
 plexium agent setup
 ```
 
-3. Plexium saves the key in `.plexium/credentials.json`, writes `.plexium/.env` for convenience, and updates `.plexium/config.yml`.
+Or choose a model explicitly in a scripted flow:
+
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-..."
+plexium agent setup --model openai/gpt-5.4-nano
+```
+
+3. After OAuth or API-key validation, Plexium either:
+
+- shows a curated model picker with:
+  - `google/gemma-4-31b-it` (recommended)
+  - `qwen/qwen3.5-35b-a3b`
+  - `openai/gpt-5.4-nano`
+  - `nvidia/nemotron-3-super-120b-a12b`
+  - `Custom model…`
+- or, in non-interactive mode, defaults to `google/gemma-4-31b-it`
+
+Plexium then saves the key in `.plexium/credentials.json`, writes `.plexium/.env` for convenience, and updates `.plexium/config.yml`.
 
 If you prefer to wire the provider manually, the resulting config looks like:
 
@@ -552,7 +569,7 @@ assistiveAgent:
       enabled: true
       type: openai-compatible
       endpoint: https://openrouter.ai/api
-      model: meta-llama/llama-3.1-8b-instruct:free
+      model: google/gemma-4-31b-it
       apiKeyEnv: OPENROUTER_API_KEY
       capabilityProfile: balanced
   budget:
@@ -565,7 +582,7 @@ assistiveAgent:
 plexium agent test
 ```
 
-**Free models on OpenRouter** (no API spend): `meta-llama/llama-3.1-8b-instruct:free`, `google/gemma-2-9b-it:free`, `mistralai/mistral-7b-instruct:free`. Check https://openrouter.ai/models for current availability.
+The provider type remains `openai-compatible` in config because Plexium talks to OpenRouter through an OpenAI-compatible API surface. The selected model is what changes during setup.
 
 ### Option C: Both (Cascade)
 
@@ -585,7 +602,7 @@ assistiveAgent:
       enabled: true
       type: openai-compatible
       endpoint: https://openrouter.ai/api
-      model: meta-llama/llama-3.1-8b-instruct:free
+      model: google/gemma-4-31b-it
       apiKeyEnv: OPENROUTER_API_KEY
       capabilityProfile: balanced
   budget:
