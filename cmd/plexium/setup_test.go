@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Clarit-AI/Plexium/internal/config"
@@ -213,12 +214,78 @@ exit 1
 	if err != nil {
 		t.Fatalf("read memento.claude.bin: %v\n%s", err, output)
 	}
-	expectedShim := filepath.Join(repoRoot, ".plexium", "bin", "claude-memento-bridge.js")
+	expectedShim := filepath.Join(repoRoot, ".plexium", "bin", "claude-memento-bridge.cjs")
 	if got := string(bytes.TrimSpace(output)); got != expectedShim {
 		t.Fatalf("expected shim path %q, got %q", expectedShim, got)
 	}
 
 	if _, err := os.Stat(expectedShim); err != nil {
 		t.Fatalf("expected shim file to exist: %v", err)
+	}
+}
+
+func TestSetupAgent_NoAssistiveProvider_AddsConvertFirstGuidance(t *testing.T) {
+	repoRoot := t.TempDir()
+
+	result, err := setupAgent(repoRoot, "codex", setupAgentOptions{})
+	if err != nil {
+		t.Fatalf("setupAgent returned error: %v", err)
+	}
+
+	foundAssistiveWarning := false
+	for _, step := range result.Steps {
+		if step.Name == "assistive" && step.Status == "warning" {
+			foundAssistiveWarning = true
+			break
+		}
+	}
+	if !foundAssistiveWarning {
+		t.Fatalf("expected assistive warning when no provider is configured")
+	}
+
+	joined := strings.Join(result.NextSteps, "\n")
+	if !strings.Contains(joined, "plexium convert") {
+		t.Fatalf("expected next steps to recommend plexium convert, got %q", joined)
+	}
+	if !strings.Contains(joined, "Codex sub-agents") {
+		t.Fatalf("expected next steps to recommend Codex sub-agents, got %q", joined)
+	}
+}
+
+func TestSetupAgent_ExistingAssistiveProvider_IsReported(t *testing.T) {
+	repoRoot := t.TempDir()
+	if _, err := setupAgent(repoRoot, "claude", setupAgentOptions{}); err != nil {
+		t.Fatalf("initial setupAgent returned error: %v", err)
+	}
+
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.AssistiveAgent.Enabled = true
+	cfg.AssistiveAgent.Providers = []config.ProviderConfig{{
+		Name:              "openrouter",
+		Enabled:           true,
+		Type:              "openai-compatible",
+		CapabilityProfile: "frontier-large-context",
+	}}
+	if err := config.SaveToDir(repoRoot, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	result, err := setupAgent(repoRoot, "claude", setupAgentOptions{})
+	if err != nil {
+		t.Fatalf("setupAgent returned error: %v", err)
+	}
+
+	foundAssistivePass := false
+	for _, step := range result.Steps {
+		if step.Name == "assistive" && step.Status == "pass" && strings.Contains(step.Message, "frontier-large-context") {
+			foundAssistivePass = true
+			break
+		}
+	}
+	if !foundAssistivePass {
+		t.Fatalf("expected configured assistive provider to be reported as pass")
 	}
 }

@@ -50,6 +50,20 @@ wiki (`.wiki/`) that you are responsible for keeping current.
 1. **Before any code change**: Read `.wiki/_index.md` and relevant wiki pages
 2. **After any code change**: Update affected wiki pages
 3. **Never modify** pages with `ownership: human-authored`
+4. **Treat the starter scaffold as incomplete** until `plexium convert` and a real first-pass population run have happened
+
+## First Population Pass
+
+When the wiki is mostly starter scaffold:
+
+1. Run `plexium convert` first to bootstrap grounded content
+2. Prefer **Claude agent teams** for the first wiki build when available
+3. Split the first pass into:
+   - retriever / context gatherer
+   - documenter / wiki writer
+   - optional validator / linter
+4. Use `.plexium/prompts/assistive/initial-wiki-population.md` as the operating contract
+5. Use `.plexium/prompts/assistive/retriever.md` and `.plexium/prompts/assistive/documenter.md` for role-specific guidance
 
 ## Plexium Schema
 
@@ -76,6 +90,7 @@ cat >> "$OUTPUT_PATH" <<'COMMANDS'
 ## Commands
 
 ```bash
+plexium convert   # Bootstrap useful content from the current repository
 plexium sync      # Update wiki after changes
 plexium lint      # Check wiki health
 plexium retrieve  # Query the wiki

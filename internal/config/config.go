@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Clarit-AI/Plexium/internal/capabilityprofile"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
@@ -38,15 +39,16 @@ type AssistiveAgent struct {
 }
 
 type ProviderConfig struct {
-	Name      string `yaml:"name"`
-	Enabled   bool   `yaml:"enabled"`
-	Type      string `yaml:"type"` // ollama | openai-compatible | inherit
-	Endpoint  string `yaml:"endpoint"`
-	Model     string `yaml:"model"`
-	APIKeyEnv string `yaml:"apiKeyEnv"`
-	RPM       int    `yaml:"requestsPerMinute"`
-	RPD       int    `yaml:"requestsPerDay"`
-	Tier      string `yaml:"tier"` // free | budget — only for openai-compatible type
+	Name              string `yaml:"name"`
+	Enabled           bool   `yaml:"enabled"`
+	Type              string `yaml:"type"` // ollama | openai-compatible | inherit
+	Endpoint          string `yaml:"endpoint"`
+	Model             string `yaml:"model"`
+	APIKeyEnv         string `yaml:"apiKeyEnv"`
+	RPM               int    `yaml:"requestsPerMinute"`
+	RPD               int    `yaml:"requestsPerDay"`
+	Tier              string `yaml:"tier"` // free | budget — only for openai-compatible type
+	CapabilityProfile string `yaml:"capabilityProfile"`
 }
 
 type BudgetConfig struct {
@@ -285,6 +287,13 @@ func (c *Config) Validate() error {
 	}
 	if c.Sources.Include == nil {
 		return fmt.Errorf("sources.include is required")
+	}
+	for i := range c.AssistiveAgent.Providers {
+		profile := capabilityprofile.Normalize(c.AssistiveAgent.Providers[i].CapabilityProfile)
+		if profile == "" {
+			return fmt.Errorf("assistiveAgent.providers[%d].capabilityProfile %q is invalid (expected one of: balanced, constrained-local, frontier-large-context)", i, c.AssistiveAgent.Providers[i].CapabilityProfile)
+		}
+		c.AssistiveAgent.Providers[i].CapabilityProfile = profile
 	}
 	return nil
 }

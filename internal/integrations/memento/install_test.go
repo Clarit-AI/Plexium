@@ -2,6 +2,7 @@ package memento
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -192,7 +193,7 @@ func TestConfigureClaudeShimWritesLocalGitConfig(t *testing.T) {
 		t.Fatalf("read memento.claude.bin: %v\n%s", err, output)
 	}
 	got := string(bytes.TrimSpace(output))
-	want := filepath.Join(repoRoot, ".plexium", "bin", "claude-memento-bridge.js")
+	want := filepath.Join(repoRoot, ".plexium", "bin", "claude-memento-bridge.cjs")
 	if got != want {
 		t.Fatalf("expected shim path %q, got %q", want, got)
 	}
@@ -203,6 +204,122 @@ func TestConfigureClaudeShimWritesLocalGitConfig(t *testing.T) {
 	}
 	if len(data) == 0 {
 		t.Fatalf("expected shim file to be written")
+	}
+}
+
+func TestConfigureCodexShimWritesLocalGitConfig(t *testing.T) {
+	skipOnWindows(t)
+
+	repoRoot := t.TempDir()
+	runGit(t, repoRoot, "init")
+
+	if err := ConfigureCodexShim(repoRoot); err != nil {
+		t.Fatalf("ConfigureCodexShim returned error: %v", err)
+	}
+
+	cmd := exec.Command("git", "config", "--local", "--get", "memento.codex.bin")
+	cmd.Dir = repoRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("read memento.codex.bin: %v\n%s", err, output)
+	}
+	got := string(bytes.TrimSpace(output))
+	want := filepath.Join(repoRoot, ".plexium", "bin", "codex-memento-bridge.cjs")
+	if got != want {
+		t.Fatalf("expected shim path %q, got %q", want, got)
+	}
+
+	data, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatalf("read shim file: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatalf("expected shim file to be written")
+	}
+}
+
+func TestCodexBridgeHandlesSessionsListAndGet(t *testing.T) {
+	skipOnWindows(t)
+	nodePath, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to exercise the Codex bridge")
+	}
+
+	homeDir := t.TempDir()
+	codexHome := filepath.Join(homeDir, ".codex")
+	sessionID := "019d6a76-f56e-75c0-8623-962656784a7c"
+	indexPath := filepath.Join(codexHome, "session_index.jsonl")
+	sessionDir := filepath.Join(codexHome, "sessions", "2026", "04", "08")
+	sessionPath := filepath.Join(sessionDir, "rollout-2026-04-08T00-21-14-"+sessionID+".jsonl")
+
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("create fake codex session dir: %v", err)
+	}
+	indexLine := `{"id":"` + sessionID + `","thread_name":"Audit dual-service app","updated_at":"2026-04-08T00:21:29.193203Z"}` + "\n"
+	if err := os.WriteFile(indexPath, []byte(indexLine), 0o644); err != nil {
+		t.Fatalf("write session index: %v", err)
+	}
+	sessionLog := strings.Join([]string{
+		`{"timestamp":"2026-04-08T00:21:25.399Z","type":"session_meta","payload":{"id":"` + sessionID + `","timestamp":"2026-04-08T00:21:14.254Z","cwd":"/tmp/project","originator":"Codex Desktop"}}`,
+		`{"timestamp":"2026-04-08T00:21:30.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"` + strings.Repeat("Document the repo. ", 5000) + `"}]}}`,
+		`{"timestamp":"2026-04-08T00:21:40.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I will build the wiki in passes."}]}}`,
+	}, "\n")
+	if err := os.WriteFile(sessionPath, []byte(sessionLog), 0o644); err != nil {
+		t.Fatalf("write fake session log: %v", err)
+	}
+
+	bridgePath := filepath.Join(t.TempDir(), "codex-memento-bridge.cjs")
+	if err := os.WriteFile(bridgePath, []byte(codexBridgeScript), 0o755); err != nil {
+		t.Fatalf("write bridge: %v", err)
+	}
+	t.Setenv("HOME", homeDir)
+	t.Setenv("CODEX_HOME", codexHome)
+
+	listCmd := exec.Command(nodePath, bridgePath, "sessions", "list", "--json")
+	listOutput, err := listCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bridge sessions list failed: %v\n%s", err, listOutput)
+	}
+
+	var sessions []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(listOutput, &sessions); err != nil {
+		t.Fatalf("parse sessions list JSON: %v\n%s", err, listOutput)
+	}
+	if len(sessions) != 1 || sessions[0].ID != sessionID || sessions[0].Title != "Audit dual-service app" {
+		t.Fatalf("unexpected sessions list payload: %s", listOutput)
+	}
+
+	getCmd := exec.Command(nodePath, bridgePath, "sessions", "get", sessionID, "--json")
+	getOutput, err := getCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bridge sessions get failed: %v\n%s", err, getOutput)
+	}
+
+	var session struct {
+		ID       string `json:"id"`
+		Title    string `json:"title"`
+		Messages []struct {
+			Role string `json:"role"`
+			Text string `json:"text"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(getOutput, &session); err != nil {
+		t.Fatalf("parse sessions get JSON: %v\n%s", err, getOutput)
+	}
+	if session.ID != sessionID || session.Title != "Audit dual-service app" {
+		t.Fatalf("unexpected session payload: %s", getOutput)
+	}
+	if len(session.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d: %s", len(session.Messages), getOutput)
+	}
+	if session.Messages[0].Role != "user" || !strings.HasPrefix(session.Messages[0].Text, "Document the repo.") || len(session.Messages[0].Text) < 1000 {
+		t.Fatalf("unexpected first message: %+v", session.Messages[0])
+	}
+	if session.Messages[1].Role != "assistant" || session.Messages[1].Text != "I will build the wiki in passes." {
+		t.Fatalf("unexpected second message: %+v", session.Messages[1])
 	}
 }
 

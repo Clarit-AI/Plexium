@@ -10,6 +10,7 @@ Use this guide for day-to-day operation. For the higher-level product map and su
 - [How Plexium Works](how-it-works.md)
 - [Retrieval and MCP](retrieval-and-mcp.md)
 - [Automation and Hooks](automation-and-hooks.md)
+- [Assistive Prompts](assistive-prompts.md)
 - [Memento Integration](memento-integration.md)
 - [Inspirations](inspirations.md)
 
@@ -463,6 +464,14 @@ Environment variables override config values. See [CLI Reference: Environment Va
 
 Plexium includes an assistive agent that automates wiki maintenance using a provider cascade. Providers are tried in cost order (cheapest first), falling through on failure. Setup is optional -- Plexium works without it, but the daemon, LLM lint, and autonomous maintenance features require at least one provider.
 
+If you skip provider setup, the supported fallback is:
+
+1. run `plexium convert`
+2. let your main coding agent enrich the wiki
+3. prefer Claude agent teams or Codex sub-agents for the first bulk population pass
+
+The assistive behavior itself lives in `.plexium/prompts/`, so teams can tune the prompt pack and its capability-profile overlays directly.
+
 ### Option A: Ollama (Local, Free)
 
 Best for: local development, air-gapped environments, zero-cost operation.
@@ -486,6 +495,7 @@ assistiveAgent:
       type: ollama
       endpoint: http://localhost:11434
       model: llama3.2
+      capabilityProfile: constrained-local
   budget:
     dailyUSD: 0
 ```
@@ -544,6 +554,7 @@ assistiveAgent:
       endpoint: https://openrouter.ai/api
       model: meta-llama/llama-3.1-8b-instruct:free
       apiKeyEnv: OPENROUTER_API_KEY
+      capabilityProfile: balanced
   budget:
     dailyUSD: 0.50
 ```
@@ -569,12 +580,14 @@ assistiveAgent:
       type: ollama
       endpoint: http://localhost:11434
       model: llama3.2
+      capabilityProfile: constrained-local
     - name: openrouter-fallback
       enabled: true
       type: openai-compatible
       endpoint: https://openrouter.ai/api
       model: meta-llama/llama-3.1-8b-instruct:free
       apiKeyEnv: OPENROUTER_API_KEY
+      capabilityProfile: balanced
   budget:
     dailyUSD: 1.00
 ```

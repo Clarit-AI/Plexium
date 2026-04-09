@@ -231,8 +231,10 @@ var initCmd = &cobra.Command{
 
 			fmt.Println("\nNext steps:")
 			fmt.Println("  1. Run 'plexium setup claude' or 'plexium setup codex' for agent-ready onboarding")
-			fmt.Println("  2. Run 'plexium doctor' to validate the setup")
-			fmt.Println("  3. Run 'plexium convert' to bootstrap wiki from existing code")
+			fmt.Println("  2. Run 'plexium convert' to replace the starter scaffold with grounded project pages")
+			fmt.Println("  3. Run 'plexium retrieve \"what does this project do?\"' to inspect early wiki coverage")
+			fmt.Println("  4. Run 'plexium doctor' or 'plexium lint --deterministic' to validate the setup")
+			fmt.Println("  5. For the first bulk wiki build, prefer agent teams/sub-agents when your coding agent supports them")
 
 			if withPageIndex {
 				fmt.Println("\nPageIndex MCP server ready.")
@@ -1685,11 +1687,16 @@ var agentSetupCmd = &cobra.Command{
 			return fmt.Errorf("getting working directory: %w", err)
 		}
 
-		apiKey, err := resolveSetupAPIKey(cmd)
+		apiKey, err := resolveSetupAPIKey(cmd, cmd.InOrStdin())
 		if err != nil {
 			return err
 		}
-		result, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{APIKey: apiKey})
+		result, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{
+			APIKey: apiKey,
+			Stdin:  cmd.InOrStdin(),
+			Stdout: cmd.OutOrStdout(),
+			Stderr: cmd.ErrOrStderr(),
+		})
 		if err != nil {
 			return fmt.Errorf("setup failed: %w", err)
 		}
@@ -1710,7 +1717,7 @@ var agentSetupCmd = &cobra.Command{
 	},
 }
 
-func resolveSetupAPIKey(cmd *cobra.Command) (string, error) {
+func resolveSetupAPIKey(cmd *cobra.Command, stdin io.Reader) (string, error) {
 	apiKeyFile, _ := cmd.Flags().GetString("api-key-file")
 	apiKeyStdin, _ := cmd.Flags().GetBool("api-key-stdin")
 
@@ -1731,10 +1738,12 @@ func resolveSetupAPIKey(cmd *cobra.Command) (string, error) {
 	}
 
 	if apiKeyStdin {
-		if stat, err := os.Stdin.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) != 0 {
-			return "", fmt.Errorf("--api-key-stdin requires piped input")
+		if file, ok := stdin.(*os.File); ok {
+			if stat, err := file.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) != 0 {
+				return "", fmt.Errorf("--api-key-stdin requires piped input")
+			}
 		}
-		data, err := io.ReadAll(os.Stdin)
+		data, err := io.ReadAll(stdin)
 		if err != nil {
 			return "", fmt.Errorf("read API key from stdin: %w", err)
 		}

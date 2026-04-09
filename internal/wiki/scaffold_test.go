@@ -180,6 +180,17 @@ func TestInit_WithPageIndex_CreatesStableReference(t *testing.T) {
 	assert.Equal(t, string(first), string(second))
 }
 
+func TestInit_MaterializesPromptPack(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := Init(InitOptions{RepoRoot: dir})
+	require.NoError(t, err)
+
+	assert.FileExists(t, filepath.Join(dir, ".plexium", "prompts", "assistive", "initial-wiki-population.md"))
+	assert.FileExists(t, filepath.Join(dir, ".plexium", "prompts", "assistive", "documenter.md"))
+	assert.FileExists(t, filepath.Join(dir, ".plexium", "prompts", "profiles", "balanced.md"))
+}
+
 func TestInit_SchemaContent(t *testing.T) {
 	dir := t.TempDir()
 

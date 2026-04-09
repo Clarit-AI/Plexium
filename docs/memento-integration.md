@@ -6,7 +6,12 @@ Plexium can use Memento to fill that gap.
 
 Memento is still optional. When you opt into it with `plexium init --with-memento` or `plexium setup <agent> --with-memento`, Plexium can offer to install `git-memento` first and then initialize it for the current repository.
 
-For Claude Code specifically, Plexium currently configures a temporary repo-local compatibility shim at `.plexium/bin/claude-memento-bridge.js`. That shim works around the current gap between upstream `git-memento` and Claude's session model. It is meant as a transitional compatibility layer, not a permanent fork of Memento behavior.
+For Claude Code and Codex, Plexium currently configures a temporary repo-local compatibility shim inside `.plexium/bin/`:
+
+- Claude: `.plexium/bin/claude-memento-bridge.cjs`
+- Codex: `.plexium/bin/codex-memento-bridge.cjs`
+
+These shims work around the current gap between upstream `git-memento` and the session models exposed by the current Claude Code and Codex CLIs. They are meant as transitional compatibility layers, not permanent forks of Memento behavior.
 
 ---
 

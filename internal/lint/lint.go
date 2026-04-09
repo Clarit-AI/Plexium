@@ -8,23 +8,24 @@ import (
 
 	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/manifest"
+	"github.com/Clarit-AI/Plexium/internal/prompts"
 )
 
 // LintReport is the complete lint report structure.
 type LintReport struct {
-	Type          string                 `json:"type"`
-	Timestamp     string                 `json:"timestamp"`
-	Deterministic DeterministicReport    `json:"deterministic"`
-	LLMAugmented  LLMAugmentedReport     `json:"llmAugmented,omitempty"`
-	Summary       LintSummary            `json:"summary"`
+	Type          string              `json:"type"`
+	Timestamp     string              `json:"timestamp"`
+	Deterministic DeterministicReport `json:"deterministic"`
+	LLMAugmented  LLMAugmentedReport  `json:"llmAugmented,omitempty"`
+	Summary       LintSummary         `json:"summary"`
 }
 
 // LLMAugmentedReport contains LLM-augmented lint results (Phase 9).
 // In Phase 7, this section is empty but the structure is defined for forward compatibility.
 type LLMAugmentedReport struct {
-	Contradictions    []ContradictionReport    `json:"contradictions"`
-	SuggestedPages    []string                 `json:"suggestedPages"`
-	MissingCrossRefs  []MissingCrossRefReport  `json:"missingCrossRefs"`
+	Contradictions   []ContradictionReport   `json:"contradictions"`
+	SuggestedPages   []string                `json:"suggestedPages"`
+	MissingCrossRefs []MissingCrossRefReport `json:"missingCrossRefs"`
 }
 
 // ContradictionReport represents a contradiction between wiki pages.
@@ -35,19 +36,19 @@ type ContradictionReport struct {
 
 // MissingCrossRefReport represents a missing cross-reference between pages.
 type MissingCrossRefReport struct {
-	From         string   `json:"from"`
-	ShouldLinkTo string   `json:"shouldLinkTo"`
-	Reason       string   `json:"reason,omitempty"`
+	From         string `json:"from"`
+	ShouldLinkTo string `json:"shouldLinkTo"`
+	Reason       string `json:"reason,omitempty"`
 }
 
 // DeterministicReport contains all deterministic lint results.
 type DeterministicReport struct {
-	BrokenLinks       []BrokenLinkReport      `json:"brokenLinks"`
-	OrphanPages       []OrphanReport          `json:"orphanPages"`
-	StaleCandidates   []StaleReport           `json:"staleCandidates"`
-	MissingSources    []string                `json:"missingSourceFiles"`
-	ManifestDrift     []ManifestErrorReport   `json:"manifestDrift"`
-	SidebarIssues     []SidebarIssueReport   `json:"sidebarIssues"`
+	BrokenLinks       []BrokenLinkReport       `json:"brokenLinks"`
+	OrphanPages       []OrphanReport           `json:"orphanPages"`
+	StaleCandidates   []StaleReport            `json:"staleCandidates"`
+	MissingSources    []string                 `json:"missingSourceFiles"`
+	ManifestDrift     []ManifestErrorReport    `json:"manifestDrift"`
+	SidebarIssues     []SidebarIssueReport     `json:"sidebarIssues"`
 	FrontmatterIssues []FrontmatterIssueReport `json:"frontmatterIssues"`
 }
 
@@ -339,6 +340,7 @@ func (l *Linter) RunFull(client LLMClient) (*LintReport, error) {
 
 	// Then run LLM analysis
 	analyzer := NewLLMAnalyzer(client, l.wikiRoot())
+	analyzer.Profile = prompts.ProfileFromConfig(l.cfg)
 	result, err := analyzer.Analyze(nil) // all pages
 	if err != nil {
 		// LLM failure is non-fatal — return deterministic results with warning
