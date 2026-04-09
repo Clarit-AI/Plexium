@@ -88,10 +88,11 @@ func TestLoad_InvalidYAML(t *testing.T) {
 
 func TestConfig_Validate(t *testing.T) {
 	tests := []struct {
-		name    string
-		cfg     Config
-		wantErr bool
-		errMsg  string
+		name                      string
+		cfg                       Config
+		wantErr                   bool
+		errMsg                    string
+		expectedCapabilityProfile string
 	}{
 		{
 			name: "valid config",
@@ -152,7 +153,8 @@ func TestConfig_Validate(t *testing.T) {
 					Providers: []ProviderConfig{{CapabilityProfile: " Frontier-Large-Context "}},
 				},
 			},
-			wantErr: false,
+			wantErr:                   false,
+			expectedCapabilityProfile: "frontier-large-context",
 		},
 	}
 
@@ -164,8 +166,8 @@ func TestConfig_Validate(t *testing.T) {
 				assert.Contains(t, err.Error(), tt.errMsg)
 			} else {
 				assert.NoError(t, err)
-				if tt.name == "valid capability profile is normalized" {
-					assert.Equal(t, "frontier-large-context", tt.cfg.AssistiveAgent.Providers[0].CapabilityProfile)
+				if tt.expectedCapabilityProfile != "" {
+					assert.Equal(t, tt.expectedCapabilityProfile, tt.cfg.AssistiveAgent.Providers[0].CapabilityProfile)
 				}
 			}
 		})

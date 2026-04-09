@@ -10,14 +10,15 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/Clarit-AI/Plexium/internal/capabilityprofile"
 	"github.com/Clarit-AI/Plexium/internal/config"
 )
 
 const (
-	ProfileConstrainedLocal     = "constrained-local"
-	ProfileBalanced             = "balanced"
-	ProfileFrontierLargeContext = "frontier-large-context"
-	DefaultProfile              = ProfileBalanced
+	ProfileConstrainedLocal     = capabilityprofile.ConstrainedLocal
+	ProfileBalanced             = capabilityprofile.Balanced
+	ProfileFrontierLargeContext = capabilityprofile.FrontierLargeContext
+	DefaultProfile              = capabilityprofile.Default
 )
 
 const (
@@ -117,16 +118,10 @@ func Render(repoRoot, name, profile string, data any) (string, error) {
 }
 
 func NormalizeProfile(profile string) string {
-	switch strings.TrimSpace(strings.ToLower(profile)) {
-	case ProfileConstrainedLocal:
-		return ProfileConstrainedLocal
-	case ProfileFrontierLargeContext:
-		return ProfileFrontierLargeContext
-	case ProfileBalanced, "":
-		return ProfileBalanced
-	default:
-		return ProfileBalanced
+	if normalized := capabilityprofile.Normalize(profile); normalized != "" {
+		return normalized
 	}
+	return DefaultProfile
 }
 
 func ProfileFromConfig(cfg *config.Config) string {

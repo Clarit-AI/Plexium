@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
+	"github.com/Clarit-AI/Plexium/internal/capabilityprofile"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
@@ -289,13 +289,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("sources.include is required")
 	}
 	for i := range c.AssistiveAgent.Providers {
-		profile := strings.TrimSpace(strings.ToLower(c.AssistiveAgent.Providers[i].CapabilityProfile))
-		switch profile {
-		case "", "balanced", "constrained-local", "frontier-large-context":
-			c.AssistiveAgent.Providers[i].CapabilityProfile = profile
-		default:
+		profile := capabilityprofile.Normalize(c.AssistiveAgent.Providers[i].CapabilityProfile)
+		if profile == "" {
 			return fmt.Errorf("assistiveAgent.providers[%d].capabilityProfile %q is invalid (expected one of: balanced, constrained-local, frontier-large-context)", i, c.AssistiveAgent.Providers[i].CapabilityProfile)
 		}
+		c.AssistiveAgent.Providers[i].CapabilityProfile = profile
 	}
 	return nil
 }

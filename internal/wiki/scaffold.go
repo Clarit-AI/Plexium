@@ -268,6 +268,12 @@ func repoRelativePath(repoRoot, path string) string {
 		return path
 	}
 	relPath = filepath.ToSlash(relPath)
+	if relPath == "." {
+		return "."
+	}
+	if strings.HasPrefix(relPath, "..") {
+		return path
+	}
 	if strings.HasPrefix(relPath, ".") {
 		return relPath
 	}
