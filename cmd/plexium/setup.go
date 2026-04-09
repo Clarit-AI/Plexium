@@ -373,12 +373,21 @@ func configureMemento(repoRoot, agent string, opts setupAgentOptions) setupStep 
 		}
 	}
 
-	if agent == "claude" {
+	switch agent {
+	case "claude":
 		if err := memento.ConfigureClaudeShim(repoRoot); err != nil {
 			return setupStep{
 				Name:    "memento",
 				Status:  "warning",
 				Message: fmt.Sprintf("git-memento is initialized but the Claude compatibility shim could not be configured: %v", err),
+			}
+		}
+	case "codex":
+		if err := memento.ConfigureCodexShim(repoRoot); err != nil {
+			return setupStep{
+				Name:    "memento",
+				Status:  "warning",
+				Message: fmt.Sprintf("git-memento is initialized but the Codex compatibility shim could not be configured: %v", err),
 			}
 		}
 	}
@@ -395,8 +404,11 @@ func configureMemento(repoRoot, agent string, opts setupAgentOptions) setupStep 
 	if result.Installed {
 		message = "installed git-memento and initialized repo-local session tracking"
 	}
-	if agent == "claude" {
+	switch agent {
+	case "claude":
 		message += " with the temporary Claude compatibility shim"
+	case "codex":
+		message += " with the temporary Codex compatibility shim"
 	}
 	return setupStep{Name: "memento", Status: "pass", Message: message}
 }

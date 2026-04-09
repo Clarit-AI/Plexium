@@ -132,7 +132,7 @@ plexium setup codex --write-config --with-memento
 
 After setup, the next default move is `plexium convert`. Setup wires the tooling, retrieval, MCP path, and agent instructions; `convert` turns the starter scaffold into a useful first-pass wiki. If no assistive provider is configured yet, Plexium now offers Ollama/OpenRouter setup during onboarding and otherwise falls back cleanly to `convert` plus your main coding agent.
 
-For Claude Code, Plexium also installs a temporary repo-local Memento compatibility shim while upstream `git-memento` catches up with Claude's current session model.
+For Claude Code and Codex, Plexium currently installs a temporary repo-local Memento compatibility shim while upstream `git-memento` catches up with their current session models.
 
 ### Claude Code marketplace
 

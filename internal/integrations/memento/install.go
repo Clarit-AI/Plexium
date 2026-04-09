@@ -166,30 +166,39 @@ func InitRepo(repoRoot, provider string) error {
 
 // ConfigureClaudeShim installs the repo-local Claude compatibility shim config.
 func ConfigureClaudeShim(repoRoot string) error {
-	bridgePath := filepath.Join(repoRoot, ".plexium", "bin", "claude-memento-bridge.cjs")
-	if err := os.MkdirAll(filepath.Dir(bridgePath), 0o755); err != nil {
-		return fmt.Errorf("create shim directory: %w", err)
-	}
-	if err := os.WriteFile(bridgePath, []byte(claudeBridgeScript), 0o755); err != nil {
-		return fmt.Errorf("write Claude compatibility bridge: %w", err)
-	}
+	return configureShim(repoRoot, "claude", "claude-memento-bridge.cjs", claudeBridgeScript)
+}
 
-	cmd := exec.Command("git", "config", "--local", "memento.claude.bin", bridgePath)
-	cmd.Dir = repoRoot
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		text := strings.TrimSpace(string(output))
-		if text != "" {
-			return fmt.Errorf("configure Claude compatibility bridge: %s", text)
-		}
-		return fmt.Errorf("configure Claude compatibility bridge: %w", err)
-	}
-	return nil
+// ConfigureCodexShim installs the repo-local Codex compatibility shim config.
+func ConfigureCodexShim(repoRoot string) error {
+	return configureShim(repoRoot, "codex", "codex-memento-bridge.cjs", codexBridgeScript)
 }
 
 func cliAvailable() bool {
 	cmd := exec.Command("git", "memento", "--version")
 	return cmd.Run() == nil
+}
+
+func configureShim(repoRoot, provider, filename, script string) error {
+	bridgePath := filepath.Join(repoRoot, ".plexium", "bin", filename)
+	if err := os.MkdirAll(filepath.Dir(bridgePath), 0o755); err != nil {
+		return fmt.Errorf("create shim directory: %w", err)
+	}
+	if err := os.WriteFile(bridgePath, []byte(script), 0o755); err != nil {
+		return fmt.Errorf("write %s compatibility bridge: %w", provider, err)
+	}
+
+	cmd := exec.Command("git", "config", "--local", fmt.Sprintf("memento.%s.bin", provider), bridgePath)
+	cmd.Dir = repoRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		text := strings.TrimSpace(string(output))
+		if text != "" {
+			return fmt.Errorf("configure %s compatibility bridge: %s", provider, text)
+		}
+		return fmt.Errorf("configure %s compatibility bridge: %w", provider, err)
+	}
+	return nil
 }
 
 func detectInstallPlan() (*installPlan, bool) {
