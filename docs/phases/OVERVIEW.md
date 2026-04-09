@@ -58,8 +58,8 @@ git memento doctor
 
 **Memento Claude Code Compatibility Shim:**
 > **Note:** Claude Code v2.1.x removed the `claude sessions` command that memento relies on. To restore functionality without modifying memento itself, a custom git-config shim was installed linking the `claude` provider to a bridge script.
-- **Script:** `bin/claude-memento-bridge.js`
-- **Configuration:** `git config --local memento.claude.bin "$(pwd)/bin/claude-memento-bridge.js"`
+- **Script:** `.plexium/bin/claude-memento-bridge.js`
+- **Configuration:** `git config --local memento.claude.bin "$(pwd)/.plexium/bin/claude-memento-bridge.js"`
 - **Behavior:** The script intercepts memento's provider calls (e.g. `list` and `get`). If an agent provides an arbitrary, non-UUID session name (e.g., `session-phase1`), the script seamlessly catches the validation failure, fetches the *most recently updated* Claude session from `~/.claude/projects/`, and maps it back to memento using the agent's requested alias.
 - **Workflow:** Agents can safely run `git memento commit <any-name> -m "message"` without needing to look up the exact internal session UUID of their environment.
 

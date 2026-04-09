@@ -35,7 +35,7 @@ Creates `.wiki/` (vault), `.plexium/` (state), `config.yml`, `manifest.json`, an
 | `--obsidian` | boolean | `false` | Generate Obsidian vault configuration (`.obsidian/`) |
 | `--strictness` | string | `moderate` | Strictness level: `strict`, `moderate`, or `advisory` |
 | `--dry-run` | boolean | `false` | Preview without writing files |
-| `--with-memento` | boolean | `false` | Initialize memento session tracking |
+| `--with-memento` | boolean | `false` | Initialize repo-local memento session tracking and offer to install `git-memento` if it is missing |
 | `--with-beads` | boolean | `false` | Initialize beads task tracking |
 | `--with-pageindex` | boolean | `false` | Initialize PageIndex retrieval |
 
@@ -282,14 +282,17 @@ Supports `claude` and `codex`.
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--write-config` | boolean | `false` | Run the native MCP configuration command instead of only printing it |
+| `--with-memento` | boolean | `false` | Initialize optional git-memento session tracking for this repository and offer to install it if needed |
 
 **Examples:**
 
 ```bash
 plexium setup claude
 plexium setup claude --write-config
+plexium setup claude --write-config --with-memento
 plexium setup codex
 plexium setup codex --write-config
+plexium setup codex --write-config --with-memento
 ```
 
 ---

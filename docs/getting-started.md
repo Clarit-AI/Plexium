@@ -2,6 +2,8 @@
 
 This guide takes you from zero to a working Plexium wiki. The fastest path is now `plexium setup <agent>`, which prepares the repo, installs the right instruction file, and tells you whether any native MCP step is still outstanding.
 
+Plexium is a per-repository system. Install the `plexium` binary once, then run `plexium init` or `plexium setup <agent>` inside each repository you want Plexium to manage.
+
 ---
 
 ## Prerequisites
@@ -61,6 +63,15 @@ Add `--write-config` to let Plexium run the native MCP configuration command for
 plexium setup claude --write-config
 plexium setup codex --write-config
 ```
+
+If you also want repo-local session provenance, add `--with-memento`. Plexium will offer to install `git-memento` first if it is missing:
+
+```bash
+plexium setup claude --write-config --with-memento
+plexium setup codex --write-config --with-memento
+```
+
+On Claude, Plexium also writes a temporary repo-local compatibility shim (`.plexium/bin/claude-memento-bridge.js`) into the local `git-memento` config so Claude users can keep using Memento until upstream support is patched.
 
 After setup, verify readiness explicitly:
 
@@ -126,6 +137,8 @@ plexium init --strictness strict
 
 The CLI retrieval command (`plexium retrieve`) works regardless of whether `--with-pageindex` was passed. The flag enables the PageIndex integration in config but the built-in search engine is always available.
 
+**A note on `--with-memento`:** This flag is also per-repository. If `git-memento` is already installed, Plexium initializes it for the current repo. If it is missing, Plexium can offer to install it with the official installer script before running `git memento init`. On Claude, Plexium additionally configures the temporary compatibility shim automatically.
+
 ### Preview first
 
 ```bash
@@ -146,6 +159,13 @@ plexium verify codex
 ```
 
 `plexium doctor` validates the general Plexium install. `plexium verify <agent>` adds agent-specific checks for the compiled navigation files, generated instruction file, PageIndex reference, deterministic lint status, and MCP configuration state.
+
+For a direct MCP-only path without the rest of setup, use:
+
+```bash
+plexium pageindex connect claude
+plexium pageindex connect codex
+```
 
 If any checks fail, see [Troubleshooting: Doctor Reports Failures](troubleshooting.md#doctor-reports-failures).
 

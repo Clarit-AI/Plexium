@@ -35,6 +35,8 @@ From there, Plexium gives you three ways to use that memory:
 - retrieve answers from it with `plexium retrieve` or PageIndex over MCP
 - keep it in sync with your code through hooks, CI, and optional background automation
 
+Plexium is also deliberately **per repository**. You install the `plexium` binary once on your machine, but you run `plexium init` or `plexium setup <agent>` inside each repository you want Plexium to manage. It does not silently apply itself to every repo on your machine.
+
 > Core vs optional:
 > The core product is the wiki, manifest, compile/lint flow, and retrieval CLI. MCP setup, marketplace plugins, daemon automation, Ollama/OpenRouter providers, and Memento ingestion are optional layers you can add when you want more leverage.
 
@@ -59,6 +61,20 @@ Plexium stores durable project understanding in `.wiki/`: architecture pages, mo
 
 Plexium includes a built-in retrieval engine over the wiki. You can query it directly from the CLI with `plexium retrieve "query"`, or expose the same engine over MCP with `plexium pageindex serve` so Claude, Codex, or other agents can pull relevant wiki context inside their own sessions. The marketplace/plugin bundles wrap that same retrieval surface instead of inventing a second system.
 
+If you want the raw MCP setup path, use:
+
+```bash
+plexium pageindex connect claude
+plexium pageindex connect codex
+```
+
+If you want Plexium to guide the repo setup and optionally write the native MCP config for you, use:
+
+```bash
+plexium setup claude --write-config
+plexium setup codex --write-config
+```
+
 ### Automation Layer
 
 Plexium can stay passive, or it can stay alive while you code. Git hooks can enforce that wiki changes accompany source changes. CI can check coverage at PR time. The daemon can watch for stale pages, lint issues, and wiki debt. Claude and Codex integrations keep setup, verification, retrieval, and MCP wiring on a single happy path instead of making users memorize the raw commands.
@@ -82,11 +98,13 @@ Plexium is shaped by the LLM Wiki idea, but it goes further in a few important w
 
 ## Quick Start
 
+**Plexium is per-repo.** Install the binary once, then run the setup commands below inside each repository you want to instrument.
+
 **Prerequisites:**
 - [Go 1.25+](https://go.dev/dl/)
 - Git
 - A Git repository
-- Memento (Optional, recomended)
+- Optional: [git-memento](https://github.com/mandel-macaque/memento) for session provenance. If you opt into it with `--with-memento`, Plexium can offer to install it for you.
 
 ### Binary-first
 
@@ -103,7 +121,14 @@ plexium verify claude
 plexium verify codex
 ```
 
-Add `--write-config` if you want Plexium to run the native MCP configuration command for you.
+Add `--write-config` if you want Plexium to run the native MCP configuration command for you. Add `--with-memento` if you also want repo-local session provenance:
+
+```bash
+plexium setup claude --write-config --with-memento
+plexium setup codex --write-config --with-memento
+```
+
+For Claude Code, Plexium also installs a temporary repo-local Memento compatibility shim while upstream `git-memento` catches up with Claude's current session model.
 
 ### Claude Code marketplace
 

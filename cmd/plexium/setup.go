@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/Clarit-AI/Plexium/internal/compile"
 	"github.com/Clarit-AI/Plexium/internal/config"
+	"github.com/Clarit-AI/Plexium/internal/integrations/memento"
 	"github.com/Clarit-AI/Plexium/internal/integrations/pageindex"
 	"github.com/Clarit-AI/Plexium/internal/lint"
 	"github.com/Clarit-AI/Plexium/internal/plugins"
@@ -50,6 +53,14 @@ type verifyResult struct {
 	Checks      []verifyCheck         `json:"checks"`
 }
 
+type setupAgentOptions struct {
+	WriteConfig bool
+	WithMemento bool
+	Stdin       io.Reader
+	Stdout      io.Writer
+	Stderr      io.Writer
+}
+
 var setupCmd = &cobra.Command{
 	Use:   "setup <agent>",
 	Short: "Initialize, connect, and verify Plexium for an agent",
@@ -69,6 +80,7 @@ func init() {
 	rootCmd.AddCommand(verifyCmd)
 
 	setupCmd.Flags().Bool("write-config", false, "Run the native MCP configuration command")
+	setupCmd.Flags().Bool("with-memento", false, "Initialize optional git-memento session tracking for this repository")
 }
 
 func runSetupCommand(cmd *cobra.Command, args []string) error {
@@ -78,9 +90,23 @@ func runSetupCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	writeConfig, _ := cmd.Flags().GetBool("write-config")
+	withMemento, _ := cmd.Flags().GetBool("with-memento")
 	outputJSON, _ := cmd.Flags().GetBool("output-json")
 
-	result, err := setupAgent(repoRoot, args[0], writeConfig)
+	setupStdout := cmd.OutOrStdout()
+	setupStderr := cmd.ErrOrStderr()
+	if outputJSON {
+		setupStdout = setupStderr
+		setupStderr = &bytes.Buffer{}
+	}
+
+	result, err := setupAgent(repoRoot, args[0], setupAgentOptions{
+		WriteConfig: writeConfig,
+		WithMemento: withMemento,
+		Stdin:       cmd.InOrStdin(),
+		Stdout:      setupStdout,
+		Stderr:      setupStderr,
+	})
 	if err != nil {
 		return err
 	}
@@ -159,7 +185,7 @@ func runVerifyCommand(cmd *cobra.Command, args []string) error {
 	return fmt.Errorf("verification failed")
 }
 
-func setupAgent(repoRoot, agent string, writeConfig bool) (*setupResult, error) {
+func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, error) {
 	normalizedAgent := normalizeAgentName(agent)
 	plan, err := buildPageIndexConnectPlan(normalizedAgent)
 	if err != nil {
@@ -169,13 +195,14 @@ func setupAgent(repoRoot, agent string, writeConfig bool) (*setupResult, error) 
 	result := &setupResult{
 		Agent:       normalizedAgent,
 		RepoRoot:    repoRoot,
-		WriteConfig: writeConfig,
+		WriteConfig: opts.WriteConfig,
 		ConnectPlan: plan,
 	}
 
 	if needsPlexiumInit(repoRoot) {
 		if _, err := wiki.Init(wiki.InitOptions{
 			RepoRoot:      repoRoot,
+			WithMemento:   false,
 			WithPageIndex: true,
 		}); err != nil {
 			return nil, fmt.Errorf("initialize Plexium: %w", err)
@@ -214,7 +241,11 @@ func setupAgent(repoRoot, agent string, writeConfig bool) (*setupResult, error) 
 	if err != nil {
 		return nil, err
 	}
-	if writeConfig && !configured {
+	if opts.WithMemento {
+		result.Steps = append(result.Steps, configureMemento(repoRoot, normalizedAgent, opts))
+	}
+
+	if opts.WriteConfig && !configured {
 		if err := runPageIndexConnect(context.Background(), repoRoot, plan); err != nil {
 			return nil, err
 		}
@@ -243,6 +274,99 @@ func setupAgent(repoRoot, agent string, writeConfig bool) (*setupResult, error) 
 	}
 
 	return result, nil
+}
+
+func configureMemento(repoRoot, agent string, opts setupAgentOptions) setupStep {
+	result, err := memento.EnsureCLI(memento.EnsureCLIOptions{
+		Stdin:  opts.Stdin,
+		Stdout: opts.Stdout,
+		Stderr: opts.Stderr,
+	})
+	if err != nil {
+		return setupStep{
+			Name:    "memento",
+			Status:  "warning",
+			Message: fmt.Sprintf("git-memento install attempt failed: %v", err),
+		}
+	}
+
+	if result == nil {
+		return setupStep{Name: "memento", Status: "warning", Message: "git-memento setup was skipped"}
+	}
+	if !result.Available {
+		message := "git-memento is still optional and not configured yet"
+		if result.InstallCommand != "" {
+			message = fmt.Sprintf("%s; install later with `%s`", message, result.InstallCommand)
+		} else if result.ReleaseURL != "" {
+			message = fmt.Sprintf("%s; install from %s", message, result.ReleaseURL)
+		} else if result.ProjectURL != "" {
+			message = fmt.Sprintf("%s; install from %s", message, result.ProjectURL)
+		}
+		return setupStep{Name: "memento", Status: "warning", Message: message}
+	}
+
+	initialized, err := memento.IsInitialized(repoRoot)
+	if err != nil {
+		return setupStep{
+			Name:    "memento",
+			Status:  "warning",
+			Message: fmt.Sprintf("git-memento is installed but repo config could not be inspected: %v", err),
+		}
+	}
+	provider, err := memento.ConfiguredProvider(repoRoot)
+	if err != nil {
+		return setupStep{
+			Name:    "memento",
+			Status:  "warning",
+			Message: fmt.Sprintf("git-memento is installed but the configured provider could not be read: %v", err),
+		}
+	}
+	if !initialized || provider != agent {
+		if err := memento.InitRepo(repoRoot, agent); err != nil {
+			return setupStep{
+				Name:    "memento",
+				Status:  "warning",
+				Message: fmt.Sprintf("git-memento is installed but repo initialization failed: %v", err),
+			}
+		}
+	}
+
+	if agent == "claude" {
+		if err := memento.ConfigureClaudeShim(repoRoot); err != nil {
+			return setupStep{
+				Name:    "memento",
+				Status:  "warning",
+				Message: fmt.Sprintf("git-memento is initialized but the Claude compatibility shim could not be configured: %v", err),
+			}
+		}
+	}
+
+	if err := enableMementoInConfig(repoRoot); err != nil {
+		return setupStep{
+			Name:    "memento",
+			Status:  "warning",
+			Message: fmt.Sprintf("git-memento is ready but Plexium config could not be updated: %v", err),
+		}
+	}
+
+	message := "initialized git-memento for this repository"
+	if result.Installed {
+		message = "installed git-memento and initialized repo-local session tracking"
+	}
+	if agent == "claude" {
+		message += " with the temporary Claude compatibility shim"
+	}
+	return setupStep{Name: "memento", Status: "pass", Message: message}
+}
+
+func enableMementoInConfig(repoRoot string) error {
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		return err
+	}
+	cfg.Integrations.Memento = true
+	cfg.Enforcement.MementoGate = true
+	return config.SaveToDir(repoRoot, cfg)
 }
 
 func verifyAgent(repoRoot, agent string) (*verifyResult, error) {

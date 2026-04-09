@@ -22,6 +22,7 @@ import (
 	"github.com/Clarit-AI/Plexium/internal/daemon"
 	"github.com/Clarit-AI/Plexium/internal/hook"
 	"github.com/Clarit-AI/Plexium/internal/integrations/beads"
+	"github.com/Clarit-AI/Plexium/internal/integrations/memento"
 	"github.com/Clarit-AI/Plexium/internal/integrations/pageindex"
 	"github.com/Clarit-AI/Plexium/internal/lint"
 	"github.com/Clarit-AI/Plexium/internal/migrate"
@@ -185,6 +186,33 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf("init failed: %w", err)
 		}
 
+		var mementoResult *memento.EnsureCLIResult
+		if withMemento && !dryRun {
+			mementoStdout := cmd.OutOrStdout()
+			if outputJSON {
+				mementoStdout = cmd.ErrOrStderr()
+			}
+			mementoResult, err = memento.EnsureCLI(memento.EnsureCLIOptions{
+				Stdin:  cmd.InOrStdin(),
+				Stdout: mementoStdout,
+				Stderr: cmd.ErrOrStderr(),
+			})
+			if err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not install git-memento automatically: %v\n", err)
+			}
+
+			if mementoResult != nil && mementoResult.Available {
+				initialized, initErr := memento.IsInitialized(repoRoot)
+				if initErr != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not inspect git-memento repo config: %v\n", initErr)
+				} else if !initialized {
+					if initErr := memento.InitRepo(repoRoot, ""); initErr != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "warning: git memento init failed: %v\n", initErr)
+					}
+				}
+			}
+		}
+
 		if outputJSON {
 			data, err := json.MarshalIndent(result, "", "  ")
 			if err != nil {
@@ -211,6 +239,21 @@ var initCmd = &cobra.Command{
 				fmt.Println("  Finish setup for Claude: plexium setup claude --write-config")
 				fmt.Println("  Finish setup for Codex:  plexium setup codex --write-config")
 				fmt.Println("  Or query directly: plexium retrieve \"<query>\"")
+			}
+			if withMemento {
+				fmt.Println("\nMemento is optional and configured per repository.")
+				switch {
+				case mementoResult != nil && mementoResult.Available && mementoResult.Installed:
+					fmt.Println("  Installed git-memento and initialized local repo metadata.")
+				case mementoResult != nil && mementoResult.Available:
+					fmt.Println("  git-memento is available and ready for repo-local initialization.")
+				case mementoResult != nil && mementoResult.InstallCommand != "":
+					fmt.Printf("  Install later with: %s\n", mementoResult.InstallCommand)
+				case mementoResult != nil && mementoResult.ReleaseURL != "":
+					fmt.Printf("  Install later from: %s\n", mementoResult.ReleaseURL)
+				default:
+					fmt.Println("  Install git-memento from https://github.com/mandel-macaque/memento when you want session provenance.")
+				}
 			}
 		}
 

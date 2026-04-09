@@ -4,6 +4,10 @@ Memento is one of the most distinctive parts of Plexium's story. Most systems in
 
 Plexium can use Memento to fill that gap.
 
+Memento is still optional. When you opt into it with `plexium init --with-memento` or `plexium setup <agent> --with-memento`, Plexium can offer to install `git-memento` first and then initialize it for the current repository.
+
+For Claude Code specifically, Plexium currently configures a temporary repo-local compatibility shim at `.plexium/bin/claude-memento-bridge.js`. That shim works around the current gap between upstream `git-memento` and Claude's session model. It is meant as a transitional compatibility layer, not a permanent fork of Memento behavior.
+
 ---
 
 ## What Memento Adds
