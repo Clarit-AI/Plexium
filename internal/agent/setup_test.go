@@ -521,6 +521,123 @@ func TestPromptBudgetChoice_InvalidThenValidRetries(t *testing.T) {
 	assert.Contains(t, stdout.String(), "Enter a number like 2.5")
 }
 
+func TestRunInteractiveSetup_DetectsExistingOpenRouterAndKeepsCurrentSetup(t *testing.T) {
+	dir := t.TempDir()
+	writeExistingOpenRouterSetup(t, dir, "nvidia/nemotron-3-super-120b-a12b", "balanced", 1.25)
+	require.NoError(t, SaveCredentials(dir, "sk-or-v1-existing", io.Discard, io.Discard))
+
+	client, cleanup := stubOpenRouterValidation(t)
+	defer cleanup()
+
+	var stdout bytes.Buffer
+	result, err := RunInteractiveSetup(dir, SetupOptions{
+		HTTPClient: client,
+		Stdin:      bytes.NewBufferString("\n"),
+		Stdout:     &stdout,
+		Stderr:     io.Discard,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, stdout.String(), "OpenRouter is already configured for this repo.")
+	assert.Equal(t, []string{"openrouter"}, result.ProvidersConfigured)
+	assert.Equal(t, "nvidia/nemotron-3-super-120b-a12b", result.OpenRouterModel)
+	assert.True(t, result.BudgetConfigured)
+	assert.Equal(t, 1.25, result.DailyBudgetUSD)
+
+	data, err := os.ReadFile(filepath.Join(dir, ".plexium", "config.yml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "model: \"nvidia/nemotron-3-super-120b-a12b\"")
+	assert.Contains(t, string(data), "dailyUSD: 1.25")
+}
+
+func TestRunInteractiveSetup_ReconfiguresExistingOpenRouterWithoutReauth(t *testing.T) {
+	dir := t.TempDir()
+	writeExistingOpenRouterSetup(t, dir, "nvidia/nemotron-3-super-120b-a12b", "balanced", 1.25)
+	require.NoError(t, SaveCredentials(dir, "sk-or-v1-existing", io.Discard, io.Discard))
+
+	client, cleanup := stubOpenRouterValidation(t)
+	defer cleanup()
+
+	result, err := RunInteractiveSetup(dir, SetupOptions{
+		HTTPClient: client,
+		Stdin:      bytes.NewBufferString("2\n3\n2.5\n"),
+		Stdout:     io.Discard,
+		Stderr:     io.Discard,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"openrouter"}, result.ProvidersConfigured)
+	assert.Equal(t, "openai/gpt-5.4-nano", result.OpenRouterModel)
+	assert.Equal(t, "frontier-large-context", result.OpenRouterCapabilityProfile)
+	assert.True(t, result.BudgetConfigured)
+	assert.Equal(t, 2.5, result.DailyBudgetUSD)
+
+	data, err := os.ReadFile(filepath.Join(dir, ".plexium", "config.yml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "model: \"openai/gpt-5.4-nano\"")
+	assert.Contains(t, string(data), "capabilityProfile: \"frontier-large-context\"")
+	assert.Contains(t, string(data), "dailyUSD: 2.5")
+}
+
+func TestRunInteractiveSetup_RemovesExistingOpenRouter(t *testing.T) {
+	dir := t.TempDir()
+	writeExistingOpenRouterSetup(t, dir, "nvidia/nemotron-3-super-120b-a12b", "balanced", 1.25)
+	require.NoError(t, SaveCredentials(dir, "sk-or-v1-existing", io.Discard, io.Discard))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".plexium", ".env"), []byte("export OPENROUTER_API_KEY=\"sk-or-v1-existing\"\n"), 0o600))
+
+	client, cleanup := stubOpenRouterValidation(t)
+	defer cleanup()
+
+	result, err := RunInteractiveSetup(dir, SetupOptions{
+		HTTPClient: client,
+		Stdin:      bytes.NewBufferString("4\n"),
+		Stdout:     io.Discard,
+		Stderr:     io.Discard,
+	})
+	require.NoError(t, err)
+
+	assert.Empty(t, result.ProvidersConfigured)
+	assert.False(t, result.BudgetConfigured)
+	assert.Equal(t, 0.0, result.DailyBudgetUSD)
+
+	data, err := os.ReadFile(filepath.Join(dir, ".plexium", "config.yml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "enabled: false")
+	assert.Contains(t, string(data), "providers: []")
+
+	credData, err := os.ReadFile(filepath.Join(dir, ".plexium", "credentials.json"))
+	if os.IsNotExist(err) {
+		return
+	}
+	require.NoError(t, err)
+	assert.NotContains(t, string(credData), "openrouter_api_key")
+}
+
+func writeExistingOpenRouterSetup(t *testing.T, dir, model, profile string, budget float64) {
+	t.Helper()
+
+	configPath := filepath.Join(dir, ".plexium", "config.yml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	content := fmt.Sprintf(`sources:
+  include:
+    - "**/*.go"
+
+assistiveAgent:
+  enabled: true
+  providers:
+    - name: openrouter
+      enabled: true
+      type: openai-compatible
+      endpoint: https://openrouter.ai/api
+      model: %q
+      apiKeyEnv: OPENROUTER_API_KEY
+      capabilityProfile: %q
+  budget:
+    dailyUSD: %v
+`, model, profile, budget)
+	require.NoError(t, os.WriteFile(configPath, []byte(content), 0o644))
+}
+
 func stubOpenRouterValidation(t *testing.T) (*http.Client, func()) {
 	t.Helper()
 

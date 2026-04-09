@@ -32,29 +32,29 @@ type daemonWorktreeSummary struct {
 }
 
 type daemonStatusView struct {
-	Running             bool                       `json:"running"`
-	PID                 int                        `json:"pid,omitempty"`
-	State               string                     `json:"state,omitempty"`
-	Runner              string                     `json:"runner,omitempty"`
-	PollIntervalSeconds int                        `json:"pollIntervalSeconds,omitempty"`
-	MaxConcurrent       int                        `json:"maxConcurrent,omitempty"`
-	TickCount           int                        `json:"tickCount,omitempty"`
-	LastTickStartedAt   time.Time                  `json:"lastTickStartedAt,omitempty"`
-	LastTickCompletedAt time.Time                  `json:"lastTickCompletedAt,omitempty"`
-	LastTickDurationMs  int64                      `json:"lastTickDurationMs,omitempty"`
-	LastTickActionCount int                        `json:"lastTickActionCount,omitempty"`
-	LastTickFailureCount int                       `json:"lastTickFailureCount,omitempty"`
-	Watches             []daemon.WatchSnapshot     `json:"watches,omitempty"`
-	RecentActions       []daemon.RecordedTickAction `json:"recentActions,omitempty"`
-	Worktrees           daemonWorktreeSummary      `json:"worktrees"`
+	Running              bool                        `json:"running"`
+	PID                  int                         `json:"pid,omitempty"`
+	State                string                      `json:"state,omitempty"`
+	Runner               string                      `json:"runner,omitempty"`
+	PollIntervalSeconds  int                         `json:"pollIntervalSeconds,omitempty"`
+	MaxConcurrent        int                         `json:"maxConcurrent,omitempty"`
+	TickCount            int                         `json:"tickCount,omitempty"`
+	LastTickStartedAt    time.Time                   `json:"lastTickStartedAt,omitempty"`
+	LastTickCompletedAt  time.Time                   `json:"lastTickCompletedAt,omitempty"`
+	LastTickDurationMs   int64                       `json:"lastTickDurationMs,omitempty"`
+	LastTickActionCount  int                         `json:"lastTickActionCount,omitempty"`
+	LastTickFailureCount int                         `json:"lastTickFailureCount,omitempty"`
+	Watches              []daemon.WatchSnapshot      `json:"watches,omitempty"`
+	RecentActions        []daemon.RecordedTickAction `json:"recentActions,omitempty"`
+	Worktrees            daemonWorktreeSummary       `json:"worktrees"`
 }
 
 type agentStatusPayload struct {
-	Enabled          bool                `json:"enabled"`
-	BudgetConfigured bool                `json:"budgetConfigured"`
-	BudgetUSD        float64             `json:"dailyBudgetUSD"`
+	Enabled          bool                 `json:"enabled"`
+	BudgetConfigured bool                 `json:"budgetConfigured"`
+	BudgetUSD        float64              `json:"dailyBudgetUSD"`
 	Providers        []providerStatusView `json:"providers"`
-	Daemon           daemonStatusView    `json:"daemon"`
+	Daemon           daemonStatusView     `json:"daemon"`
 }
 
 func collectAgentStatus(repoRoot string, cfg *config.Config) (*agentStatusPayload, error) {
@@ -204,11 +204,12 @@ func formatAgentStatus(status *agentStatusPayload) string {
 		b.WriteString("Daemon: stopped\n")
 	}
 	if status.Daemon.Runner != "" {
-		fmt.Fprintf(&b, "  Runner: %s\n", status.Daemon.Runner)
+		fmt.Fprintf(&b, "  Daemon runner: %s\n", status.Daemon.Runner)
 	}
 	if status.Daemon.State != "" {
 		fmt.Fprintf(&b, "  State: %s\n", status.Daemon.State)
 	}
+	fmt.Fprintf(&b, "  Activity: %s\n", summarizeDaemonActivity(status.Daemon))
 	if status.Daemon.PollIntervalSeconds > 0 || status.Daemon.MaxConcurrent > 0 {
 		fmt.Fprintf(&b, "  Cadence: every %s, max %d concurrent worktrees\n", time.Duration(status.Daemon.PollIntervalSeconds)*time.Second, status.Daemon.MaxConcurrent)
 	}
@@ -272,6 +273,32 @@ func formatAgentStatus(status *agentStatusPayload) string {
 	}
 
 	return b.String()
+}
+
+func summarizeDaemonActivity(status daemonStatusView) string {
+	if !status.Running {
+		return "daemon is not running"
+	}
+	if status.Worktrees.Active > 0 {
+		return fmt.Sprintf("processing %d active worktree(s)", status.Worktrees.Active)
+	}
+	if len(status.RecentActions) == 0 {
+		if status.LastTickCompletedAt.IsZero() {
+			return "waiting for the first daemon tick"
+		}
+		return "no active maintenance jobs right now"
+	}
+	passiveOnly := true
+	for _, action := range status.RecentActions {
+		if action.Action != "log-only" {
+			passiveOnly = false
+			break
+		}
+	}
+	if passiveOnly {
+		return "no active maintenance jobs right now; recent ticks only ran passive checks"
+	}
+	return "no active maintenance jobs right now"
 }
 
 func formatWatchSummary(watches []daemon.WatchSnapshot) string {

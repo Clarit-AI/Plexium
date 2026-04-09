@@ -21,20 +21,37 @@ import (
 	"time"
 
 	"github.com/Clarit-AI/Plexium/internal/capabilityprofile"
+	"github.com/Clarit-AI/Plexium/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	openRouterAuthURL  = "https://openrouter.ai/auth"
-	openRouterTokenURL = "https://openrouter.ai/api/v1/auth/keys"
-	openRouterKeyURL   = "https://openrouter.ai/api/v1/auth/key"
-	pkceMethodS256     = "S256"
-	callbackPort       = 3000
-	callbackURL        = "http://localhost:3000"
-	oauthAppName       = "Plexium"
-	oauthTimeout       = 180 * time.Second
+	openRouterAuthURL       = "https://openrouter.ai/auth"
+	openRouterTokenURL      = "https://openrouter.ai/api/v1/auth/keys"
+	openRouterKeyURL        = "https://openrouter.ai/api/v1/auth/key"
+	pkceMethodS256          = "S256"
+	callbackPort            = 3000
+	callbackURL             = "http://localhost:3000"
+	oauthAppName            = "Plexium"
+	oauthTimeout            = 180 * time.Second
 	callbackShutdownTimeout = 2 * time.Second
 )
+
+type storedAssistiveConfig struct {
+	AssistiveAgent config.AssistiveAgent `yaml:"assistiveAgent"`
+}
+
+type existingSetupState struct {
+	HasOllama                   bool
+	OllamaEndpoint              string
+	OllamaModel                 string
+	HasOpenRouter               bool
+	OpenRouterModel             string
+	OpenRouterCapabilityProfile string
+	OpenRouterAuthConfigured    bool
+	BudgetConfigured            bool
+	BudgetUSD                   float64
+}
 
 // SetupResult holds the outcome of the interactive setup.
 type SetupResult struct {
@@ -59,13 +76,13 @@ type SetupOptions struct {
 	// package-level shared client.
 	HTTPClient *http.Client
 	// Model optionally selects an OpenRouter model non-interactively.
-	Model  string
+	Model string
 	// DailyBudgetUSD configures an optional daily provider budget. Nil means
 	// leave it unlimited unless the interactive flow asks the user to set one.
 	DailyBudgetUSD *float64
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
+	Stdin          io.Reader
+	Stdout         io.Writer
+	Stderr         io.Writer
 }
 
 // RunInteractiveSetup runs the full interactive provider setup flow.
@@ -92,27 +109,28 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 	}
 	client := clientOrDefault(opts.HTTPClient)
 	interactive := isInteractiveInput(stdin)
-
-	if opts.APIKey == "" {
-		opts.APIKey = os.Getenv("OPENROUTER_API_KEY")
+	explicitAPIKey := strings.TrimSpace(opts.APIKey)
+	if explicitAPIKey == "" && !interactive {
+		explicitAPIKey = os.Getenv("OPENROUTER_API_KEY")
 	}
-	if opts.APIKey != "" {
+
+	if explicitAPIKey != "" {
 		fmt.Fprintln(stdout, "Plexium Agent Setup")
 		fmt.Fprintln(stdout, "===================")
 		fmt.Fprintln(stdout)
 		fmt.Fprint(stdout, "Validating provided API key... ")
-		if _, err := validateKey(client, opts.APIKey); err != nil {
+		if _, err := validateKey(client, explicitAPIKey); err != nil {
 			fmt.Fprintf(stdout, "FAILED (%v)\n", err)
 			return nil, fmt.Errorf("key validation failed: %w", err)
 		}
 		fmt.Fprintln(stdout, "OK")
 
-		if err := SaveCredentials(repoRoot, opts.APIKey, stdout, stderr); err != nil {
+		if err := SaveCredentials(repoRoot, explicitAPIKey, stdout, stderr); err != nil {
 			return nil, fmt.Errorf("saving credentials: %w", err)
 		}
 
 		envPath := filepath.Join(repoRoot, ".plexium", ".env")
-		envContent := fmt.Sprintf("# Source this file: source .plexium/.env\nexport OPENROUTER_API_KEY=%q\n", opts.APIKey)
+		envContent := fmt.Sprintf("# Source this file: source .plexium/.env\nexport OPENROUTER_API_KEY=%q\n", explicitAPIKey)
 		if err := os.WriteFile(envPath, []byte(envContent), 0o600); err != nil {
 			fmt.Fprintf(stderr, "Warning: could not write %s: %v\n", envPath, err)
 		}
@@ -139,6 +157,12 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 		return result, nil
 	}
 
+	existing, err := loadExistingSetupState(repoRoot, configPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading existing assistive config: %w", err)
+	}
+	seedExistingProviders(result, repoRoot, existing)
+
 	fmt.Fprintln(stdout, "Plexium Agent Setup")
 	fmt.Fprintln(stdout, "===================")
 	fmt.Fprintln(stdout)
@@ -154,7 +178,7 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 			model := promptChoice(reader, stdout, "Select model", models[0], models)
 			result.OllamaEndpoint = ollamaEndpoint
 			result.OllamaModel = model
-			result.ProvidersConfigured = append(result.ProvidersConfigured, "ollama")
+			addConfiguredProvider(result, "ollama")
 		}
 	} else {
 		fmt.Fprintln(stdout, "Checking for Ollama... not found")
@@ -163,75 +187,21 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 	}
 
 	// OpenRouter setup
-	if promptYesNo(reader, stdout, "Configure OpenRouter?", true) {
-		fmt.Fprintln(stdout)
-		fmt.Fprintln(stdout, "Choose setup method:")
-		fmt.Fprintln(stdout, "  1. Browser OAuth (recommended)")
-		fmt.Fprintln(stdout, "  2. Manual API key")
-		fmt.Fprint(stdout, "> ")
-		choice, _ := reader.ReadString('\n')
-		choice = strings.TrimSpace(choice)
-
-		var apiKey string
-		switch choice {
-		case "1", "":
-			fmt.Fprintln(stdout)
-			apiKey, err = RunOAuthFlow(client, oauthAppName, stdout, stderr)
-			if err != nil {
-				fmt.Fprintf(stdout, "OAuth failed: %v\n", err)
-				fmt.Fprintln(stdout, "Falling back to manual entry...")
-				apiKey, err = promptManualKey(reader, stdout)
-				if err != nil {
-					return nil, fmt.Errorf("manual key entry: %w", err)
-				}
-			}
-		case "2":
-			apiKey, err = promptManualKey(reader, stdout)
-			if err != nil {
-				return nil, fmt.Errorf("manual key entry: %w", err)
-			}
-		default:
-			fmt.Fprintln(stdout, "Skipping OpenRouter.")
+	shouldWriteConfig := false
+	if existing.HasOpenRouter {
+		shouldWriteConfig = true
+		if err := handleExistingOpenRouterSetup(reader, stdout, stderr, client, repoRoot, opts, result, existing); err != nil {
+			return nil, err
 		}
-
-		if apiKey != "" {
-			// Validate key before persisting
-			fmt.Fprint(stdout, "Validating key... ")
-			if _, vErr := validateKey(client, apiKey); vErr != nil {
-				fmt.Fprintf(stdout, "FAILED (%v)\n", vErr)
-				fmt.Fprintln(stdout, "Key not saved. Check the key and try again.")
-			} else {
-				fmt.Fprintln(stdout, "OK")
-				if err := SaveCredentials(repoRoot, apiKey, stdout, stderr); err != nil {
-					return nil, fmt.Errorf("saving credentials: %w", err)
-				}
-
-				// Also write .env for convenience
-				envPath := filepath.Join(repoRoot, ".plexium", ".env")
-				envContent := fmt.Sprintf("# Source this file: source .plexium/.env\nexport OPENROUTER_API_KEY=%q\n", apiKey)
-				if envErr := os.WriteFile(envPath, []byte(envContent), 0o600); envErr != nil {
-					fmt.Fprintf(stderr, "Warning: could not write %s: %v\n", envPath, envErr)
-				}
-
-				model, profile, err := resolveOpenRouterModelChoice(reader, stdout, opts.Model, interactive)
-				if err != nil {
-					return nil, fmt.Errorf("select OpenRouter model: %w", err)
-				}
-				setOpenRouterSelection(result, model, profile)
-				applyBudgetSelection(result, opts.DailyBudgetUSD)
-				if interactive && opts.DailyBudgetUSD == nil {
-					if err := promptBudgetChoice(reader, stdout, result); err != nil {
-						return nil, fmt.Errorf("choose daily budget: %w", err)
-					}
-				}
-				result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
-				result.ProvidersConfigured = append(result.ProvidersConfigured, "openrouter")
-			}
+	} else if promptYesNo(reader, stdout, "Configure OpenRouter?", true) {
+		shouldWriteConfig = true
+		if err := configureOpenRouter(reader, stdout, stderr, client, repoRoot, opts, result); err != nil {
+			return nil, err
 		}
 	}
 
 	// Update config
-	if len(result.ProvidersConfigured) > 0 {
+	if shouldWriteConfig || len(result.ProvidersConfigured) > 0 {
 		fmt.Fprintln(stdout)
 		fmt.Fprintln(stdout, "Updating .plexium/config.yml...")
 		if err := writeAssistiveAgentConfig(configPath, result); err != nil {
@@ -623,6 +593,61 @@ func SaveCredentials(repoRoot string, key string, stdout, stderr io.Writer) erro
 	return nil
 }
 
+func RemoveOpenRouterCredentials(repoRoot string) error {
+	credPath := filepath.Join(repoRoot, ".plexium", "credentials.json")
+	if data, err := os.ReadFile(credPath); err == nil {
+		creds := make(map[string]string)
+		if err := json.Unmarshal(data, &creds); err == nil {
+			delete(creds, "openrouter_api_key")
+			if len(creds) == 0 {
+				if err := os.Remove(credPath); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("remove credentials: %w", err)
+				}
+			} else {
+				updated, err := json.MarshalIndent(creds, "", "  ")
+				if err != nil {
+					return fmt.Errorf("marshal credentials: %w", err)
+				}
+				if err := os.WriteFile(credPath, append(updated, '\n'), 0o600); err != nil {
+					return fmt.Errorf("write credentials: %w", err)
+				}
+			}
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read credentials: %w", err)
+	}
+
+	envPath := filepath.Join(repoRoot, ".plexium", ".env")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read env file: %w", err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "export OPENROUTER_API_KEY=") {
+			continue
+		}
+		if trimmed == "" && len(filtered) > 0 && strings.TrimSpace(filtered[len(filtered)-1]) == "" {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	content := strings.TrimRight(strings.Join(filtered, "\n"), "\n")
+	if content == "" {
+		if err := os.Remove(envPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove env file: %w", err)
+		}
+		return nil
+	}
+	return os.WriteFile(envPath, []byte(content+"\n"), 0o600)
+}
+
 // --- Config Writing ---
 
 func writeAssistiveAgentConfig(configPath string, result *SetupResult) error {
@@ -657,12 +682,17 @@ func writeAssistiveAgentConfig(configPath string, result *SetupResult) error {
 		}
 	}
 
+	enabled := len(result.ProvidersConfigured) > 0
+	providerBlock := "  providers: []\n"
+	if enabled {
+		providerBlock = "  providers:\n" + providers.String()
+	}
+
 	agentBlock := fmt.Sprintf(`assistiveAgent:
-  enabled: true
-  providers:
+  enabled: %t
 %s  budget:
     dailyUSD: %s
-`, providers.String(), formatBudgetValue(result))
+`, enabled, providerBlock, formatBudgetValue(result))
 
 	// Replace existing assistiveAgent block or append
 	if strings.Contains(content, "assistiveAgent:") {
@@ -760,6 +790,252 @@ func promptManualKey(reader *bufio.Reader, stdout io.Writer) (string, error) {
 		return "", fmt.Errorf("no key entered")
 	}
 	return key, nil
+}
+
+func loadExistingSetupState(repoRoot, configPath string) (*existingSetupState, error) {
+	state := &existingSetupState{}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+
+	var stored storedAssistiveConfig
+	if err := yaml.Unmarshal(data, &stored); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+
+	for _, provider := range stored.AssistiveAgent.Providers {
+		if !provider.Enabled {
+			continue
+		}
+		switch provider.Type {
+		case "ollama":
+			state.HasOllama = true
+			state.OllamaEndpoint = provider.Endpoint
+			state.OllamaModel = provider.Model
+		case "openai-compatible":
+			if provider.Name != "openrouter" && provider.APIKeyEnv != "OPENROUTER_API_KEY" {
+				continue
+			}
+			state.HasOpenRouter = true
+			state.OpenRouterModel = provider.Model
+			state.OpenRouterCapabilityProfile = provider.CapabilityProfile
+		}
+	}
+
+	state.BudgetUSD = stored.AssistiveAgent.Budget.DailyUSD
+	state.BudgetConfigured = state.BudgetUSD > 0
+	state.OpenRouterAuthConfigured = loadStoredOpenRouterKey(repoRoot) != ""
+	return state, nil
+}
+
+func seedExistingProviders(result *SetupResult, repoRoot string, existing *existingSetupState) {
+	if existing == nil {
+		return
+	}
+	if existing.HasOllama {
+		result.OllamaEndpoint = existing.OllamaEndpoint
+		result.OllamaModel = existing.OllamaModel
+		addConfiguredProvider(result, "ollama")
+	}
+	if existing.HasOpenRouter {
+		result.OpenRouterModel = existing.OpenRouterModel
+		result.OpenRouterCapabilityProfile = existing.OpenRouterCapabilityProfile
+		if result.OpenRouterCapabilityProfile == "" {
+			result.OpenRouterCapabilityProfile = capabilityProfileForModel(result.OpenRouterModel)
+		}
+		if existing.OpenRouterAuthConfigured {
+			result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
+		}
+		addConfiguredProvider(result, "openrouter")
+	}
+	if existing.BudgetConfigured {
+		result.BudgetConfigured = true
+		result.DailyBudgetUSD = existing.BudgetUSD
+	}
+}
+
+func handleExistingOpenRouterSetup(reader *bufio.Reader, stdout, stderr io.Writer, client *http.Client, repoRoot string, opts SetupOptions, result *SetupResult, existing *existingSetupState) error {
+	fmt.Fprintln(stdout, "OpenRouter is already configured for this repo.")
+	if existing.OpenRouterModel != "" {
+		fmt.Fprintf(stdout, "  Current model: %s\n", existing.OpenRouterModel)
+	}
+	if existing.OpenRouterAuthConfigured {
+		fmt.Fprintln(stdout, "  Auth: credentials are already saved")
+	} else {
+		fmt.Fprintln(stdout, "  Auth: provider is configured, but no saved credentials were found")
+	}
+	if existing.BudgetConfigured {
+		fmt.Fprintf(stdout, "  Daily budget: $%s\n", strconv.FormatFloat(existing.BudgetUSD, 'f', -1, 64))
+	} else {
+		fmt.Fprintln(stdout, "  Daily budget: unlimited")
+	}
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "OpenRouter options:")
+	fmt.Fprintln(stdout, "  1. Keep current setup")
+	fmt.Fprintln(stdout, "  2. Reconfigure model or budget (keep current auth)")
+	fmt.Fprintln(stdout, "  3. Reauthorize or replace API key")
+	fmt.Fprintln(stdout, "  4. Remove OpenRouter")
+	fmt.Fprint(stdout, "> ")
+	choice, _ := reader.ReadString('\n')
+	choice = strings.TrimSpace(choice)
+
+	switch choice {
+	case "", "1":
+		addConfiguredProvider(result, "openrouter")
+		if result.OpenRouterModel == "" {
+			result.OpenRouterModel = existing.OpenRouterModel
+			result.OpenRouterCapabilityProfile = existing.OpenRouterCapabilityProfile
+		}
+		if result.OpenRouterCapabilityProfile == "" {
+			result.OpenRouterCapabilityProfile = capabilityProfileForModel(result.OpenRouterModel)
+		}
+		if existing.OpenRouterAuthConfigured {
+			result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
+		}
+		return nil
+	case "2":
+		if !existing.OpenRouterAuthConfigured {
+			fmt.Fprintln(stdout, "No saved OpenRouter credentials were found, so Plexium needs to reauthorize first.")
+			return configureOpenRouter(reader, stdout, stderr, client, repoRoot, opts, result)
+		}
+		model, profile, err := resolveOpenRouterModelChoice(reader, stdout, opts.Model, true)
+		if err != nil {
+			return fmt.Errorf("select OpenRouter model: %w", err)
+		}
+		setOpenRouterSelection(result, model, profile)
+		result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
+		addConfiguredProvider(result, "openrouter")
+		if opts.DailyBudgetUSD != nil {
+			applyBudgetSelection(result, opts.DailyBudgetUSD)
+			return nil
+		}
+		return promptBudgetChoice(reader, stdout, result)
+	case "3":
+		return configureOpenRouter(reader, stdout, stderr, client, repoRoot, opts, result)
+	case "4":
+		removeConfiguredProvider(result, "openrouter")
+		result.OpenRouterModel = ""
+		result.OpenRouterCapabilityProfile = ""
+		result.OpenRouterKeyPath = ""
+		if err := RemoveOpenRouterCredentials(repoRoot); err != nil {
+			return fmt.Errorf("remove OpenRouter credentials: %w", err)
+		}
+		if len(result.ProvidersConfigured) == 0 {
+			result.BudgetConfigured = false
+			result.DailyBudgetUSD = 0
+		}
+		fmt.Fprintln(stdout, "OpenRouter credentials removed.")
+		return nil
+	default:
+		fmt.Fprintln(stdout, "Keeping current OpenRouter setup.")
+		addConfiguredProvider(result, "openrouter")
+		return nil
+	}
+}
+
+func configureOpenRouter(reader *bufio.Reader, stdout, stderr io.Writer, client *http.Client, repoRoot string, opts SetupOptions, result *SetupResult) error {
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "Choose setup method:")
+	fmt.Fprintln(stdout, "  1. Browser OAuth (recommended)")
+	fmt.Fprintln(stdout, "  2. Manual API key")
+	fmt.Fprint(stdout, "> ")
+	choice, _ := reader.ReadString('\n')
+	choice = strings.TrimSpace(choice)
+
+	var apiKey string
+	var err error
+	switch choice {
+	case "1", "":
+		fmt.Fprintln(stdout)
+		apiKey, err = RunOAuthFlow(client, oauthAppName, stdout, stderr)
+		if err != nil {
+			fmt.Fprintf(stdout, "OAuth failed: %v\n", err)
+			fmt.Fprintln(stdout, "Falling back to manual entry...")
+			apiKey, err = promptManualKey(reader, stdout)
+			if err != nil {
+				return fmt.Errorf("manual key entry: %w", err)
+			}
+		}
+	case "2":
+		apiKey, err = promptManualKey(reader, stdout)
+		if err != nil {
+			return fmt.Errorf("manual key entry: %w", err)
+		}
+	default:
+		fmt.Fprintln(stdout, "Skipping OpenRouter.")
+		removeConfiguredProvider(result, "openrouter")
+		return nil
+	}
+
+	if apiKey == "" {
+		return nil
+	}
+
+	fmt.Fprint(stdout, "Validating key... ")
+	if _, vErr := validateKey(client, apiKey); vErr != nil {
+		fmt.Fprintf(stdout, "FAILED (%v)\n", vErr)
+		fmt.Fprintln(stdout, "Key not saved. Check the key and try again.")
+		return nil
+	}
+	fmt.Fprintln(stdout, "OK")
+	if err := SaveCredentials(repoRoot, apiKey, stdout, stderr); err != nil {
+		return fmt.Errorf("saving credentials: %w", err)
+	}
+
+	envPath := filepath.Join(repoRoot, ".plexium", ".env")
+	envContent := fmt.Sprintf("# Source this file: source .plexium/.env\nexport OPENROUTER_API_KEY=%q\n", apiKey)
+	if envErr := os.WriteFile(envPath, []byte(envContent), 0o600); envErr != nil {
+		fmt.Fprintf(stderr, "Warning: could not write %s: %v\n", envPath, envErr)
+	}
+
+	model, profile, err := resolveOpenRouterModelChoice(reader, stdout, opts.Model, true)
+	if err != nil {
+		return fmt.Errorf("select OpenRouter model: %w", err)
+	}
+	setOpenRouterSelection(result, model, profile)
+	applyBudgetSelection(result, opts.DailyBudgetUSD)
+	if opts.DailyBudgetUSD == nil {
+		if err := promptBudgetChoice(reader, stdout, result); err != nil {
+			return fmt.Errorf("choose daily budget: %w", err)
+		}
+	}
+	result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
+	addConfiguredProvider(result, "openrouter")
+	return nil
+}
+
+func loadStoredOpenRouterKey(repoRoot string) string {
+	credPath := filepath.Join(repoRoot, ".plexium", "credentials.json")
+	if data, err := os.ReadFile(credPath); err == nil {
+		var creds map[string]string
+		if json.Unmarshal(data, &creds) == nil {
+			if key := strings.TrimSpace(creds["openrouter_api_key"]); key != "" {
+				return key
+			}
+		}
+	}
+	return strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY"))
+}
+
+func addConfiguredProvider(result *SetupResult, provider string) {
+	for _, existing := range result.ProvidersConfigured {
+		if existing == provider {
+			return
+		}
+	}
+	result.ProvidersConfigured = append(result.ProvidersConfigured, provider)
+}
+
+func removeConfiguredProvider(result *SetupResult, provider string) {
+	filtered := result.ProvidersConfigured[:0]
+	for _, existing := range result.ProvidersConfigured {
+		if existing == provider {
+			continue
+		}
+		filtered = append(filtered, existing)
+	}
+	result.ProvidersConfigured = filtered
 }
 
 func promptBudgetChoice(reader *bufio.Reader, stdout io.Writer, result *SetupResult) error {

@@ -48,6 +48,12 @@ func TestFormatAgentStatus_ShowsDaemonActivityAndUnlimitedBudget(t *testing.T) {
 	if !strings.Contains(rendered, "Daemon: running (PID 1234)") {
 		t.Fatalf("expected daemon line, got:\n%s", rendered)
 	}
+	if !strings.Contains(rendered, "Daemon runner: claude") {
+		t.Fatalf("expected daemon runner line, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Activity: no active maintenance jobs right now") {
+		t.Fatalf("expected activity summary, got:\n%s", rendered)
+	}
 	if !strings.Contains(rendered, "Recent activity:") {
 		t.Fatalf("expected recent activity section, got:\n%s", rendered)
 	}
@@ -56,5 +62,18 @@ func TestFormatAgentStatus_ShowsDaemonActivityAndUnlimitedBudget(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "usage today: 2 requests, 512 tokens, $0.0000") {
 		t.Fatalf("expected provider usage line, got:\n%s", rendered)
+	}
+}
+
+func TestSummarizeDaemonActivity_PassiveChecks(t *testing.T) {
+	summary := summarizeDaemonActivity(daemonStatusView{
+		Running: true,
+		RecentActions: []daemon.RecordedTickAction{
+			{Action: "log-only"},
+			{Action: "log-only"},
+		},
+	})
+	if summary != "no active maintenance jobs right now; recent ticks only ran passive checks" {
+		t.Fatalf("unexpected summary: %s", summary)
 	}
 }
