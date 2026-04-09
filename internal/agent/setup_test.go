@@ -336,7 +336,6 @@ func TestPromptYesNo_EOFWithoutAnswerReturnsFalse(t *testing.T) {
 		t.Fatalf("expected EOF without answer to return false")
 	}
 }
-
 func stubOpenRouterValidation(t *testing.T) (*http.Client, func()) {
 	t.Helper()
 
