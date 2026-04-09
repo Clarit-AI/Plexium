@@ -166,7 +166,7 @@ func InitRepo(repoRoot, provider string) error {
 
 // ConfigureClaudeShim installs the repo-local Claude compatibility shim config.
 func ConfigureClaudeShim(repoRoot string) error {
-	bridgePath := filepath.Join(repoRoot, ".plexium", "bin", "claude-memento-bridge.js")
+	bridgePath := filepath.Join(repoRoot, ".plexium", "bin", "claude-memento-bridge.cjs")
 	if err := os.MkdirAll(filepath.Dir(bridgePath), 0o755); err != nil {
 		return fmt.Errorf("create shim directory: %w", err)
 	}

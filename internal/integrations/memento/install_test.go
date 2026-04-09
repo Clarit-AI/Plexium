@@ -192,7 +192,7 @@ func TestConfigureClaudeShimWritesLocalGitConfig(t *testing.T) {
 		t.Fatalf("read memento.claude.bin: %v\n%s", err, output)
 	}
 	got := string(bytes.TrimSpace(output))
-	want := filepath.Join(repoRoot, ".plexium", "bin", "claude-memento-bridge.js")
+	want := filepath.Join(repoRoot, ".plexium", "bin", "claude-memento-bridge.cjs")
 	if got != want {
 		t.Fatalf("expected shim path %q, got %q", want, got)
 	}

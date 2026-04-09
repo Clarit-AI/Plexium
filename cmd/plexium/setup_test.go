@@ -213,7 +213,7 @@ exit 1
 	if err != nil {
 		t.Fatalf("read memento.claude.bin: %v\n%s", err, output)
 	}
-	expectedShim := filepath.Join(repoRoot, ".plexium", "bin", "claude-memento-bridge.js")
+	expectedShim := filepath.Join(repoRoot, ".plexium", "bin", "claude-memento-bridge.cjs")
 	if got := string(bytes.TrimSpace(output)); got != expectedShim {
 		t.Fatalf("expected shim path %q, got %q", expectedShim, got)
 	}

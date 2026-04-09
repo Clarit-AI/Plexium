@@ -71,7 +71,7 @@ plexium setup claude --write-config --with-memento
 plexium setup codex --write-config --with-memento
 ```
 
-On Claude, Plexium also writes a temporary repo-local compatibility shim (`.plexium/bin/claude-memento-bridge.js`) into the local `git-memento` config so Claude users can keep using Memento until upstream support is patched.
+On Claude, Plexium also writes a temporary repo-local compatibility shim (`.plexium/bin/claude-memento-bridge.cjs`) into the local `git-memento` config so Claude users can keep using Memento until upstream support is patched.
 
 After setup, verify readiness explicitly:
 
