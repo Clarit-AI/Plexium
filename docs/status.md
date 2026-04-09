@@ -47,8 +47,8 @@ This document is the single source of truth for what works, what is incomplete, 
 | `plexium agent spend` | Stable | Shows daily spend per provider against budget limits. |
 | `plexium agent benchmark` | Stable | Benchmarks provider latency over 3 rounds. |
 | `plexium bootstrap` | Stub | Prints placeholder. No page generation logic implemented. |
-| `plexium agent start` | Stub | Prints a message. Does not start a background process. |
-| `plexium agent stop` | Stub | Prints a message. Does not stop anything. |
+| `plexium agent start` | Experimental | Starts the background daemon, writes `.plexium/daemon.pid`, and uses the configured daemon runner/watches. |
+| `plexium agent stop` | Experimental | Stops the background daemon referenced by `.plexium/daemon.pid`. |
 | `plexium daemon` | Experimental | Poll loop and workspace management work. The LinearTracker returns `ErrNotImplemented` for all operations. Runner dispatches to external CLI tools (untested integration). Flags: `--poll-interval`, `--max-concurrent` |
 | `plexium orchestrate` | Experimental | Creates isolated worktree and runs retriever/documenter roles. Default runner is noop. Flags: `--issue` (required) |
 

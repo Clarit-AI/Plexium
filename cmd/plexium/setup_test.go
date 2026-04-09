@@ -32,6 +32,13 @@ func TestSetupAgent_WriteConfigClaude(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repoRoot, ".mcp.json")); err != nil {
 		t.Fatalf("expected .mcp.json to exist: %v", err)
 	}
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Daemon.Runner != "claude" {
+		t.Fatalf("expected daemon runner claude, got %q", cfg.Daemon.Runner)
+	}
 }
 
 func TestSetupAgent_WriteConfigCodex(t *testing.T) {
@@ -56,6 +63,96 @@ func TestSetupAgent_WriteConfigCodex(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(homeDir, ".codex", "config.toml")); err != nil {
 		t.Fatalf("expected config.toml to exist: %v", err)
+	}
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Daemon.Runner != "codex" {
+		t.Fatalf("expected daemon runner codex, got %q", cfg.Daemon.Runner)
+	}
+}
+
+func TestSetupAgent_SeedsDaemonDefaults(t *testing.T) {
+	repoRoot := t.TempDir()
+
+	result, err := setupAgent(repoRoot, "claude", setupAgentOptions{})
+	if err != nil {
+		t.Fatalf("setupAgent returned error: %v", err)
+	}
+
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !cfg.Daemon.Enabled {
+		t.Fatalf("expected daemon to be enabled")
+	}
+	if cfg.Daemon.Runner != "claude" {
+		t.Fatalf("expected daemon runner claude, got %q", cfg.Daemon.Runner)
+	}
+	if cfg.Daemon.PollInterval != 300 {
+		t.Fatalf("expected default poll interval 300, got %d", cfg.Daemon.PollInterval)
+	}
+	if cfg.Daemon.MaxConcurrent != 2 {
+		t.Fatalf("expected max concurrent 2, got %d", cfg.Daemon.MaxConcurrent)
+	}
+	if !cfg.Daemon.Watches.Staleness.Enabled || cfg.Daemon.Watches.Staleness.Action != "auto-sync" {
+		t.Fatalf("expected staleness watch to be enabled for auto-sync")
+	}
+	if !cfg.Daemon.Watches.Ingest.Enabled || cfg.Daemon.Watches.Ingest.Action != "auto-ingest" {
+		t.Fatalf("expected ingest watch to be enabled for auto-ingest")
+	}
+
+	foundDaemonStep := false
+	for _, step := range result.Steps {
+		if step.Name == "daemon" && strings.Contains(step.Message, "default watches enabled") {
+			foundDaemonStep = true
+			break
+		}
+	}
+	if !foundDaemonStep {
+		t.Fatalf("expected daemon setup step to mention default watches")
+	}
+}
+
+func TestConfigureDaemonRunnerInConfig_PreservesExistingWatches(t *testing.T) {
+	repoRoot := t.TempDir()
+	if _, err := setupAgent(repoRoot, "claude", setupAgentOptions{}); err != nil {
+		t.Fatalf("initial setupAgent returned error: %v", err)
+	}
+
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.Daemon.Watches.Staleness.Action = "create-issue"
+	cfg.Daemon.Watches.Debt.Action = "create-issue"
+	cfg.Daemon.Runner = ""
+	if err := config.SaveToDir(repoRoot, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	step, err := configureDaemonRunnerInConfig(repoRoot, "codex")
+	if err != nil {
+		t.Fatalf("configureDaemonRunnerInConfig returned error: %v", err)
+	}
+	if step.Status != "pass" {
+		t.Fatalf("expected pass step, got %+v", step)
+	}
+
+	cfg, err = config.LoadFromDir(repoRoot)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if cfg.Daemon.Runner != "codex" {
+		t.Fatalf("expected daemon runner codex, got %q", cfg.Daemon.Runner)
+	}
+	if cfg.Daemon.Watches.Staleness.Action != "create-issue" {
+		t.Fatalf("expected staleness action to be preserved, got %q", cfg.Daemon.Watches.Staleness.Action)
+	}
+	if cfg.Daemon.Watches.Debt.Action != "create-issue" {
+		t.Fatalf("expected debt action to be preserved, got %q", cfg.Daemon.Watches.Debt.Action)
 	}
 }
 
@@ -312,6 +409,7 @@ func TestFormatSetupSummary_GroupsOutputIntoSections(t *testing.T) {
 		},
 		NextSteps: []string{
 			"Run `plexium convert` to replace the starter scaffold with grounded project pages.",
+			"Run `plexium agent start` when you want background upkeep with Claude as the daemon runner.",
 		},
 	}
 
@@ -331,5 +429,8 @@ func TestFormatSetupSummary_GroupsOutputIntoSections(t *testing.T) {
 	}
 	if !strings.Contains(summary, "Plexium tooling is wired.") {
 		t.Fatalf("expected ready message, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Run `plexium agent start` when you want background upkeep") {
+		t.Fatalf("expected daemon next step, got:\n%s", summary)
 	}
 }

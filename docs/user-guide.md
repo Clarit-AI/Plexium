@@ -462,7 +462,7 @@ Environment variables override config values. See [CLI Reference: Environment Va
 
 ## Assistive Agent Setup
 
-Plexium includes an assistive agent that automates wiki maintenance using a provider cascade. Providers are tried in cost order (cheapest first), falling through on failure. Setup is optional -- Plexium works without it, but the daemon, LLM lint, and autonomous maintenance features require at least one provider.
+Plexium includes an assistive agent that automates wiki maintenance using a provider cascade. Providers are tried in cost order (cheapest first), falling through on failure. Setup is optional. If you skip provider setup, Plexium can still run background upkeep through the configured daemon runner (`claude`, `codex`, `gemini`, or `noop`), but LLM-augmented lint and the provider-cascade commands still require at least one provider.
 
 If you skip provider setup, the supported fallback is:
 
@@ -684,6 +684,8 @@ daemon:
 **Actions:** `log-only` records the finding. `create-issue` creates a GitHub issue. `auto-sync`, `auto-fix`, and `auto-ingest` create an isolated git worktree and run the configured runner to resolve the issue automatically.
 
 **Runner:** The daemon shells out to the configured CLI tool (e.g., `claude --print`) in the worktree to perform wiki updates. Set `runner: noop` for dry-run mode.
+
+`plexium setup claude` and `plexium setup codex` now seed a usable `daemon:` block automatically: they enable the daemon, select the matching runner, and add default watches if the repo does not have any yet.
 
 **Tracker:** Set `tracker: github` and ensure `GITHUB_TOKEN` is set to enable automatic GitHub issue creation.
 

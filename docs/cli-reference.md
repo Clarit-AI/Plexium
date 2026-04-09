@@ -599,9 +599,9 @@ plexium bootstrap
 
 ---
 
-### `plexium agent start` [Stub]
+### `plexium agent start` [Experimental]
 
-Prints a message. Does not start a background process.
+Starts the background daemon for the current repository and writes `.plexium/daemon.pid`.
 
 ```bash
 plexium agent start
@@ -609,9 +609,9 @@ plexium agent start
 
 ---
 
-### `plexium agent stop` [Stub]
+### `plexium agent stop` [Experimental]
 
-Prints a message. Does not stop anything.
+Stops the background daemon referenced by `.plexium/daemon.pid`.
 
 ```bash
 plexium agent stop
