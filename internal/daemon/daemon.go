@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Clarit-AI/Plexium/internal/agent"
@@ -69,6 +70,7 @@ type Daemon struct {
 	pollInterval  time.Duration
 	maxConcurrent int
 	stopCh        chan struct{}
+	stopOnce      sync.Once
 }
 
 // NewDaemon creates a Daemon with sensible defaults for zero-value fields.
@@ -115,10 +117,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 // Stop signals the daemon to exit its Run loop.
 func (d *Daemon) Stop() {
-	select {
-	case d.stopCh <- struct{}{}:
-	default:
-	}
+	d.stopOnce.Do(func() {
+		close(d.stopCh)
+	})
 }
 
 // tick runs all enabled watches and returns the actions taken.
