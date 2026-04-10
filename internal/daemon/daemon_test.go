@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -111,7 +112,7 @@ func TestNewDaemon_CustomValues(t *testing.T) {
 func TestTick_NoWatchesEnabled(t *testing.T) {
 	d, _ := newTestDaemon(t, DaemonOpts{})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Empty(t, actions)
 }
 
@@ -134,7 +135,7 @@ func TestTick_Staleness_DetectsOldFiles(t *testing.T) {
 		"_schema.md":    old, // should be skipped (underscore prefix)
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 
 	assert.Len(t, actions, 1)
 	assert.Equal(t, "staleness", actions[0].Watch)
@@ -153,7 +154,7 @@ func TestTick_Staleness_NoStaleFiles(t *testing.T) {
 		"fresh.md": time.Now(),
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Empty(t, actions)
 }
 
@@ -164,7 +165,7 @@ func TestTick_Staleness_NoWikiDir(t *testing.T) {
 		},
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Len(t, actions, 1)
 	assert.False(t, actions[0].Success)
 	assert.Contains(t, actions[0].Error, "readdir")
@@ -188,7 +189,7 @@ func TestTick_Debt_OverThreshold(t *testing.T) {
 		"- Normal log entry",
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Len(t, actions, 1)
 	assert.Equal(t, "debt", actions[0].Watch)
 	assert.Contains(t, actions[0].Target, "count=3")
@@ -207,7 +208,7 @@ func TestTick_Debt_UnderThreshold(t *testing.T) {
 		"- Normal entry",
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Empty(t, actions)
 }
 
@@ -218,7 +219,7 @@ func TestTick_Debt_NoLogFile(t *testing.T) {
 		},
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Empty(t, actions)
 }
 
@@ -235,7 +236,7 @@ func TestTick_Ingest_DetectsRawFiles(t *testing.T) {
 
 	setupRawDir(t, repoRoot, []string{"new-doc.md", "draft.md"})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Len(t, actions, 2)
 	assert.Equal(t, "ingest", actions[0].Watch)
 }
@@ -247,8 +248,29 @@ func TestTick_Ingest_NoRawDir(t *testing.T) {
 		},
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Empty(t, actions)
+}
+
+func TestTick_Ingest_SkipsNonRegularFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior differs on Windows")
+	}
+
+	d, repoRoot := newTestDaemon(t, DaemonOpts{
+		Watches: WatchOpts{
+			Ingest: WatchDef{Enabled: true, Action: "log-only"},
+		},
+	})
+
+	rawDir := filepath.Join(repoRoot, ".wiki", "raw")
+	require.NoError(t, os.MkdirAll(rawDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(rawDir, "new-doc.md"), []byte("data"), 0o644))
+	require.NoError(t, os.Symlink(filepath.Join(rawDir, "new-doc.md"), filepath.Join(rawDir, "linked-doc.md")))
+
+	actions := d.tick(context.Background())
+	require.Len(t, actions, 1)
+	assert.Equal(t, "new-doc.md", actions[0].Target)
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +298,7 @@ func TestHandleAction_CreateIssue(t *testing.T) {
 		"stale.md": old,
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	require.Len(t, actions, 1)
 	assert.True(t, actions[0].Success)
 	assert.Contains(t, issueTitles[0], "staleness")
@@ -305,13 +327,48 @@ func TestHandleAction_AutoSync_RespectsMaxConcurrent(t *testing.T) {
 	_, err := d.workspace.Create("existing")
 	require.NoError(t, err)
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 
 	// Both pages are stale, but both should fail due to max concurrent.
 	for _, a := range actions {
 		assert.False(t, a.Success)
 		assert.Contains(t, a.Error, "max concurrent")
 	}
+}
+
+func TestRefreshJobCounts_IncludesQueuedWorktrees(t *testing.T) {
+	d, _ := newTestDaemon(t, DaemonOpts{})
+	wt, err := d.workspace.Create("queued")
+	require.NoError(t, err)
+	require.NoError(t, d.workspace.UpdateStatus(wt.ID, jobStateQueued))
+
+	snapshot := &StatusSnapshot{}
+	d.refreshJobCounts(snapshot)
+
+	assert.Equal(t, 1, snapshot.JobCounts.Queued)
+	assert.Equal(t, 0, snapshot.JobCounts.Running)
+}
+
+func TestTick_PropagatesContextToJobExecution(t *testing.T) {
+	d, repoRoot := newTestDaemon(t, DaemonOpts{
+		RunnerName: "codex",
+		Watches: WatchOpts{
+			Ingest: WatchDef{Enabled: true, Action: "auto-ingest"},
+		},
+	})
+	setupRawDir(t, repoRoot, []string{"new-doc.md"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	runner := &contextAwareRunner{}
+	d.runner = runner
+
+	actions := d.tick(ctx)
+	require.Len(t, actions, 2)
+	assert.True(t, runner.sawCanceled)
+	assert.False(t, actions[len(actions)-1].Success)
+	assert.Contains(t, actions[len(actions)-1].Error, "context canceled")
 }
 
 // ---------------------------------------------------------------------------
@@ -473,4 +530,18 @@ type failingRunner struct{}
 
 func (f *failingRunner) Run(_ context.Context, _, _ string, _ []string, _ string) (*RunResult, error) {
 	return nil, fmt.Errorf("runner failed")
+}
+
+type contextAwareRunner struct {
+	sawCanceled bool
+}
+
+func (r *contextAwareRunner) Run(ctx context.Context, _, _ string, _ []string, _ string) (*RunResult, error) {
+	select {
+	case <-ctx.Done():
+		r.sawCanceled = true
+		return nil, ctx.Err()
+	default:
+		return &RunResult{}, nil
+	}
 }

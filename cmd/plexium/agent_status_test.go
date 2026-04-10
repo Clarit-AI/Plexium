@@ -1,10 +1,14 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/daemon"
 )
 
@@ -91,5 +95,72 @@ func TestSummarizeDaemonActivity_CurrentJob(t *testing.T) {
 	})
 	if summary != "openrouter -> codex is documenting .wiki/" {
 		t.Fatalf("unexpected summary: %s", summary)
+	}
+}
+
+func TestBuildDaemonStatusView_StoppedDaemonUsesConfigDefaults(t *testing.T) {
+	repoRoot := t.TempDir()
+	requireConfig := &config.Config{}
+	requireConfig.Daemon.Runner = "codex"
+	requireConfig.Daemon.PollInterval = 900
+	requireConfig.Daemon.MaxConcurrent = 4
+	requireConfig.Daemon.ExecutionMode = "provider-primary"
+	requireConfig.Daemon.Watches.Staleness = config.WatchEntry{Enabled: true, Action: "auto-sync", Threshold: "7d"}
+
+	snapshot := daemon.StatusSnapshot{
+		State:               "working",
+		Runner:              "claude",
+		ExecutionMode:       "coding-agent-primary",
+		CurrentActor:        "openrouter",
+		DelegatedActor:      "claude",
+		PollIntervalSeconds: 300,
+		MaxConcurrent:       1,
+		LastTickStartedAt:   time.Now().Add(-2 * time.Minute),
+		LastTickCompletedAt: time.Now().Add(-90 * time.Second),
+		LastTickDurationMs:  99,
+		LastTickActionCount: 5,
+		RecentActions: []daemon.RecordedTickAction{{
+			At:      time.Now().Add(-90 * time.Second),
+			Watch:   "ingest",
+			Action:  "queue",
+			Target:  "raw.md",
+			Success: true,
+		}},
+		CurrentJob: &daemon.DaemonJobSnapshot{Type: "repo-drift", Target: ".wiki/", Phase: "documenting"},
+		Watches:    []daemon.WatchSnapshot{{Name: "staleness", Enabled: true, Action: "auto-sync", Threshold: "7d"}},
+	}
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".plexium"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, ".plexium", "daemon-status.json"), data, 0o644); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+
+	view := buildDaemonStatusView(repoRoot, requireConfig)
+
+	if view.Running {
+		t.Fatalf("expected daemon to be stopped")
+	}
+	if view.Runner != "codex" {
+		t.Fatalf("expected runner from config, got %q", view.Runner)
+	}
+	if view.ExecutionMode != "provider-primary" {
+		t.Fatalf("expected execution mode from config, got %q", view.ExecutionMode)
+	}
+	if view.PollIntervalSeconds != 900 {
+		t.Fatalf("expected poll interval from config, got %d", view.PollIntervalSeconds)
+	}
+	if view.MaxConcurrent != 4 {
+		t.Fatalf("expected max concurrent from config, got %d", view.MaxConcurrent)
+	}
+	if view.State != "" || view.CurrentActor != "" || view.DelegatedActor != "" || view.CurrentJob != nil {
+		t.Fatalf("expected runtime-only fields to be cleared for stopped daemon: %+v", view)
+	}
+	if !view.LastTickStartedAt.IsZero() || !view.LastTickCompletedAt.IsZero() || view.LastTickDurationMs != 0 || len(view.RecentActions) != 0 {
+		t.Fatalf("expected stale tick runtime fields cleared, got %+v", view)
 	}
 }

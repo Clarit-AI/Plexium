@@ -134,25 +134,40 @@ func buildDaemonStatusView(repoRoot string, cfg *config.Config) daemonStatusView
 	}
 
 	if snapshot, err := daemon.LoadStatusSnapshot(repoRoot); err == nil {
-		view.State = snapshot.State
-		view.Runner = snapshot.Runner
-		view.ExecutionMode = snapshot.ExecutionMode
-		view.CurrentActor = snapshot.CurrentActor
-		view.DelegatedActor = snapshot.DelegatedActor
-		view.PollIntervalSeconds = snapshot.PollIntervalSeconds
-		view.MaxConcurrent = snapshot.MaxConcurrent
 		view.TickCount = snapshot.TickCount
-		view.LastTickStartedAt = snapshot.LastTickStartedAt
-		view.LastTickCompletedAt = snapshot.LastTickCompletedAt
-		view.LastTickDurationMs = snapshot.LastTickDurationMs
-		view.LastTickActionCount = snapshot.LastTickActionCount
-		view.LastTickFailureCount = snapshot.LastTickFailureCount
 		view.Watches = snapshot.Watches
-		view.RecentActions = snapshot.RecentActions
 		view.JobCounts = snapshot.JobCounts
-		view.CurrentJob = snapshot.CurrentJob
 		view.LastCompletedJob = snapshot.LastCompletedJob
 		view.LastFailure = snapshot.LastFailure
+		if view.Running {
+			view.State = snapshot.State
+			view.Runner = snapshot.Runner
+			view.ExecutionMode = snapshot.ExecutionMode
+			view.CurrentActor = snapshot.CurrentActor
+			view.DelegatedActor = snapshot.DelegatedActor
+			view.PollIntervalSeconds = snapshot.PollIntervalSeconds
+			view.MaxConcurrent = snapshot.MaxConcurrent
+			view.LastTickStartedAt = snapshot.LastTickStartedAt
+			view.LastTickCompletedAt = snapshot.LastTickCompletedAt
+			view.LastTickDurationMs = snapshot.LastTickDurationMs
+			view.LastTickActionCount = snapshot.LastTickActionCount
+			view.LastTickFailureCount = snapshot.LastTickFailureCount
+			view.RecentActions = snapshot.RecentActions
+			view.CurrentJob = snapshot.CurrentJob
+		} else {
+			view.State = ""
+			view.CurrentActor = ""
+			view.DelegatedActor = ""
+			view.CurrentJob = nil
+			view.LastTickStartedAt = time.Time{}
+			view.LastTickCompletedAt = time.Time{}
+			view.LastTickDurationMs = 0
+			view.LastTickActionCount = 0
+			view.LastTickFailureCount = 0
+			view.RecentActions = nil
+			view.JobCounts.Queued = 0
+			view.JobCounts.Running = 0
+		}
 	}
 
 	if cfg != nil {

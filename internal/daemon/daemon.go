@@ -98,7 +98,7 @@ func NewDaemon(opts DaemonOpts, workspace *WorkspaceMgr, tracker TrackerAdapter,
 // every PollInterval. It exits when ctx is cancelled or Stop() is called.
 func (d *Daemon) Run(ctx context.Context) error {
 	d.writeLifecycleSnapshot("running")
-	d.runTick()
+	d.runTick(ctx)
 
 	ticker := time.NewTicker(d.pollInterval)
 	defer ticker.Stop()
@@ -110,7 +110,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		case <-d.stopCh:
 			return nil
 		case <-ticker.C:
-			d.runTick()
+			d.runTick(ctx)
 		}
 	}
 }
@@ -123,18 +123,18 @@ func (d *Daemon) Stop() {
 }
 
 // tick runs all enabled watches and returns the actions taken.
-func (d *Daemon) tick() []TickAction {
+func (d *Daemon) tick(ctx context.Context) []TickAction {
 	jobs, actions := d.discoverJobs()
 	if len(jobs) > 0 && d.canExecuteJobs() {
-		actions = append(actions, d.executeJob(context.Background(), jobs[0]))
+		actions = append(actions, d.executeJob(ctx, jobs[0]))
 	}
 	return actions
 }
 
-func (d *Daemon) runTick() {
+func (d *Daemon) runTick(ctx context.Context) {
 	startedAt := time.Now()
 	d.writeTickStarted(startedAt)
-	actions := d.tick()
+	actions := d.tick(ctx)
 	d.writeTickCompleted(startedAt, actions)
 }
 
@@ -364,6 +364,8 @@ func (d *Daemon) refreshJobCounts(snapshot *StatusSnapshot) {
 	counts := JobCountsSnapshot{}
 	for _, wt := range worktrees {
 		switch wt.Status {
+		case jobStateQueued:
+			counts.Queued++
 		case "running":
 			counts.Running++
 		case "completed":
@@ -373,6 +375,9 @@ func (d *Daemon) refreshJobCounts(snapshot *StatusSnapshot) {
 		case jobStateAttentionNeeded:
 			counts.AttentionNeeded++
 		}
+	}
+	if snapshot.CurrentJob != nil && snapshot.CurrentJob.State == jobStateQueued && counts.Queued == 0 {
+		counts.Queued = 1
 	}
 	if snapshot.CurrentJob != nil && snapshot.CurrentJob.State == jobStateRunning && counts.Running == 0 {
 		counts.Running = 1

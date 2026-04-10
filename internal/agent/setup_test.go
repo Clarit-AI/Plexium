@@ -405,6 +405,12 @@ func TestRunInteractiveSetup_UsesEnvVarFallback(t *testing.T) {
 	assert.Equal(t, "google/gemma-4-31b-it", result.OpenRouterModel)
 }
 
+func TestLoadStoredOpenRouterKey_DoesNotFallbackToEnv(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-v1-env")
+	assert.Equal(t, "", loadStoredOpenRouterKey(dir))
+}
+
 func TestRunInteractiveSetup_WithExplicitModel(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, ".plexium", "config.yml")
@@ -458,6 +464,38 @@ func TestRunInteractiveSetup_WithExplicitBudget(t *testing.T) {
 	data, err := os.ReadFile(configPath)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "dailyUSD: 2.5")
+}
+
+func TestRunInteractiveSetup_WithAPIKeyOption_PreservesExistingProvidersAndBudget(t *testing.T) {
+	dir := t.TempDir()
+	writeExistingOpenRouterSetup(t, dir, "nvidia/nemotron-3-super-120b-a12b", "balanced", 1.25)
+
+	configPath := filepath.Join(dir, ".plexium", "config.yml")
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	updated := strings.Replace(string(data), "providers:\n", "providers:\n    - name: ollama\n      enabled: true\n      type: ollama\n      endpoint: http://localhost:11434\n      model: llama3.2\n", 1)
+	require.NoError(t, os.WriteFile(configPath, []byte(updated), 0o644))
+
+	client, cleanup := stubOpenRouterValidation(t)
+	defer cleanup()
+
+	result, err := RunInteractiveSetup(dir, SetupOptions{
+		APIKey:     "sk-or-v1-test",
+		HTTPClient: client,
+		Stdin:      bytes.NewBuffer(nil),
+		Stdout:     io.Discard,
+		Stderr:     io.Discard,
+	})
+	require.NoError(t, err)
+	assert.True(t, result.BudgetConfigured)
+	assert.Equal(t, 1.25, result.DailyBudgetUSD)
+	assert.Contains(t, result.ProvidersConfigured, "openrouter")
+	assert.Contains(t, result.ProvidersConfigured, "ollama")
+
+	contents, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(contents), "name: local-ollama")
+	assert.Contains(t, string(contents), "dailyUSD: 1.25")
 }
 
 func TestResolveOpenRouterModelChoice_InteractiveSelection(t *testing.T) {

@@ -110,6 +110,11 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 	}
 	client := clientOrDefault(opts.HTTPClient)
 	interactive := isInteractiveInput(stdin)
+	existing, err := loadExistingSetupState(repoRoot, configPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading existing assistive config: %w", err)
+	}
+	seedExistingProviders(result, repoRoot, existing)
 	explicitAPIKey := strings.TrimSpace(opts.APIKey)
 	if explicitAPIKey == "" && !interactive {
 		explicitAPIKey = os.Getenv("OPENROUTER_API_KEY")
@@ -141,14 +146,16 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 			return nil, fmt.Errorf("select OpenRouter model: %w", err)
 		}
 		setOpenRouterSelection(result, model, profile)
-		applyBudgetSelection(result, opts.DailyBudgetUSD)
+		if opts.DailyBudgetUSD != nil {
+			applyBudgetSelection(result, opts.DailyBudgetUSD)
+		}
 		if interactive && opts.DailyBudgetUSD == nil {
 			if err := promptBudgetChoice(reader, stdout, result); err != nil {
 				return nil, fmt.Errorf("choose daily budget: %w", err)
 			}
 		}
 		result.OpenRouterKeyPath = filepath.Join(repoRoot, ".plexium", "credentials.json")
-		result.ProvidersConfigured = append(result.ProvidersConfigured, "openrouter")
+		addConfiguredProvider(result, "openrouter")
 		if err := writeAssistiveAgentConfig(configPath, result); err != nil {
 			fmt.Fprintf(stdout, "Warning: could not update config: %v\n", err)
 		} else {
@@ -157,12 +164,6 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 		fmt.Fprintln(stdout, "OpenRouter configured.")
 		return result, nil
 	}
-
-	existing, err := loadExistingSetupState(repoRoot, configPath)
-	if err != nil {
-		return nil, fmt.Errorf("loading existing assistive config: %w", err)
-	}
-	seedExistingProviders(result, repoRoot, existing)
 
 	fmt.Fprintln(stdout, "Plexium Agent Setup")
 	fmt.Fprintln(stdout, "===================")
@@ -1020,7 +1021,7 @@ func loadStoredOpenRouterKey(repoRoot string) string {
 			}
 		}
 	}
-	return strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY"))
+	return ""
 }
 
 func addConfiguredProvider(result *SetupResult, provider string) {

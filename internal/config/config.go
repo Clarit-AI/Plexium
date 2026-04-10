@@ -298,6 +298,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Daemon.ExecutionMode == "" {
 		c.Daemon.ExecutionMode = "coding-agent-primary"
+	} else {
+		switch c.Daemon.ExecutionMode {
+		case "coding-agent-primary", "provider-primary":
+		default:
+			return fmt.Errorf("daemon.executionMode %q is invalid (expected coding-agent-primary or provider-primary)", c.Daemon.ExecutionMode)
+		}
 	}
 	return nil
 }

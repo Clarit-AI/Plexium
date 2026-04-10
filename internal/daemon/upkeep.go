@@ -91,6 +91,10 @@ func (d *Daemon) discoverJobs() ([]*upkeepJob, []TickAction) {
 				if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 					continue
 				}
+				info, infoErr := entry.Info()
+				if infoErr != nil || !info.Mode().IsRegular() {
+					continue
+				}
 				if d.config.Watches.Ingest.Action == "auto-ingest" && d.canExecuteJobs() {
 					jobs = append(jobs, &upkeepJob{
 						ID:      fmt.Sprintf("ingest-%d", time.Now().UnixNano()),
@@ -609,12 +613,12 @@ func collectWorkspaceChanges(workdir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("git status: %w", err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	lines := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n")
 	seen := make(map[string]bool)
 	var changed []string
 	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || len(line) < 4 {
+		line = strings.TrimRight(line, "\r\n")
+		if strings.TrimSpace(line) == "" || len(line) < 4 {
 			continue
 		}
 		path := strings.TrimSpace(line[3:])
@@ -710,6 +714,12 @@ func (d *Daemon) updateManifestForWorkspace(job *upkeepJob, workdir string, chan
 
 		content, err := os.ReadFile(filepath.Join(workdir, changed))
 		if err != nil {
+			if os.IsNotExist(err) {
+				if err := mgr.RemovePage(changed); err != nil {
+					return err
+				}
+				continue
+			}
 			return err
 		}
 		entry := manifest.PageEntry{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -138,6 +139,38 @@ printf 'codex final output' > "$out"
 	assert.Contains(t, got, "--output-last-message")
 	assert.Contains(t, got, "--model")
 	assert.Contains(t, got, "o3")
+}
+
+func TestCodexRunner_RunSetsWorkingDirectory(t *testing.T) {
+	binDir := t.TempDir()
+	workdir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "codex-pwd.txt")
+
+	script := `#!/bin/sh
+pwd > "$CODEX_TEST_PWD"
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output-last-message" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+done
+printf 'codex final output' > "$out"
+`
+	scriptPath := filepath.Join(binDir, "codex")
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CODEX_TEST_PWD", logPath)
+
+	runner := NewCodexRunner("o3")
+	_, err := runner.Run(context.Background(), "coder", "fix bug", []string{"modules/auth.md"}, workdir)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	assert.Equal(t, workdir, strings.TrimSpace(string(data)))
 }
 
 func TestCodexRunner_RunReturnsResultWhenCLIIsMissing(t *testing.T) {
