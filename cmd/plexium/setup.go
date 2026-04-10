@@ -554,6 +554,10 @@ func configureDaemonRunnerInConfig(repoRoot, agent string) (setupStep, error) {
 		cfg.Daemon.Runner = normalizedAgent
 		changed = true
 	}
+	if cfg.Daemon.ExecutionMode == "" {
+		cfg.Daemon.ExecutionMode = "coding-agent-primary"
+		changed = true
+	}
 	if cfg.Daemon.PollInterval <= 0 {
 		cfg.Daemon.PollInterval = 300
 		changed = true

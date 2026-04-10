@@ -25,10 +25,11 @@ type providerStatusView struct {
 }
 
 type daemonWorktreeSummary struct {
-	Active    int `json:"active"`
-	Completed int `json:"completed"`
-	Failed    int `json:"failed"`
-	Total     int `json:"total"`
+	Active          int `json:"active"`
+	Completed       int `json:"completed"`
+	Failed          int `json:"failed"`
+	AttentionNeeded int `json:"attentionNeeded"`
+	Total           int `json:"total"`
 }
 
 type daemonStatusView struct {
@@ -36,6 +37,9 @@ type daemonStatusView struct {
 	PID                  int                         `json:"pid,omitempty"`
 	State                string                      `json:"state,omitempty"`
 	Runner               string                      `json:"runner,omitempty"`
+	ExecutionMode        string                      `json:"executionMode,omitempty"`
+	CurrentActor         string                      `json:"currentActor,omitempty"`
+	DelegatedActor       string                      `json:"delegatedActor,omitempty"`
 	PollIntervalSeconds  int                         `json:"pollIntervalSeconds,omitempty"`
 	MaxConcurrent        int                         `json:"maxConcurrent,omitempty"`
 	TickCount            int                         `json:"tickCount,omitempty"`
@@ -46,6 +50,10 @@ type daemonStatusView struct {
 	LastTickFailureCount int                         `json:"lastTickFailureCount,omitempty"`
 	Watches              []daemon.WatchSnapshot      `json:"watches,omitempty"`
 	RecentActions        []daemon.RecordedTickAction `json:"recentActions,omitempty"`
+	JobCounts            daemon.JobCountsSnapshot    `json:"jobCounts"`
+	CurrentJob           *daemon.DaemonJobSnapshot   `json:"currentJob,omitempty"`
+	LastCompletedJob     *daemon.DaemonJobSnapshot   `json:"lastCompletedJob,omitempty"`
+	LastFailure          *daemon.DaemonJobSnapshot   `json:"lastFailure,omitempty"`
 	Worktrees            daemonWorktreeSummary       `json:"worktrees"`
 }
 
@@ -128,6 +136,9 @@ func buildDaemonStatusView(repoRoot string, cfg *config.Config) daemonStatusView
 	if snapshot, err := daemon.LoadStatusSnapshot(repoRoot); err == nil {
 		view.State = snapshot.State
 		view.Runner = snapshot.Runner
+		view.ExecutionMode = snapshot.ExecutionMode
+		view.CurrentActor = snapshot.CurrentActor
+		view.DelegatedActor = snapshot.DelegatedActor
 		view.PollIntervalSeconds = snapshot.PollIntervalSeconds
 		view.MaxConcurrent = snapshot.MaxConcurrent
 		view.TickCount = snapshot.TickCount
@@ -138,6 +149,10 @@ func buildDaemonStatusView(repoRoot string, cfg *config.Config) daemonStatusView
 		view.LastTickFailureCount = snapshot.LastTickFailureCount
 		view.Watches = snapshot.Watches
 		view.RecentActions = snapshot.RecentActions
+		view.JobCounts = snapshot.JobCounts
+		view.CurrentJob = snapshot.CurrentJob
+		view.LastCompletedJob = snapshot.LastCompletedJob
+		view.LastFailure = snapshot.LastFailure
 	}
 
 	if cfg != nil {
@@ -146,6 +161,9 @@ func buildDaemonStatusView(repoRoot string, cfg *config.Config) daemonStatusView
 		}
 		if view.PollIntervalSeconds == 0 {
 			view.PollIntervalSeconds = cfg.Daemon.PollInterval
+		}
+		if view.ExecutionMode == "" {
+			view.ExecutionMode = cfg.Daemon.ExecutionMode
 		}
 		if view.MaxConcurrent == 0 {
 			view.MaxConcurrent = cfg.Daemon.MaxConcurrent
@@ -180,6 +198,8 @@ func buildDaemonStatusView(repoRoot string, cfg *config.Config) daemonStatusView
 				view.Worktrees.Completed++
 			case "failed":
 				view.Worktrees.Failed++
+			case "attention_needed":
+				view.Worktrees.AttentionNeeded++
 			}
 		}
 	}
@@ -188,6 +208,9 @@ func buildDaemonStatusView(repoRoot string, cfg *config.Config) daemonStatusView
 		view.State = "working"
 	} else if view.Running && view.State == "" {
 		view.State = "idle"
+	}
+	if view.ExecutionMode == "" {
+		view.ExecutionMode = "coding-agent-primary"
 	}
 
 	return view
@@ -206,6 +229,12 @@ func formatAgentStatus(status *agentStatusPayload) string {
 	if status.Daemon.Runner != "" {
 		fmt.Fprintf(&b, "  Daemon runner: %s\n", status.Daemon.Runner)
 	}
+	if status.Daemon.ExecutionMode != "" {
+		fmt.Fprintf(&b, "  Execution mode: %s\n", status.Daemon.ExecutionMode)
+	}
+	if chain := formatActorChain(status.Daemon); chain != "" {
+		fmt.Fprintf(&b, "  Orchestration: %s\n", chain)
+	}
 	if status.Daemon.State != "" {
 		fmt.Fprintf(&b, "  State: %s\n", status.Daemon.State)
 	}
@@ -213,7 +242,14 @@ func formatAgentStatus(status *agentStatusPayload) string {
 	if status.Daemon.PollIntervalSeconds > 0 || status.Daemon.MaxConcurrent > 0 {
 		fmt.Fprintf(&b, "  Cadence: every %s, max %d concurrent worktrees\n", time.Duration(status.Daemon.PollIntervalSeconds)*time.Second, status.Daemon.MaxConcurrent)
 	}
-	fmt.Fprintf(&b, "  Worktrees: %d active, %d completed, %d failed\n", status.Daemon.Worktrees.Active, status.Daemon.Worktrees.Completed, status.Daemon.Worktrees.Failed)
+	fmt.Fprintf(&b, "  Worktrees: %d active, %d completed, %d failed", status.Daemon.Worktrees.Active, status.Daemon.Worktrees.Completed, status.Daemon.Worktrees.Failed)
+	if status.Daemon.Worktrees.AttentionNeeded > 0 {
+		fmt.Fprintf(&b, ", %d need attention", status.Daemon.Worktrees.AttentionNeeded)
+	}
+	b.WriteString("\n")
+	if counts := formatJobCounts(status.Daemon.JobCounts); counts != "" {
+		fmt.Fprintf(&b, "  Jobs: %s\n", counts)
+	}
 	if !status.Daemon.LastTickCompletedAt.IsZero() {
 		fmt.Fprintf(&b, "  Last tick: %s (%d actions, %d failures, %dms)\n",
 			humanizeTimeAgo(status.Daemon.LastTickCompletedAt),
@@ -226,6 +262,39 @@ func formatAgentStatus(status *agentStatusPayload) string {
 	}
 	if watches := formatWatchSummary(status.Daemon.Watches); watches != "" {
 		fmt.Fprintf(&b, "  Watches: %s\n", watches)
+	}
+	if status.Daemon.CurrentJob != nil {
+		b.WriteString("  Current job:\n")
+		fmt.Fprintf(&b, "    %s on %s\n", status.Daemon.CurrentJob.Type, emptyIfUnset(status.Daemon.CurrentJob.Target))
+		if status.Daemon.CurrentJob.Phase != "" {
+			fmt.Fprintf(&b, "    phase: %s\n", status.Daemon.CurrentJob.Phase)
+		}
+		if status.Daemon.CurrentJob.WorkspacePath != "" {
+			fmt.Fprintf(&b, "    workspace: %s\n", status.Daemon.CurrentJob.WorkspacePath)
+		}
+		if summary := strings.TrimSpace(status.Daemon.CurrentJob.Summary); summary != "" {
+			fmt.Fprintf(&b, "    summary: %s\n", summary)
+		}
+		if files := compactFileList(status.Daemon.CurrentJob.ChangedFiles); files != "" {
+			fmt.Fprintf(&b, "    files touched: %s\n", files)
+		}
+	}
+	if status.Daemon.LastCompletedJob != nil {
+		b.WriteString("  Last write:\n")
+		fmt.Fprintf(&b, "    %s ago — %s on %s\n", humanizeTimeAgo(status.Daemon.LastCompletedJob.CompletedAt), status.Daemon.LastCompletedJob.Type, emptyIfUnset(status.Daemon.LastCompletedJob.Target))
+		if outcome := strings.TrimSpace(status.Daemon.LastCompletedJob.ApplyOutcome); outcome != "" {
+			fmt.Fprintf(&b, "    apply: %s\n", outcome)
+		}
+		if files := compactFileList(firstNonEmpty(status.Daemon.LastCompletedJob.AppliedFiles, status.Daemon.LastCompletedJob.ChangedFiles)); files != "" {
+			fmt.Fprintf(&b, "    files: %s\n", files)
+		}
+	}
+	if status.Daemon.LastFailure != nil {
+		b.WriteString("  Last failure:\n")
+		fmt.Fprintf(&b, "    %s ago — %s on %s\n", humanizeTimeAgo(status.Daemon.LastFailure.CompletedAt), status.Daemon.LastFailure.Type, emptyIfUnset(status.Daemon.LastFailure.Target))
+		if errText := strings.TrimSpace(status.Daemon.LastFailure.Error); errText != "" {
+			fmt.Fprintf(&b, "    error: %s\n", errText)
+		}
 	}
 	if len(status.Daemon.RecentActions) > 0 {
 		b.WriteString("  Recent activity:\n")
@@ -279,6 +348,17 @@ func summarizeDaemonActivity(status daemonStatusView) string {
 	if !status.Running {
 		return "daemon is not running"
 	}
+	if status.CurrentJob != nil {
+		actor := formatActorChain(status)
+		if actor == "" {
+			actor = "daemon"
+		}
+		phase := status.CurrentJob.Phase
+		if phase == "" {
+			phase = "working"
+		}
+		return fmt.Sprintf("%s is %s %s", actor, phase, emptyIfUnset(status.CurrentJob.Target))
+	}
 	if status.Worktrees.Active > 0 {
 		return fmt.Sprintf("processing %d active worktree(s)", status.Worktrees.Active)
 	}
@@ -299,6 +379,52 @@ func summarizeDaemonActivity(status daemonStatusView) string {
 		return "no active maintenance jobs right now; recent ticks only ran passive checks"
 	}
 	return "no active maintenance jobs right now"
+}
+
+func formatActorChain(status daemonStatusView) string {
+	parts := []string{}
+	if actor := strings.TrimSpace(status.CurrentActor); actor != "" {
+		parts = append(parts, actor)
+	}
+	if delegated := strings.TrimSpace(status.DelegatedActor); delegated != "" {
+		parts = append(parts, delegated)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " -> ")
+}
+
+func formatJobCounts(counts daemon.JobCountsSnapshot) string {
+	parts := []string{
+		fmt.Sprintf("%d queued", counts.Queued),
+		fmt.Sprintf("%d running", counts.Running),
+		fmt.Sprintf("%d completed", counts.Completed),
+		fmt.Sprintf("%d failed", counts.Failed),
+	}
+	if counts.AttentionNeeded > 0 {
+		parts = append(parts, fmt.Sprintf("%d attention-needed", counts.AttentionNeeded))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func compactFileList(files []string) string {
+	if len(files) == 0 {
+		return ""
+	}
+	limit := files
+	if len(limit) > 4 {
+		limit = append([]string{}, limit[:4]...)
+		return fmt.Sprintf("%s (+%d more)", strings.Join(limit, ", "), len(files)-4)
+	}
+	return strings.Join(limit, ", ")
+}
+
+func firstNonEmpty(primary, fallback []string) []string {
+	if len(primary) > 0 {
+		return primary
+	}
+	return fallback
 }
 
 func formatWatchSummary(watches []daemon.WatchSnapshot) string {

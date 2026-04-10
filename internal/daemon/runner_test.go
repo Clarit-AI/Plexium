@@ -44,7 +44,7 @@ func TestBuildPrompt_EmptyRole(t *testing.T) {
 
 func TestNoOpRunner_ReturnsEmptyResult(t *testing.T) {
 	runner := NewNoOpRunner()
-	result, err := runner.Run(context.Background(), "coder", "do something", []string{"page.md"})
+	result, err := runner.Run(context.Background(), "coder", "do something", []string{"page.md"}, "")
 
 	require.NoError(t, err)
 	assert.Equal(t, "", result.Output)
@@ -126,7 +126,7 @@ printf 'codex final output' > "$out"
 	t.Setenv("CODEX_TEST_LOG", logPath)
 
 	runner := NewCodexRunner("o3")
-	result, err := runner.Run(context.Background(), "coder", "fix bug", []string{"modules/auth.md"})
+	result, err := runner.Run(context.Background(), "coder", "fix bug", []string{"modules/auth.md"}, "")
 	require.NoError(t, err)
 	assert.Equal(t, "codex final output", result.Output)
 
@@ -144,7 +144,7 @@ func TestCodexRunner_RunReturnsResultWhenCLIIsMissing(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
 	runner := NewCodexRunner("o3")
-	result, err := runner.Run(context.Background(), "coder", "fix bug", nil)
+	result, err := runner.Run(context.Background(), "coder", "fix bug", nil, "")
 	require.Error(t, err)
 	require.NotNil(t, result)
 	assert.Contains(t, err.Error(), "codex CLI not found")
@@ -165,7 +165,7 @@ exit 7
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	runner := NewCodexRunner("")
-	result, err := runner.Run(context.Background(), "coder", "fix bug", nil)
+	result, err := runner.Run(context.Background(), "coder", "fix bug", nil, "")
 	require.Error(t, err)
 	require.NotNil(t, result)
 	assert.Contains(t, err.Error(), "codex exec failed")
@@ -194,7 +194,7 @@ rm -f "$out"
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	runner := NewCodexRunner("")
-	result, err := runner.Run(context.Background(), "coder", "fix bug", nil)
+	result, err := runner.Run(context.Background(), "coder", "fix bug", nil, "")
 	require.Error(t, err)
 	require.NotNil(t, result)
 	assert.Contains(t, err.Error(), "reading Codex final output")

@@ -77,3 +77,19 @@ func TestSummarizeDaemonActivity_PassiveChecks(t *testing.T) {
 		t.Fatalf("unexpected summary: %s", summary)
 	}
 }
+
+func TestSummarizeDaemonActivity_CurrentJob(t *testing.T) {
+	summary := summarizeDaemonActivity(daemonStatusView{
+		Running:        true,
+		CurrentActor:   "openrouter",
+		DelegatedActor: "codex",
+		CurrentJob: &daemon.DaemonJobSnapshot{
+			Type:   "bootstrap",
+			Target: ".wiki/",
+			Phase:  "documenting",
+		},
+	})
+	if summary != "openrouter -> codex is documenting .wiki/" {
+		t.Fatalf("unexpected summary: %s", summary)
+	}
+}

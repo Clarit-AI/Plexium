@@ -43,7 +43,7 @@ func newTestDaemon(t *testing.T, opts DaemonOpts) (*Daemon, string) {
 	tracker := &NoOpTracker{}
 	runner := NewNoOpRunner()
 
-	d := NewDaemon(opts, mgr, tracker, runner)
+	d := NewDaemon(opts, mgr, tracker, runner, nil, nil)
 	return d, tmpDir
 }
 
@@ -129,9 +129,9 @@ func TestTick_Staleness_DetectsOldFiles(t *testing.T) {
 	old := time.Now().Add(-14 * 24 * time.Hour)
 	recent := time.Now()
 	setupWikiDir(t, repoRoot, map[string]time.Time{
-		"old-page.md":    old,
-		"fresh-page.md":  recent,
-		"_schema.md":     old, // should be skipped (underscore prefix)
+		"old-page.md":   old,
+		"fresh-page.md": recent,
+		"_schema.md":    old, // should be skipped (underscore prefix)
 	})
 
 	actions := d.tick()
@@ -401,9 +401,9 @@ func (m *mockTracker) CreateIssue(title, body string) (string, error) {
 	return "", nil
 }
 
-func (m *mockTracker) CloseIssue(_ string) error    { return nil }
-func (m *mockTracker) AddLabel(_, _ string) error    { return nil }
-func (m *mockTracker) Comment(_, _ string) error     { return nil }
+func (m *mockTracker) CloseIssue(_ string) error  { return nil }
+func (m *mockTracker) AddLabel(_, _ string) error { return nil }
+func (m *mockTracker) Comment(_, _ string) error  { return nil }
 
 // ---------------------------------------------------------------------------
 // countDebtEntries
@@ -471,6 +471,6 @@ func TestHandleAction_AutoSync_RunnerFails(t *testing.T) {
 
 type failingRunner struct{}
 
-func (f *failingRunner) Run(_ context.Context, _, _ string, _ []string) (*RunResult, error) {
+func (f *failingRunner) Run(_ context.Context, _, _ string, _ []string, _ string) (*RunResult, error) {
 	return nil, fmt.Errorf("runner failed")
 }

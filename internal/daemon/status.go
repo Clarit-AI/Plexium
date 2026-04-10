@@ -11,19 +11,26 @@ import (
 const maxRecentActions = 10
 
 type StatusSnapshot struct {
-	State               string              `json:"state"`
-	Runner              string              `json:"runner"`
-	PollIntervalSeconds int                 `json:"pollIntervalSeconds"`
-	MaxConcurrent       int                 `json:"maxConcurrent"`
-	StartedAt           time.Time           `json:"startedAt,omitempty"`
-	LastTickStartedAt   time.Time           `json:"lastTickStartedAt,omitempty"`
-	LastTickCompletedAt time.Time           `json:"lastTickCompletedAt,omitempty"`
-	LastTickDurationMs  int64               `json:"lastTickDurationMs"`
-	LastTickActionCount int                 `json:"lastTickActionCount"`
-	LastTickFailureCount int                `json:"lastTickFailureCount"`
-	TickCount           int                 `json:"tickCount"`
-	Watches             []WatchSnapshot     `json:"watches,omitempty"`
-	RecentActions       []RecordedTickAction `json:"recentActions,omitempty"`
+	State                string               `json:"state"`
+	Runner               string               `json:"runner"`
+	ExecutionMode        string               `json:"executionMode,omitempty"`
+	CurrentActor         string               `json:"currentActor,omitempty"`
+	DelegatedActor       string               `json:"delegatedActor,omitempty"`
+	PollIntervalSeconds  int                  `json:"pollIntervalSeconds"`
+	MaxConcurrent        int                  `json:"maxConcurrent"`
+	StartedAt            time.Time            `json:"startedAt,omitempty"`
+	LastTickStartedAt    time.Time            `json:"lastTickStartedAt,omitempty"`
+	LastTickCompletedAt  time.Time            `json:"lastTickCompletedAt,omitempty"`
+	LastTickDurationMs   int64                `json:"lastTickDurationMs"`
+	LastTickActionCount  int                  `json:"lastTickActionCount"`
+	LastTickFailureCount int                  `json:"lastTickFailureCount"`
+	TickCount            int                  `json:"tickCount"`
+	Watches              []WatchSnapshot      `json:"watches,omitempty"`
+	RecentActions        []RecordedTickAction `json:"recentActions,omitempty"`
+	JobCounts            JobCountsSnapshot    `json:"jobCounts"`
+	CurrentJob           *DaemonJobSnapshot   `json:"currentJob,omitempty"`
+	LastCompletedJob     *DaemonJobSnapshot   `json:"lastCompletedJob,omitempty"`
+	LastFailure          *DaemonJobSnapshot   `json:"lastFailure,omitempty"`
 }
 
 type WatchSnapshot struct {
@@ -40,6 +47,33 @@ type RecordedTickAction struct {
 	Target  string    `json:"target"`
 	Success bool      `json:"success"`
 	Error   string    `json:"error,omitempty"`
+}
+
+type JobCountsSnapshot struct {
+	Queued          int `json:"queued"`
+	Running         int `json:"running"`
+	Completed       int `json:"completed"`
+	Failed          int `json:"failed"`
+	AttentionNeeded int `json:"attentionNeeded"`
+}
+
+type DaemonJobSnapshot struct {
+	ID             string    `json:"id"`
+	Type           string    `json:"type"`
+	Target         string    `json:"target"`
+	Phase          string    `json:"phase"`
+	State          string    `json:"state"`
+	WorkspacePath  string    `json:"workspacePath,omitempty"`
+	PrimaryActor   string    `json:"primaryActor,omitempty"`
+	DelegatedActor string    `json:"delegatedActor,omitempty"`
+	Summary        string    `json:"summary,omitempty"`
+	ApplyOutcome   string    `json:"applyOutcome,omitempty"`
+	ChangedFiles   []string  `json:"changedFiles,omitempty"`
+	AppliedFiles   []string  `json:"appliedFiles,omitempty"`
+	StartedAt      time.Time `json:"startedAt,omitempty"`
+	CompletedAt    time.Time `json:"completedAt,omitempty"`
+	RetryAt        time.Time `json:"retryAt,omitempty"`
+	Error          string    `json:"error,omitempty"`
 }
 
 func statusFilePath(repoRoot string) string {
@@ -78,4 +112,3 @@ func saveStatusSnapshot(repoRoot string, snapshot *StatusSnapshot) error {
 	}
 	return nil
 }
-

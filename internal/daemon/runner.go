@@ -17,7 +17,7 @@ import (
 // out to specific CLI tools (claude, codex, gemini) or return canned results
 // (noop). Every implementation measures wall-clock latency and captures stdout.
 type RunnerAdapter interface {
-	Run(ctx context.Context, role string, prompt string, contextPages []string) (*RunResult, error)
+	Run(ctx context.Context, role string, prompt string, contextPages []string, workdir string) (*RunResult, error)
 }
 
 // RunResult holds the output and telemetry from a single runner invocation.
@@ -98,17 +98,24 @@ func NewClaudeRunner(model string) *ClaudeRunner {
 // Run executes `claude --print [--model <model>] <prompt>` and returns the
 // captured stdout along with wall-clock latency. TokensUsed and CostUSD are
 // -1 (unknown) as the CLI does not emit structured usage data.
-func (r *ClaudeRunner) Run(ctx context.Context, role, prompt string, contextPages []string) (*RunResult, error) {
+func (r *ClaudeRunner) Run(ctx context.Context, role, prompt string, contextPages []string, workdir string) (*RunResult, error) {
 	start := time.Now()
 	fullPrompt := buildPrompt(role, prompt, contextPages)
 
-	args := []string{"--print"}
+	args := []string{
+		"--print",
+		"--permission-mode", "acceptEdits",
+		"--allow-dangerously-skip-permissions",
+	}
 	if r.modelFlag != "" {
 		args = append(args, "--model", r.modelFlag)
 	}
 	args = append(args, fullPrompt)
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
+	if workdir != "" {
+		cmd.Dir = workdir
+	}
 	out, err := cmd.Output()
 
 	return &RunResult{
@@ -136,7 +143,7 @@ func NewCodexRunner(model string) *CodexRunner {
 
 // Run executes `codex exec --full-auto [--model <model>] --output-last-message <file> <prompt>`.
 // TokensUsed and CostUSD are -1 (unknown).
-func (r *CodexRunner) Run(ctx context.Context, role, prompt string, contextPages []string) (*RunResult, error) {
+func (r *CodexRunner) Run(ctx context.Context, role, prompt string, contextPages []string, workdir string) (*RunResult, error) {
 	start := time.Now()
 	fullPrompt := buildPrompt(role, prompt, contextPages)
 
@@ -157,6 +164,9 @@ func (r *CodexRunner) Run(ctx context.Context, role, prompt string, contextPages
 	args = append(args, fullPrompt)
 
 	cmd := exec.CommandContext(ctx, "codex", args...)
+	if workdir != "" {
+		cmd.Dir = workdir
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		result := newRunResult(string(out), start)
@@ -201,17 +211,20 @@ func NewGeminiRunner(model string) *GeminiRunner {
 
 // Run executes `gemini [--model <model>] <prompt>`.
 // TokensUsed and CostUSD are -1 (unknown).
-func (r *GeminiRunner) Run(ctx context.Context, role, prompt string, contextPages []string) (*RunResult, error) {
+func (r *GeminiRunner) Run(ctx context.Context, role, prompt string, contextPages []string, workdir string) (*RunResult, error) {
 	start := time.Now()
 	fullPrompt := buildPrompt(role, prompt, contextPages)
 
-	args := []string{}
+	args := []string{"--approval-mode", "auto_edit", "--yolo"}
 	if r.modelFlag != "" {
 		args = append(args, "--model", r.modelFlag)
 	}
-	args = append(args, fullPrompt)
+	args = append(args, "--prompt", fullPrompt)
 
 	cmd := exec.CommandContext(ctx, "gemini", args...)
+	if workdir != "" {
+		cmd.Dir = workdir
+	}
 	out, err := cmd.Output()
 
 	return &RunResult{
@@ -236,7 +249,7 @@ func NewNoOpRunner() *NoOpRunner {
 }
 
 // Run returns an empty result immediately.
-func (r *NoOpRunner) Run(_ context.Context, _, _ string, _ []string) (*RunResult, error) {
+func (r *NoOpRunner) Run(_ context.Context, _, _ string, _ []string, _ string) (*RunResult, error) {
 	return &RunResult{}, nil
 }
 

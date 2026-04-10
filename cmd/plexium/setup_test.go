@@ -91,6 +91,9 @@ func TestSetupAgent_SeedsDaemonDefaults(t *testing.T) {
 	if cfg.Daemon.Runner != "claude" {
 		t.Fatalf("expected daemon runner claude, got %q", cfg.Daemon.Runner)
 	}
+	if cfg.Daemon.ExecutionMode != "coding-agent-primary" {
+		t.Fatalf("expected execution mode coding-agent-primary, got %q", cfg.Daemon.ExecutionMode)
+	}
 	if cfg.Daemon.PollInterval != 300 {
 		t.Fatalf("expected default poll interval 300, got %d", cfg.Daemon.PollInterval)
 	}
