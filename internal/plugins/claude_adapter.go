@@ -3,6 +3,7 @@ package plugins
 import (
 	"bufio"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -100,16 +101,11 @@ func detectProjectName(repoRoot string) string {
 
 	// Try package.json
 	if data, err := os.ReadFile(filepath.Join(repoRoot, "package.json")); err == nil {
-		content := string(data)
-		// Simple extraction — avoid importing encoding/json for this
-		if idx := strings.Index(content, `"name"`); idx >= 0 {
-			rest := content[idx+6:]
-			if start := strings.IndexByte(rest, '"'); start >= 0 {
-				rest = rest[start+1:]
-				if end := strings.IndexByte(rest, '"'); end >= 0 {
-					return rest[:end]
-				}
-			}
+		var pkg struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(data, &pkg) == nil && pkg.Name != "" {
+			return pkg.Name
 		}
 	}
 

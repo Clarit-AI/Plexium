@@ -584,7 +584,9 @@ func (d *Daemon) abortIfCancelled(ctx context.Context, wt *Worktree, snapshot *D
 	if ctx.Err() == nil {
 		return TickAction{}, false
 	}
-	_ = d.workspace.UpdateStatus(wt.ID, jobStateFailed)
+	if err := d.workspace.UpdateStatus(wt.ID, jobStateFailed); err != nil {
+		fmt.Fprintf(os.Stderr, "daemon: failed to update workspace status on cancellation: %v\n", err)
+	}
 	snapshot.State = jobStateFailed
 	snapshot.Error = fmt.Sprintf("cancelled during %s: %v", phase, ctx.Err())
 	snapshot.CompletedAt = time.Now()

@@ -79,6 +79,9 @@ last-updated: 2026-04-06
 Before committing:
 
 ```bash
+# Refresh manifest mappings, hashes, and staleness markers
+plexium sync
+
 # Check for broken wiki-links, orphan pages, stale mappings
 plexium lint --deterministic
 

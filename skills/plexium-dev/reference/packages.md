@@ -2,7 +2,7 @@
 
 ## cmd/plexium
 
-Single-file CLI (`main.go`, ~1200 lines). All cobra commands defined here. Key patterns:
+CLI entry point. Cobra commands defined across multiple files (main.go, setup.go, pageindex_connect.go, etc.). Key patterns:
 - `buildCascadeFromConfig()` constructs the provider cascade from config
 - `readPIDFile()` / `processAlive()` for daemon PID management
 - Flag parsing happens in `init()`, command logic in `RunE` closures

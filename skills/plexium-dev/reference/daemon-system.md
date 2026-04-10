@@ -37,7 +37,7 @@ Each watch has a configured action:
 
 ```go
 type RunnerAdapter interface {
-    Run(ctx context.Context, role string, prompt string, contextPages []string) (*RunResult, error)
+    Run(ctx context.Context, role string, prompt string, contextPages []string, workdir string) (*RunResult, error)
 }
 ```
 

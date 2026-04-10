@@ -31,7 +31,7 @@ For testing, inject mock functions instead. All existing tests use this pattern.
 
 `TaskRouter` classifies tasks and routes them:
 
-```
+```text
 Deterministic → rejected (ErrDeterministicTask — handle with code, not LLM)
 Low/Medium    → assistive cascade (cheapest providers)
 High          → primary cascade (coding agent's own LLM)

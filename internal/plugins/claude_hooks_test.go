@@ -76,3 +76,22 @@ func TestEnsureClaudeHooks_Idempotent(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, created2, "second call should not create hook again")
 }
+
+func TestEnsureClaudeHooks_MalformedJSON(t *testing.T) {
+	repoRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(repoRoot, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, ".claude", "settings.json"), []byte(`{not valid json`), 0o644))
+
+	created, err := EnsureClaudeHooks(repoRoot)
+	require.NoError(t, err)
+	assert.True(t, created, "should create hooks even when existing JSON is malformed")
+
+	data, err := os.ReadFile(filepath.Join(repoRoot, ".claude", "settings.json"))
+	require.NoError(t, err)
+
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal(data, &settings))
+
+	hooks := settings["hooks"].(map[string]any)
+	assert.NotNil(t, hooks["PostToolUse"])
+}

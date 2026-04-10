@@ -172,6 +172,9 @@ func TestCLI_RootCommandHelp(t *testing.T) {
 	assert.Equal(t, 0, code)
 	assert.Contains(t, out, "Plexium")
 	assert.Contains(t, out, "Getting Started")
+	assert.Contains(t, out, "Daily Use")
+	assert.Contains(t, out, "Agent Management")
+	assert.Contains(t, out, "Advanced")
 }
 
 // =============================================================================

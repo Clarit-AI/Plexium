@@ -29,7 +29,7 @@ go build -o plexium ./cmd/plexium
 ## Package Structure
 
 ```
-cmd/plexium/          # CLI entry point — all cobra commands in main.go
+cmd/plexium/          # CLI entry point — cobra commands across multiple *.go files
 internal/
   agent/              # Provider cascade, task router, rate limiter, HTTP transport, setup
   ci/                 # CI check command (diff-aware wiki validation)

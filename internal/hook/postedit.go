@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -34,9 +35,18 @@ func (h *PostEditHook) Run(r io.Reader) error {
 		return nil
 	}
 
+	// Normalize to a clean, repo-relative path with forward slashes
+	cleaned := filepath.Clean(filePath)
+	rel, err := filepath.Rel(h.repoRoot, cleaned)
+	if err != nil {
+		// If we can't make it relative, use the original cleaned path
+		rel = cleaned
+	}
+	rel = filepath.ToSlash(strings.TrimPrefix(rel, "./"))
+
 	// Wiki and plexium files don't need a reminder
-	if strings.HasPrefix(filePath, ".wiki/") || strings.HasPrefix(filePath, ".wiki\\") ||
-		strings.HasPrefix(filePath, ".plexium/") || strings.HasPrefix(filePath, ".plexium\\") {
+	if strings.HasPrefix(rel, ".wiki/") || rel == ".wiki" ||
+		strings.HasPrefix(rel, ".plexium/") || rel == ".plexium" {
 		return nil
 	}
 

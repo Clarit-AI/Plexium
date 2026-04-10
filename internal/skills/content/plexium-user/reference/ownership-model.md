@@ -51,6 +51,6 @@ last-updated: 2026-04-06
 
 ## Edge Cases
 
-- **New pages you create** default to `managed` unless you set otherwise.
-- **Pages without frontmatter** are treated as `managed`.
-- **Conflicting ownership** (frontmatter says `managed`, manifest says `human-authored`) — manifest wins for enforcement, but this state should be fixed.
+- **New pages you create** default to `managed` unless you set otherwise. Always add explicit `title` and `ownership` frontmatter — the runtime fallback is not a valid steady state.
+- **Pages without frontmatter** are treated as `managed` at runtime, but `plexium lint` will flag them. Add valid frontmatter (`ownership: managed` or `ownership: human-authored` and a `title`) to pass validation.
+- **Conflicting ownership** (frontmatter says `managed`, manifest says `human-authored`) — manifest wins for enforcement, but the frontmatter should be corrected to match.

@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +24,7 @@ func EnsureClaudeHooks(repoRoot string) (bool, error) {
 		settings = make(map[string]any)
 	} else {
 		if err := json.Unmarshal(data, &settings); err != nil {
-			// Malformed JSON — start fresh rather than destroying existing file
+			fmt.Fprintf(os.Stderr, "plexium: .claude/settings.json is malformed (%v), creating fresh hooks config\n", err)
 			settings = make(map[string]any)
 		}
 	}

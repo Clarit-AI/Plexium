@@ -122,6 +122,13 @@ func TestDetectProjectName_GoMod(t *testing.T) {
 	assert.Equal(t, "myapp", detectProjectName(repoRoot))
 }
 
+func TestDetectProjectName_PackageJSON(t *testing.T) {
+	repoRoot := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, "package.json"), []byte(`{"name":"my-npm-package","version":"1.0.0"}`), 0o644))
+
+	assert.Equal(t, "my-npm-package", detectProjectName(repoRoot))
+}
+
 func TestDetectProjectName_FallbackToDir(t *testing.T) {
 	repoRoot := t.TempDir()
 	assert.Equal(t, filepath.Base(repoRoot), detectProjectName(repoRoot))

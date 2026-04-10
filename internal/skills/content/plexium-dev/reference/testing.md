@@ -3,7 +3,7 @@
 ## Running Tests
 
 ```bash
-go test ./...                          # Full suite (540+ tests, ~7s)
+go test ./...                          # Full test suite
 go test ./internal/agent/...           # Single package
 go test ./internal/agent/... -v        # Verbose output
 go test ./internal/agent/... -run TestName  # Single test

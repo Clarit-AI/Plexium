@@ -363,7 +363,9 @@ func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, e
 	result.Steps = append(result.Steps, daemonStep)
 
 	result.Steps = append(result.Steps, maybeConfigureAssistiveProvider(repoRoot, normalizedAgent, opts))
-	result.Steps = append(result.Steps, maybeInstallLefthook(repoRoot))
+	if _, err := os.Stat(filepath.Join(repoRoot, "lefthook.yml")); err == nil {
+		result.Steps = append(result.Steps, maybeInstallLefthook(repoRoot))
+	}
 
 	result.Verify, err = verifyAgent(repoRoot, normalizedAgent)
 	if err != nil {
@@ -1074,15 +1076,9 @@ func detectAgent(repoRoot string) string {
 	if _, err := exec.LookPath("codex"); err == nil {
 		return "codex"
 	}
-	// Cursor
-	if _, err := os.Stat(filepath.Join(repoRoot, ".cursorrules")); err == nil {
-		return "cursor"
-	}
-	// Gemini
-	if info, err := os.Stat(filepath.Join(repoRoot, ".gemini")); err == nil && info.IsDir() {
-		return "gemini"
-	}
-	// Default to claude
+	// Default to claude (cursor/gemini adapters exist but buildPageIndexConnectPlan
+	// and detectMCPConfig only support claude/codex — add detection here when those
+	// are extended)
 	return "claude"
 }
 
