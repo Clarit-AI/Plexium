@@ -4,6 +4,36 @@ Common issues and how to resolve them.
 
 ---
 
+## `plexium` Command Not Found After `go install`
+
+**Symptom:** `go install github.com/Clarit-AI/Plexium/cmd/plexium@latest` finishes without errors, but `plexium --help` or `plexium --version` returns `command not found`.
+
+**Cause:** `go install` succeeded, but Go wrote the binary to `GOBIN` or `$(go env GOPATH)/bin`, and that directory is not in your shell `PATH`.
+
+**Fix:**
+
+```bash
+BIN_DIR="${GOBIN:-$(go env GOPATH)/bin}"
+export PATH="$BIN_DIR:$PATH"
+hash -r
+plexium --version
+```
+
+To make the fix permanent for `zsh`:
+
+```bash
+echo 'export PATH="${GOBIN:-$(go env GOPATH)/bin}:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+To verify the installed binary directly without changing `PATH`:
+
+```bash
+"$(go env GOPATH)/bin/plexium" --version
+```
+
+---
+
 ## Pre-commit Hook Blocks Your Commit
 
 **Symptom:** `git commit` fails with a message about wiki not being updated.
