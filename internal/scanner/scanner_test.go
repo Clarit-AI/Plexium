@@ -32,11 +32,11 @@ func TestScanner_Scan(t *testing.T) {
 
 	// Create test files
 	files := map[string]string{
-		"src/main.go":         "package main",
-		"src/auth/login.go":   "package auth",
-		"docs/guide.md":       "# Guide",
-		"docs/guides/api.md":  "# API Guide",
-		"README.md":           "# Readme",
+		"src/main.go":        "package main",
+		"src/auth/login.go":  "package auth",
+		"docs/guide.md":      "# Guide",
+		"docs/guides/api.md": "# API Guide",
+		"README.md":          "# Readme",
 	}
 	for path, content := range files {
 		err = os.WriteFile(filepath.Join(tmpDir, path), []byte(content), 0644)
@@ -135,19 +135,21 @@ func TestScanner_Scan_SkipsUnixSocket(t *testing.T) {
 		t.Skip("unix sockets are not supported on Windows")
 	}
 
-	tmpDir, err := os.MkdirTemp("/tmp", "plexium-scan-")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = os.RemoveAll(tmpDir)
-	})
+	tmpDir := t.TempDir()
 
-	err = os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0o755)
+	err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0o755)
 	require.NoError(t, err)
 	err = os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# Readme"), 0o644)
 	require.NoError(t, err)
 
-	socketPath := filepath.Join(tmpDir, ".beads", "bd.sock")
-	listener, err := net.Listen("unix", socketPath)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	t.Cleanup(func() {
+		_ = os.Chdir(cwd)
+	})
+
+	listener, err := net.Listen("unix", filepath.Join(".beads", "bd.sock"))
 	require.NoError(t, err)
 	defer listener.Close()
 

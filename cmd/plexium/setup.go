@@ -126,7 +126,7 @@ func runSetupCommand(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Print(formatSetupSummary(result, writeConfig))
+	fmt.Fprint(cmd.OutOrStdout(), formatSetupSummary(result, writeConfig))
 	if result.Verify.Ready {
 		return nil
 	}

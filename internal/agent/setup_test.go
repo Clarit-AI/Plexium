@@ -505,6 +505,22 @@ func TestPromptBudgetChoice_ParsesValue(t *testing.T) {
 	assert.Equal(t, 3.75, result.DailyBudgetUSD)
 }
 
+func TestPromptBudgetChoice_ZeroMeansUnlimited(t *testing.T) {
+	reader := bufio.NewReader(bytes.NewBufferString("0\n"))
+	result := &SetupResult{}
+	require.NoError(t, promptBudgetChoice(reader, io.Discard, result))
+	assert.False(t, result.BudgetConfigured)
+	assert.Equal(t, 0.0, result.DailyBudgetUSD)
+}
+
+func TestPromptBudgetChoice_NegativeMeansUnlimited(t *testing.T) {
+	reader := bufio.NewReader(bytes.NewBufferString("-2\n"))
+	result := &SetupResult{}
+	require.NoError(t, promptBudgetChoice(reader, io.Discard, result))
+	assert.False(t, result.BudgetConfigured)
+	assert.Equal(t, 0.0, result.DailyBudgetUSD)
+}
+
 func TestPromptBudgetChoice_InvalidValueFails(t *testing.T) {
 	reader := bufio.NewReader(bytes.NewBufferString("abc"))
 	result := &SetupResult{}
@@ -519,6 +535,27 @@ func TestPromptBudgetChoice_InvalidThenValidRetries(t *testing.T) {
 	assert.True(t, result.BudgetConfigured)
 	assert.Equal(t, 1.5, result.DailyBudgetUSD)
 	assert.Contains(t, stdout.String(), "Enter a number like 2.5")
+}
+
+func TestApplyBudgetSelection_NonPositiveMeansUnlimited(t *testing.T) {
+	result := &SetupResult{BudgetConfigured: true, DailyBudgetUSD: 1.25}
+	zero := 0.0
+	applyBudgetSelection(result, &zero)
+	assert.False(t, result.BudgetConfigured)
+	assert.Equal(t, 0.0, result.DailyBudgetUSD)
+
+	negative := -4.0
+	applyBudgetSelection(result, &negative)
+	assert.False(t, result.BudgetConfigured)
+	assert.Equal(t, 0.0, result.DailyBudgetUSD)
+}
+
+func TestRenderCallbackPage_EscapesHTML(t *testing.T) {
+	page := renderCallbackPage("<title>", "<b>heading</b>", "<script>alert(1)</script>")
+	assert.Contains(t, page, "&lt;title&gt;")
+	assert.Contains(t, page, "&lt;b&gt;heading&lt;/b&gt;")
+	assert.Contains(t, page, "&lt;script&gt;alert(1)&lt;/script&gt;")
+	assert.NotContains(t, page, "<script>alert(1)</script>")
 }
 
 func TestRunInteractiveSetup_DetectsExistingOpenRouterAndKeepsCurrentSetup(t *testing.T) {

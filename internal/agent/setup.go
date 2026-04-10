@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -357,6 +358,10 @@ func startCallbackServer(codeCh chan<- string, errCh chan<- error) (*http.Server
 }
 
 func renderCallbackPage(title, heading, body string) string {
+	title = html.EscapeString(title)
+	heading = html.EscapeString(heading)
+	body = html.EscapeString(body)
+
 	return fmt.Sprintf(`<!doctype html>
 <html lang="en">
 <head>
@@ -1054,7 +1059,12 @@ func promptBudgetChoice(reader *bufio.Reader, stdout io.Writer, result *SetupRes
 		}
 
 		value, parseErr := strconv.ParseFloat(answer, 64)
-		if parseErr == nil && value >= 0 {
+		if parseErr == nil {
+			if value <= 0 {
+				result.BudgetConfigured = false
+				result.DailyBudgetUSD = 0
+				return nil
+			}
 			result.BudgetConfigured = true
 			result.DailyBudgetUSD = value
 			return nil
@@ -1168,7 +1178,7 @@ func setOpenRouterSelection(result *SetupResult, model, profile string) {
 }
 
 func applyBudgetSelection(result *SetupResult, budget *float64) {
-	if budget == nil {
+	if budget == nil || *budget <= 0 {
 		result.BudgetConfigured = false
 		result.DailyBudgetUSD = 0
 		return
