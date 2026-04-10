@@ -89,7 +89,7 @@ func detectProjectName(repoRoot string) string {
 	// Try go.mod
 	if data, err := os.ReadFile(filepath.Join(repoRoot, "go.mod")); err == nil {
 		sc := bufio.NewScanner(strings.NewReader(string(data)))
-		if sc.Scan() {
+		for sc.Scan() {
 			line := sc.Text()
 			if strings.HasPrefix(line, "module ") {
 				mod := strings.TrimPrefix(line, "module ")

@@ -1062,17 +1062,20 @@ func currentGitRepoRoot() (string, error) {
 }
 
 func detectAgent(repoRoot string) string {
-	// Claude indicators
-	if _, err := exec.LookPath("claude"); err == nil {
-		return "claude"
-	}
+	// Repo-local indicators take precedence over installed binaries
 	if info, err := os.Stat(filepath.Join(repoRoot, ".claude")); err == nil && info.IsDir() {
 		return "claude"
 	}
 	if _, err := os.Stat(filepath.Join(repoRoot, "CLAUDE.md")); err == nil {
 		return "claude"
 	}
-	// Codex
+	if _, err := os.Stat(filepath.Join(repoRoot, "AGENTS.md")); err == nil {
+		return "codex"
+	}
+	// Fall back to PATH detection
+	if _, err := exec.LookPath("claude"); err == nil {
+		return "claude"
+	}
 	if _, err := exec.LookPath("codex"); err == nil {
 		return "codex"
 	}

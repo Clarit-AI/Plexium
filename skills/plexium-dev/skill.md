@@ -13,7 +13,7 @@ Plexium is a Go CLI tool that gives repositories a persistent, agent-maintained 
 # Build
 go build ./...
 
-# Run all tests (540+ across 25 packages)
+# Run the full test suite across all packages
 go test ./...
 
 # Run a specific package
@@ -28,7 +28,7 @@ go build -o plexium ./cmd/plexium
 
 ## Package Structure
 
-```
+```text
 cmd/plexium/          # CLI entry point — cobra commands across multiple *.go files
 internal/
   agent/              # Provider cascade, task router, rate limiter, HTTP transport, setup
@@ -59,7 +59,7 @@ internal/
 
 ## Architecture Layers
 
-```
+```text
 Source Layer (immutable)     — src/**, docs/**
 State Manifest              — .plexium/manifest.json
 Wiki Layer                  — .wiki/**
