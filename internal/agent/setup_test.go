@@ -468,13 +468,32 @@ func TestRunInteractiveSetup_WithExplicitBudget(t *testing.T) {
 
 func TestRunInteractiveSetup_WithAPIKeyOption_PreservesExistingProvidersAndBudget(t *testing.T) {
 	dir := t.TempDir()
-	writeExistingOpenRouterSetup(t, dir, "nvidia/nemotron-3-super-120b-a12b", "balanced", 1.25)
-
 	configPath := filepath.Join(dir, ".plexium", "config.yml")
-	data, err := os.ReadFile(configPath)
-	require.NoError(t, err)
-	updated := strings.Replace(string(data), "providers:\n", "providers:\n    - name: ollama\n      enabled: true\n      type: ollama\n      endpoint: http://localhost:11434\n      model: llama3.2\n", 1)
-	require.NoError(t, os.WriteFile(configPath, []byte(updated), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	content := `sources:
+  include:
+    - "**/*.go"
+
+assistiveAgent:
+  enabled: true
+  providers:
+    - name: local-ollama
+      enabled: true
+      type: ollama
+      endpoint: http://localhost:11434
+      model: llama3.2
+    - name: openrouter
+      enabled: true
+      type: openai-compatible
+      endpoint: https://openrouter.ai/api
+      model: "nvidia/nemotron-3-super-120b-a12b"
+      apiKeyEnv: OPENROUTER_API_KEY
+      capabilityProfile: "balanced"
+  budget:
+    dailyUSD: 1.25
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(content), 0o644))
+	require.NoError(t, SaveCredentials(dir, "sk-or-v1-existing", io.Discard, io.Discard))
 
 	client, cleanup := stubOpenRouterValidation(t)
 	defer cleanup()
@@ -682,10 +701,23 @@ func TestRunInteractiveSetup_RemovesExistingOpenRouter(t *testing.T) {
 
 	credData, err := os.ReadFile(filepath.Join(dir, ".plexium", "credentials.json"))
 	if os.IsNotExist(err) {
+		envData, envErr := os.ReadFile(filepath.Join(dir, ".plexium", ".env"))
+		if os.IsNotExist(envErr) {
+			return
+		}
+		require.NoError(t, envErr)
+		assert.NotContains(t, string(envData), "OPENROUTER_API_KEY")
 		return
 	}
 	require.NoError(t, err)
 	assert.NotContains(t, string(credData), "openrouter_api_key")
+
+	envData, envErr := os.ReadFile(filepath.Join(dir, ".plexium", ".env"))
+	if os.IsNotExist(envErr) {
+		return
+	}
+	require.NoError(t, envErr)
+	assert.NotContains(t, string(envData), "OPENROUTER_API_KEY")
 }
 
 func writeExistingOpenRouterSetup(t *testing.T, dir, model, profile string, budget float64) {

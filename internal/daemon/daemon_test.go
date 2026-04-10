@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Clarit-AI/Plexium/internal/agent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -312,6 +313,7 @@ func TestHandleAction_CreateIssue(t *testing.T) {
 func TestHandleAction_AutoSync_RespectsMaxConcurrent(t *testing.T) {
 	d, repoRoot := newTestDaemon(t, DaemonOpts{
 		MaxConcurrent: 1,
+		RunnerName:    "codex",
 		Watches: WatchOpts{
 			Staleness: WatchDef{Enabled: true, Action: "auto-sync", Threshold: "1h"},
 		},
@@ -328,12 +330,13 @@ func TestHandleAction_AutoSync_RespectsMaxConcurrent(t *testing.T) {
 	require.NoError(t, err)
 
 	actions := d.tick(context.Background())
-
-	// Both pages are stale, but both should fail due to max concurrent.
-	for _, a := range actions {
-		assert.False(t, a.Success)
-		assert.Contains(t, a.Error, "max concurrent")
-	}
+	require.Len(t, actions, 3)
+	assert.True(t, actions[0].Success)
+	assert.Equal(t, "queue", actions[0].Action)
+	assert.True(t, actions[1].Success)
+	assert.Equal(t, "queue", actions[1].Action)
+	assert.False(t, actions[2].Success)
+	assert.Contains(t, actions[2].Error, "max concurrent")
 }
 
 func TestRefreshJobCounts_IncludesQueuedWorktrees(t *testing.T) {
@@ -501,6 +504,7 @@ func TestHandleAction_UnknownAction(t *testing.T) {
 func TestHandleAction_AutoSync_Success(t *testing.T) {
 	d, _ := newTestDaemon(t, DaemonOpts{
 		MaxConcurrent: 5,
+		RunnerName:    "codex",
 	})
 
 	a := d.handleAction("staleness", "auto-sync", "page.md")
@@ -516,6 +520,7 @@ func TestHandleAction_AutoSync_Success(t *testing.T) {
 func TestHandleAction_AutoSync_RunnerFails(t *testing.T) {
 	d, _ := newTestDaemon(t, DaemonOpts{
 		MaxConcurrent: 5,
+		RunnerName:    "codex",
 	})
 
 	// Replace runner with one that fails.
@@ -524,6 +529,23 @@ func TestHandleAction_AutoSync_RunnerFails(t *testing.T) {
 	a := d.handleAction("staleness", "auto-sync", "page.md")
 	assert.False(t, a.Success)
 	assert.Contains(t, a.Error, "runner failed")
+}
+
+func TestHandleAction_AutoSync_SkipsWithoutCodingRunner(t *testing.T) {
+	d, _ := newTestDaemon(t, DaemonOpts{
+		ExecutionMode: executionModeProviderPrimary,
+	})
+	d.runner = nil
+	d.config.RunnerName = ""
+	d.cascade = &agent.ProviderCascade{}
+
+	a := d.handleAction("staleness", "auto-sync", "page.md")
+	assert.False(t, a.Success)
+	assert.Contains(t, a.Error, "no coding-agent runner configured")
+
+	count, err := d.workspace.ActiveCount()
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
 }
 
 type failingRunner struct{}

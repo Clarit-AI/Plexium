@@ -65,6 +65,69 @@ type providerExecutionPlan struct {
 	Files          []providerWriteFile `json:"files"`
 }
 
+func configuredWikiRoot(cfg *config.Config) string {
+	if cfg != nil {
+		if root := strings.TrimSpace(cfg.Wiki.Root); root != "" {
+			clean := filepath.ToSlash(filepath.Clean(root))
+			if clean != "." {
+				return clean
+			}
+		}
+	}
+	return ".wiki"
+}
+
+func configuredWikiRootAbs(repoRoot string, cfg *config.Config) string {
+	return filepath.Join(repoRoot, filepath.FromSlash(configuredWikiRoot(cfg)))
+}
+
+func configuredWikiLogPath(cfg *config.Config) string {
+	logName := "_log.md"
+	if cfg != nil && strings.TrimSpace(cfg.Wiki.Log) != "" {
+		logName = cfg.Wiki.Log
+	}
+	return filepath.ToSlash(filepath.Join(configuredWikiRoot(cfg), logName))
+}
+
+func isPathWithinRoot(path, root string) bool {
+	cleanPath := filepath.ToSlash(filepath.Clean(path))
+	cleanRoot := filepath.ToSlash(filepath.Clean(root))
+	return cleanPath == cleanRoot || strings.HasPrefix(cleanPath, cleanRoot+"/")
+}
+
+func trimRootPrefix(path, root string) string {
+	cleanPath := filepath.ToSlash(filepath.Clean(path))
+	cleanRoot := filepath.ToSlash(filepath.Clean(root))
+	if cleanPath == cleanRoot {
+		return ""
+	}
+	return strings.TrimPrefix(cleanPath, cleanRoot+"/")
+}
+
+func (d *Daemon) wikiRootRel() string {
+	return configuredWikiRoot(d.config.Config)
+}
+
+func (d *Daemon) wikiRootAbs() string {
+	return configuredWikiRootAbs(d.config.RepoRoot, d.config.Config)
+}
+
+func (d *Daemon) wikiRootTarget() string {
+	return d.wikiRootRel() + "/"
+}
+
+func (d *Daemon) rawDirRel() string {
+	return filepath.ToSlash(filepath.Join(d.wikiRootRel(), "raw"))
+}
+
+func (d *Daemon) rawDirAbs() string {
+	return filepath.Join(d.config.RepoRoot, filepath.FromSlash(d.rawDirRel()))
+}
+
+func (d *Daemon) wikiLogRel() string {
+	return configuredWikiLogPath(d.config.Config)
+}
+
 func (d *Daemon) discoverJobs() ([]*upkeepJob, []TickAction) {
 	var jobs []*upkeepJob
 	var actions []TickAction
@@ -73,14 +136,14 @@ func (d *Daemon) discoverJobs() ([]*upkeepJob, []TickAction) {
 		jobs = append(jobs, &upkeepJob{
 			ID:     fmt.Sprintf("bootstrap-%d", time.Now().UnixMilli()),
 			Type:   jobTypeBootstrap,
-			Target: ".wiki/",
+			Target: d.wikiRootTarget(),
 			Reason: "wiki is missing, minimal, or still scaffold-level",
 		})
-		actions = append(actions, TickAction{Watch: "bootstrap", Action: "queue", Target: ".wiki/", Success: true})
+		actions = append(actions, TickAction{Watch: "bootstrap", Action: "queue", Target: d.wikiRootTarget(), Success: true})
 	}
 
 	if d.config.Watches.Ingest.Enabled {
-		rawDir := filepath.Join(d.config.RepoRoot, ".wiki", "raw")
+		rawDir := d.rawDirAbs()
 		entries, err := os.ReadDir(rawDir)
 		if err != nil {
 			if !os.IsNotExist(err) {
@@ -99,7 +162,7 @@ func (d *Daemon) discoverJobs() ([]*upkeepJob, []TickAction) {
 					jobs = append(jobs, &upkeepJob{
 						ID:      fmt.Sprintf("ingest-%d", time.Now().UnixNano()),
 						Type:    jobTypeRawIngest,
-						Target:  filepath.ToSlash(filepath.Join(".wiki", "raw", entry.Name())),
+						Target:  filepath.ToSlash(filepath.Join(d.rawDirRel(), entry.Name())),
 						Reason:  "new raw source detected",
 						Payload: entry.Name(),
 					})
@@ -167,7 +230,7 @@ func (d *Daemon) needsBootstrap() bool {
 	if d.config.Config == nil {
 		return false
 	}
-	wikiRoot := filepath.Join(d.config.RepoRoot, ".wiki")
+	wikiRoot := d.wikiRootAbs()
 	entries, err := os.ReadDir(wikiRoot)
 	if err != nil {
 		return true
@@ -223,13 +286,13 @@ func (d *Daemon) detectRepoDriftJob() (*upkeepJob, TickAction) {
 		DryRun:   true,
 	})
 	if err != nil {
-		return nil, TickAction{Watch: "staleness", Action: "scan", Target: ".wiki/", Success: false, Error: err.Error()}
+		return nil, TickAction{Watch: "staleness", Action: "scan", Target: d.wikiRootTarget(), Success: false, Error: err.Error()}
 	}
 	if result.StalePages == 0 && len(result.PagesAffected) == 0 {
 		return nil, TickAction{}
 	}
 
-	target := ".wiki/"
+	target := d.wikiRootTarget()
 	if len(result.PagesAffected) > 0 {
 		target = strings.Join(limitStrings(result.PagesAffected, 3), ", ")
 	}
@@ -250,7 +313,7 @@ func (d *Daemon) detectDebtJob() (*upkeepJob, TickAction) {
 	if !d.config.Watches.Debt.Enabled {
 		return nil, TickAction{}
 	}
-	logPath := filepath.Join(d.config.RepoRoot, ".wiki", "_log.md")
+	logPath := filepath.Join(d.config.RepoRoot, filepath.FromSlash(d.wikiLogRel()))
 	count, err := countDebtEntries(logPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -281,19 +344,19 @@ func (d *Daemon) detectLintJob() (*upkeepJob, TickAction) {
 	}
 	if d.config.Config == nil {
 		if d.config.Watches.Lint.Action == "log-only" {
-			return nil, TickAction{Watch: "lint", Action: "log-only", Target: ".wiki/", Success: true}
+			return nil, TickAction{Watch: "lint", Action: "log-only", Target: d.wikiRootTarget(), Success: true}
 		}
 		return nil, TickAction{}
 	}
 	report, err := lint.NewLinter(d.config.RepoRoot, d.config.Config).RunDeterministic()
 	if err != nil {
-		return nil, TickAction{Watch: "lint", Action: "scan", Target: ".wiki/", Success: false, Error: err.Error()}
+		return nil, TickAction{Watch: "lint", Action: "scan", Target: d.wikiRootTarget(), Success: false, Error: err.Error()}
 	}
 	if report.Summary.Errors == 0 && report.Summary.Warnings == 0 {
 		if d.config.Watches.Lint.Action == "log-only" {
-			return nil, TickAction{Watch: "lint", Action: "log-only", Target: ".wiki/", Success: true}
+			return nil, TickAction{Watch: "lint", Action: "log-only", Target: d.wikiRootTarget(), Success: true}
 		}
-		return nil, TickAction{Watch: "lint", Action: "scan", Target: ".wiki/", Success: true}
+		return nil, TickAction{Watch: "lint", Action: "scan", Target: d.wikiRootTarget(), Success: true}
 	}
 	target := fmt.Sprintf("%d errors, %d warnings", report.Summary.Errors, report.Summary.Warnings)
 	if d.config.Watches.Lint.Action != "auto-fix" {
@@ -316,7 +379,7 @@ func (d *Daemon) hasEnabledWatches() bool {
 func (d *Daemon) detectLegacyStalenessJobs() ([]*upkeepJob, []TickAction) {
 	threshold := parseDuration(d.config.Watches.Staleness.Threshold, 7*24*time.Hour)
 	cutoff := time.Now().Add(-threshold)
-	wikiRoot := filepath.Join(d.config.RepoRoot, ".wiki")
+	wikiRoot := d.wikiRootAbs()
 
 	entries, err := os.ReadDir(wikiRoot)
 	if err != nil {
@@ -461,7 +524,7 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 	result.ChangedFiles = changedFiles
 
 	d.persistJobPhase(result, jobPhaseApplying)
-	appliedFiles, applyOutcome, attentionNeeded, applyErr := applyWorkspaceChanges(d.config.RepoRoot, wt.Path, changedFiles)
+	appliedFiles, applyOutcome, attentionNeeded, applyErr := applyWorkspaceChanges(d.config.RepoRoot, wt.Path, d.wikiRootRel(), changedFiles)
 	result.AppliedFiles = appliedFiles
 	result.ApplyOutcome = applyOutcome
 	result.CompletedAt = time.Now()
@@ -495,8 +558,7 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 }
 
 func (d *Daemon) buildContextPages(job *upkeepJob) ([]string, error) {
-	wikiRoot := filepath.Join(d.config.RepoRoot, ".wiki")
-	retriever := pageindex.NewRetriever(wikiRoot)
+	retriever := pageindex.NewRetriever(d.wikiRootAbs())
 	query := job.Target
 	switch job.Type {
 	case jobTypeBootstrap:
@@ -585,19 +647,19 @@ func (d *Daemon) runProviderPrimary(ctx context.Context, snapshot *DaemonJobSnap
 
 	d.persistJobPhase(snapshot, jobPhaseDocumenting)
 	for _, file := range plan.Files {
-		if err := writeProviderFile(workdir, file); err != nil {
+		if err := writeProviderFile(workdir, d.wikiRootRel(), file); err != nil {
 			return snapshot, err
 		}
 	}
 	return snapshot, nil
 }
 
-func writeProviderFile(workdir string, file providerWriteFile) error {
+func writeProviderFile(workdir, wikiRoot string, file providerWriteFile) error {
 	cleanPath := filepath.Clean(file.Path)
 	if strings.HasPrefix(cleanPath, "..") {
 		return fmt.Errorf("provider attempted unsafe path %q", file.Path)
 	}
-	if !strings.HasPrefix(cleanPath, ".wiki/") && cleanPath != ".wiki" && !strings.HasPrefix(cleanPath, ".plexium/reports/") {
+	if !isPathWithinRoot(cleanPath, wikiRoot) && !strings.HasPrefix(cleanPath, ".plexium/reports/") {
 		return fmt.Errorf("provider attempted to write unsupported path %q", file.Path)
 	}
 	absPath := filepath.Join(workdir, cleanPath)
@@ -634,10 +696,10 @@ func collectWorkspaceChanges(workdir string) ([]string, error) {
 	return changed, nil
 }
 
-func applyWorkspaceChanges(repoRoot, workdir string, changedFiles []string) ([]string, string, bool, error) {
+func applyWorkspaceChanges(repoRoot, workdir, wikiRoot string, changedFiles []string) ([]string, string, bool, error) {
 	var applied []string
 	for _, rel := range changedFiles {
-		if !isAllowedApplyPath(rel) {
+		if !isAllowedApplyPath(rel, wikiRoot) {
 			return nil, fmt.Sprintf("left in workspace for review (%s outside allowed apply scope)", rel), true, nil
 		}
 		src := filepath.Join(workdir, rel)
@@ -670,8 +732,8 @@ func applyWorkspaceChanges(repoRoot, workdir string, changedFiles []string) ([]s
 	return applied, fmt.Sprintf("applied %d file(s) back to repo", len(applied)), false, nil
 }
 
-func isAllowedApplyPath(path string) bool {
-	return strings.HasPrefix(path, ".wiki/") || path == ".wiki" || path == ".plexium/manifest.json" || strings.HasPrefix(path, ".plexium/reports/")
+func isAllowedApplyPath(path, wikiRoot string) bool {
+	return isPathWithinRoot(path, wikiRoot) || path == ".plexium/manifest.json" || strings.HasPrefix(path, ".plexium/reports/")
 }
 
 func (d *Daemon) updateManifestForWorkspace(job *upkeepJob, workdir string, changedFiles []string) error {
@@ -682,9 +744,11 @@ func (d *Daemon) updateManifestForWorkspace(job *upkeepJob, workdir string, chan
 	suggestedSources, _ := d.suggestSourceMappings()
 	headCommit := gitOutput(workdir, "rev-parse", "HEAD")
 	now := time.Now().UTC().Format(time.RFC3339)
+	wikiRoot := d.wikiRootRel()
+	rawRoot := filepath.ToSlash(filepath.Join(wikiRoot, "raw"))
 
 	for _, changed := range changedFiles {
-		if !strings.HasPrefix(changed, ".wiki/") || !strings.HasSuffix(changed, ".md") {
+		if !isPathWithinRoot(changed, wikiRoot) || !strings.HasSuffix(changed, ".md") {
 			continue
 		}
 		if strings.HasPrefix(filepath.Base(changed), "_") {
@@ -698,7 +762,7 @@ func (d *Daemon) updateManifestForWorkspace(job *upkeepJob, workdir string, chan
 		} else if suggestion, ok := suggestedSources[changed]; ok {
 			sourceFiles = suggestion
 		} else if job.Type == jobTypeRawIngest && job.Payload != "" {
-			sourceFiles = []manifest.SourceFile{{Path: filepath.ToSlash(filepath.Join(".wiki", "raw", job.Payload))}}
+			sourceFiles = []manifest.SourceFile{{Path: filepath.ToSlash(filepath.Join(rawRoot, job.Payload))}}
 		}
 
 		for i := range sourceFiles {
@@ -726,7 +790,7 @@ func (d *Daemon) updateManifestForWorkspace(job *upkeepJob, workdir string, chan
 			WikiPath:    changed,
 			Title:       extractTitle(string(content), changed),
 			Ownership:   "managed",
-			Section:     inferSection(changed),
+			Section:     inferSection(changed, wikiRoot),
 			SourceFiles: sourceFiles,
 			LastUpdated: now,
 			UpdatedBy:   "plexium-daemon",
@@ -797,8 +861,11 @@ func extractTitle(content, wikiPath string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
-func inferSection(wikiPath string) string {
-	rel := strings.TrimPrefix(wikiPath, ".wiki/")
+func inferSection(wikiPath, wikiRoot string) string {
+	rel := trimRootPrefix(wikiPath, wikiRoot)
+	if rel == "" {
+		return "Root"
+	}
 	parts := strings.Split(rel, "/")
 	if len(parts) <= 1 {
 		return "Root"
@@ -808,9 +875,10 @@ func inferSection(wikiPath string) string {
 
 func buildRunnerJobPrompt(cfg *config.Config, job *upkeepJob, contextPages []string) string {
 	var b strings.Builder
+	wikiRoot := configuredWikiRoot(cfg)
 	b.WriteString("You are maintaining a persistent LLM wiki for this repository.\n")
 	b.WriteString("Follow the LLM wiki pattern: update or create real wiki pages, preserve the knowledge base, and make the wiki more useful after this run.\n")
-	b.WriteString("Only edit wiki-maintenance surfaces: .wiki/**, .plexium/manifest.json, and .plexium/reports/** when needed.\n")
+	fmt.Fprintf(&b, "Only edit wiki-maintenance surfaces: %s/**, .plexium/manifest.json, and .plexium/reports/** when needed.\n", wikiRoot)
 	b.WriteString("Update pages directly; do not stop at analysis.\n\n")
 	fmt.Fprintf(&b, "Job type: %s\n", job.Type)
 	fmt.Fprintf(&b, "Target: %s\n", job.Target)
@@ -836,13 +904,15 @@ func buildRunnerJobPrompt(cfg *config.Config, job *upkeepJob, contextPages []str
 
 func buildProviderJobPrompt(cfg *config.Config, job *upkeepJob, contextPages []string, repoRoot string) string {
 	var b strings.Builder
+	wikiRoot := configuredWikiRoot(cfg)
+	wikiRootAbs := configuredWikiRootAbs(repoRoot, cfg)
 	b.WriteString("You are the primary upkeep orchestrator for an LLM-maintained wiki.\n")
 	b.WriteString("Return ONLY valid JSON with this schema:\n")
-	b.WriteString(`{"summary":"...","delegateToCli":false,"delegatePrompt":"...","files":[{"path":".wiki/path.md","content":"..."}]}`)
+	fmt.Fprintf(&b, `{"summary":"...","delegateToCli":false,"delegatePrompt":"...","files":[{"path":"%s/path.md","content":"..."}]}`, wikiRoot)
 	b.WriteString("\n")
 	b.WriteString("If the task is too broad or needs a headless coding agent session, set delegateToCli=true and provide delegatePrompt.\n")
 	b.WriteString("Otherwise, directly author the wiki file updates in `files`.\n")
-	b.WriteString("Never write outside `.wiki/` or `.plexium/reports/`.\n\n")
+	fmt.Fprintf(&b, "Never write outside `%s/` or `.plexium/reports/`.\n\n", wikiRoot)
 	fmt.Fprintf(&b, "Job type: %s\nTarget: %s\nReason: %s\n", job.Type, job.Target, job.Reason)
 	if len(contextPages) > 0 {
 		b.WriteString("\nRelevant wiki pages:\n")
@@ -850,7 +920,7 @@ func buildProviderJobPrompt(cfg *config.Config, job *upkeepJob, contextPages []s
 			b.WriteString("- ")
 			b.WriteString(page)
 			b.WriteString("\n")
-			content, err := os.ReadFile(filepath.Join(repoRoot, ".wiki", page))
+			content, err := os.ReadFile(filepath.Join(wikiRootAbs, page))
 			if err == nil {
 				b.WriteString("```md\n")
 				b.WriteString(truncateString(string(content), 1800))
@@ -859,7 +929,7 @@ func buildProviderJobPrompt(cfg *config.Config, job *upkeepJob, contextPages []s
 		}
 	}
 	if job.Type == jobTypeRawIngest && job.Payload != "" {
-		rawPath := filepath.Join(repoRoot, ".wiki", "raw", job.Payload)
+		rawPath := filepath.Join(wikiRootAbs, "raw", job.Payload)
 		if data, err := os.ReadFile(rawPath); err == nil {
 			b.WriteString("\nRaw source content:\n```md\n")
 			b.WriteString(truncateString(string(data), 3500))

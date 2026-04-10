@@ -157,6 +157,12 @@ func TestBuildDaemonStatusView_StoppedDaemonUsesConfigDefaults(t *testing.T) {
 	if view.MaxConcurrent != 4 {
 		t.Fatalf("expected max concurrent from config, got %d", view.MaxConcurrent)
 	}
+	if len(view.Watches) != 4 {
+		t.Fatalf("expected watches to fall back to config for stopped daemon, got %+v", view.Watches)
+	}
+	if view.Watches[0].Name != "staleness" || view.Watches[0].Action != "auto-sync" {
+		t.Fatalf("expected staleness watch from config, got %+v", view.Watches[0])
+	}
 	if view.State != "" || view.CurrentActor != "" || view.DelegatedActor != "" || view.CurrentJob != nil {
 		t.Fatalf("expected runtime-only fields to be cleared for stopped daemon: %+v", view)
 	}

@@ -135,11 +135,11 @@ func buildDaemonStatusView(repoRoot string, cfg *config.Config) daemonStatusView
 
 	if snapshot, err := daemon.LoadStatusSnapshot(repoRoot); err == nil {
 		view.TickCount = snapshot.TickCount
-		view.Watches = snapshot.Watches
 		view.JobCounts = snapshot.JobCounts
 		view.LastCompletedJob = snapshot.LastCompletedJob
 		view.LastFailure = snapshot.LastFailure
 		if view.Running {
+			view.Watches = snapshot.Watches
 			view.State = snapshot.State
 			view.Runner = snapshot.Runner
 			view.ExecutionMode = snapshot.ExecutionMode
@@ -155,6 +155,7 @@ func buildDaemonStatusView(repoRoot string, cfg *config.Config) daemonStatusView
 			view.RecentActions = snapshot.RecentActions
 			view.CurrentJob = snapshot.CurrentJob
 		} else {
+			view.Watches = nil
 			view.State = ""
 			view.CurrentActor = ""
 			view.DelegatedActor = ""

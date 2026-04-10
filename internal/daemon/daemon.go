@@ -71,6 +71,9 @@ type Daemon struct {
 	maxConcurrent int
 	stopCh        chan struct{}
 	stopOnce      sync.Once
+	ctxMu         sync.RWMutex
+	runCtx        context.Context
+	runCancel     context.CancelFunc
 }
 
 // NewDaemon creates a Daemon with sensible defaults for zero-value fields.
@@ -97,20 +100,29 @@ func NewDaemon(opts DaemonOpts, workspace *WorkspaceMgr, tracker TrackerAdapter,
 // Run starts the poll loop. It executes one tick immediately, then ticks on
 // every PollInterval. It exits when ctx is cancelled or Stop() is called.
 func (d *Daemon) Run(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	d.setRunContext(runCtx, cancel)
+	defer d.clearRunContext()
+
 	d.writeLifecycleSnapshot("running")
-	d.runTick(ctx)
+	d.runTick(runCtx)
 
 	ticker := time.NewTicker(d.pollInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-runCtx.Done():
+			select {
+			case <-d.stopCh:
+				return nil
+			default:
+				return runCtx.Err()
+			}
 		case <-d.stopCh:
 			return nil
 		case <-ticker.C:
-			d.runTick(ctx)
+			d.runTick(runCtx)
 		}
 	}
 }
@@ -119,6 +131,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 func (d *Daemon) Stop() {
 	d.stopOnce.Do(func() {
 		close(d.stopCh)
+		d.cancelRunContext()
 	})
 }
 
@@ -182,6 +195,11 @@ func (d *Daemon) handleAction(watch, action, target string) TickAction {
 		}
 
 	case "auto-sync", "auto-fix", "auto-ingest":
+		if !d.canExecuteJobs() || d.runner == nil || strings.TrimSpace(d.config.RunnerName) == "" || d.config.RunnerName == "noop" {
+			ta.Success = false
+			ta.Error = "execution skipped: no coding-agent runner configured"
+			return ta
+		}
 		active, err := d.workspace.ActiveCount()
 		if err != nil {
 			ta.Success = false
@@ -203,7 +221,7 @@ func (d *Daemon) handleAction(watch, action, target string) TickAction {
 		}
 
 		prompt := fmt.Sprintf("Run %s on target: %s", action, target)
-		_, runErr := d.runner.Run(context.Background(), watch, prompt, nil, wt.Path)
+		_, runErr := d.runner.Run(d.lifecycleContext(), watch, prompt, nil, wt.Path)
 
 		if runErr != nil {
 			_ = d.workspace.UpdateStatus(wt.ID, "failed")
@@ -222,6 +240,38 @@ func (d *Daemon) handleAction(watch, action, target string) TickAction {
 	}
 
 	return ta
+}
+
+func (d *Daemon) setRunContext(ctx context.Context, cancel context.CancelFunc) {
+	d.ctxMu.Lock()
+	defer d.ctxMu.Unlock()
+	d.runCtx = ctx
+	d.runCancel = cancel
+}
+
+func (d *Daemon) clearRunContext() {
+	d.ctxMu.Lock()
+	defer d.ctxMu.Unlock()
+	d.runCtx = nil
+	d.runCancel = nil
+}
+
+func (d *Daemon) cancelRunContext() {
+	d.ctxMu.RLock()
+	cancel := d.runCancel
+	d.ctxMu.RUnlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (d *Daemon) lifecycleContext() context.Context {
+	d.ctxMu.RLock()
+	defer d.ctxMu.RUnlock()
+	if d.runCtx != nil {
+		return d.runCtx
+	}
+	return context.Background()
 }
 
 // ---------------------------------------------------------------------------
