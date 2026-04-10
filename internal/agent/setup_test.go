@@ -211,13 +211,15 @@ func TestStopCallbackServer_AllowsInFlightRequestToComplete(t *testing.T) {
 	require.NoError(t, err)
 	defer listener.Close()
 
+	serveDone := make(chan error, 1)
 	go func() {
-		_ = server.Serve(listener)
+		serveDone <- server.Serve(listener)
 	}()
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resp, err := http.Get("http://" + listener.Addr().String())
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Get("http://" + listener.Addr().String())
 		if err != nil {
 			resultCh <- err
 			return
@@ -240,9 +242,21 @@ func TestStopCallbackServer_AllowsInFlightRequestToComplete(t *testing.T) {
 		resultCh <- nil
 	}()
 
-	<-started
+	select {
+	case <-started:
+		// Handler started successfully
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for handler to start")
+	}
+
 	stopCallbackServer(server)
-	require.NoError(t, <-resultCh)
+
+	select {
+	case err := <-resultCh:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for HTTP response")
+	}
 }
 
 func TestPortAvailable(t *testing.T) {

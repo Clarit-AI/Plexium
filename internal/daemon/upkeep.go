@@ -949,10 +949,11 @@ func buildProviderJobPrompt(cfg *config.Config, job *upkeepJob, contextPages []s
 }
 
 func truncateString(value string, max int) string {
-	if len(value) <= max {
+	runes := []rune(value)
+	if len(runes) <= max {
 		return value
 	}
-	return value[:max]
+	return string(runes[:max])
 }
 
 func gitOutput(workdir string, args ...string) string {
