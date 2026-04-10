@@ -171,7 +171,7 @@ func TestCLI_RootCommandHelp(t *testing.T) {
 	out, code := runPlexium(t, "--help")
 	assert.Equal(t, 0, code)
 	assert.Contains(t, out, "Plexium")
-	assert.Contains(t, out, "Available Commands")
+	assert.Contains(t, out, "Getting Started")
 }
 
 // =============================================================================

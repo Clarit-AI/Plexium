@@ -67,9 +67,9 @@ type setupAgentOptions struct {
 }
 
 var setupCmd = &cobra.Command{
-	Use:   "setup <agent>",
-	Short: "Initialize, connect, and verify Plexium for an agent",
-	Args:  cobra.ExactArgs(1),
+	Use:   "setup [agent]",
+	Short: "Initialize, connect, and verify Plexium for an agent (auto-detects if omitted)",
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runSetupCommand,
 }
 
@@ -81,6 +81,9 @@ var verifyCmd = &cobra.Command{
 }
 
 func init() {
+	setupCmd.GroupID = "start"
+	verifyCmd.GroupID = "start"
+
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(verifyCmd)
 
@@ -105,7 +108,15 @@ func runSetupCommand(cmd *cobra.Command, args []string) error {
 		setupStderr = &bytes.Buffer{}
 	}
 
-	result, err := setupAgent(repoRoot, args[0], setupAgentOptions{
+	agentName := ""
+	if len(args) > 0 {
+		agentName = args[0]
+	} else {
+		agentName = detectAgent(repoRoot)
+		fmt.Fprintf(cmd.ErrOrStderr(), "Auto-detected agent: %s\n", agentName)
+	}
+
+	result, err := setupAgent(repoRoot, agentName, setupAgentOptions{
 		WriteConfig:        writeConfig,
 		WithMemento:        withMemento,
 		Stdin:              cmd.InOrStdin(),
@@ -352,6 +363,7 @@ func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, e
 	result.Steps = append(result.Steps, daemonStep)
 
 	result.Steps = append(result.Steps, maybeConfigureAssistiveProvider(repoRoot, normalizedAgent, opts))
+	result.Steps = append(result.Steps, maybeInstallLefthook(repoRoot))
 
 	result.Verify, err = verifyAgent(repoRoot, normalizedAgent)
 	if err != nil {
@@ -1045,4 +1057,62 @@ func currentGitRepoRoot() (string, error) {
 		return "", fmt.Errorf("current directory is not inside a git repository")
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+func detectAgent(repoRoot string) string {
+	// Claude indicators
+	if _, err := exec.LookPath("claude"); err == nil {
+		return "claude"
+	}
+	if info, err := os.Stat(filepath.Join(repoRoot, ".claude")); err == nil && info.IsDir() {
+		return "claude"
+	}
+	if _, err := os.Stat(filepath.Join(repoRoot, "CLAUDE.md")); err == nil {
+		return "claude"
+	}
+	// Codex
+	if _, err := exec.LookPath("codex"); err == nil {
+		return "codex"
+	}
+	// Cursor
+	if _, err := os.Stat(filepath.Join(repoRoot, ".cursorrules")); err == nil {
+		return "cursor"
+	}
+	// Gemini
+	if info, err := os.Stat(filepath.Join(repoRoot, ".gemini")); err == nil && info.IsDir() {
+		return "gemini"
+	}
+	// Default to claude
+	return "claude"
+}
+
+func maybeInstallLefthook(repoRoot string) setupStep {
+	if _, err := exec.LookPath("lefthook"); err != nil {
+		return setupStep{
+			Name:    "lefthook",
+			Status:  "warning",
+			Message: "lefthook not found on PATH — install it to activate git hooks",
+		}
+	}
+	if _, err := os.Stat(filepath.Join(repoRoot, "lefthook.yml")); os.IsNotExist(err) {
+		return setupStep{
+			Name:    "lefthook",
+			Status:  "warning",
+			Message: "lefthook.yml not found — run setup with an adapter first",
+		}
+	}
+	cmd := exec.Command("lefthook", "install")
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return setupStep{
+			Name:    "lefthook",
+			Status:  "warning",
+			Message: fmt.Sprintf("lefthook install failed: %s", strings.TrimSpace(string(out))),
+		}
+	}
+	return setupStep{
+		Name:    "lefthook",
+		Status:  "pass",
+		Message: "installed git hooks via lefthook",
+	}
 }

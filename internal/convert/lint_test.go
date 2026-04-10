@@ -90,7 +90,20 @@ func TestLint_GapScoreNoSourceDirs(t *testing.T) {
 
 	result := linter.Analyze([]PageData{}, []scanner.File{})
 
-	assert.Equal(t, 1.0, result.GapScore, "no source dirs = 100% coverage")
+	assert.Equal(t, 0.0, result.GapScore, "no source dirs and no pages = 0% coverage")
+}
+
+func TestLint_GapScoreNoSourceDirsWithPages(t *testing.T) {
+	linker := NewLinker()
+	linter := NewConvertLinter(linker)
+
+	pages := []PageData{
+		{WikiPath: "Home.md", Title: "Home", Section: "Root", Content: "# Home"},
+	}
+	linker.AddPages(pages)
+	result := linter.Analyze(pages, []scanner.File{})
+
+	assert.Equal(t, 1.0, result.GapScore, "no source dirs but pages exist = 100% coverage")
 }
 
 func TestLint_SuggestsCrossRefsForOrphans(t *testing.T) {

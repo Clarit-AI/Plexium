@@ -802,12 +802,12 @@ func loadExistingSetupState(repoRoot, configPath string) (*existingSetupState, e
 	state := &existingSetupState{}
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
+		return state, nil // missing or unreadable config — proceed with empty state
 	}
 
 	var stored storedAssistiveConfig
 	if err := yaml.Unmarshal(data, &stored); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+		return state, nil // malformed YAML — proceed with empty state
 	}
 
 	for _, provider := range stored.AssistiveAgent.Providers {

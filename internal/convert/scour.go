@@ -120,6 +120,8 @@ func (s *Scourer) Scour(opts ScourOptions) (*ScourFindings, error) {
 			}
 		case isDocFile(f.Path):
 			findings.ExistingDocs = append(findings.ExistingDocs, s.extractExistingDoc(f))
+		case isStandaloneDoc(f.Path):
+			findings.ExistingDocs = append(findings.ExistingDocs, s.extractExistingDoc(f))
 		case isSourceFile(f.Path) && opts.Depth == "deep":
 			findings.SourceFiles = append(findings.SourceFiles, s.extractSource(f))
 		}
@@ -379,6 +381,13 @@ func isDocFile(path string) bool {
 		return dir == "docs" || dir == "doc" || dir == "documentation"
 	}
 	return false
+}
+
+func isStandaloneDoc(path string) bool {
+	if filepath.Ext(path) != ".md" {
+		return false
+	}
+	return !isReadme(path) && !isADRPath(path) && !isAgentInstruction(path) && !isConfigFile(path) && !isDocFile(path)
 }
 
 func (s *Scourer) extractExistingDoc(f scanner.File) ExistingDoc {
