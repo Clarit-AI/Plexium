@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
+	"github.com/Clarit-AI/Plexium/internal/agent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,7 +45,7 @@ func newTestDaemon(t *testing.T, opts DaemonOpts) (*Daemon, string) {
 	tracker := &NoOpTracker{}
 	runner := NewNoOpRunner()
 
-	d := NewDaemon(opts, mgr, tracker, runner)
+	d := NewDaemon(opts, mgr, tracker, runner, nil, nil)
 	return d, tmpDir
 }
 
@@ -111,7 +113,7 @@ func TestNewDaemon_CustomValues(t *testing.T) {
 func TestTick_NoWatchesEnabled(t *testing.T) {
 	d, _ := newTestDaemon(t, DaemonOpts{})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Empty(t, actions)
 }
 
@@ -129,12 +131,12 @@ func TestTick_Staleness_DetectsOldFiles(t *testing.T) {
 	old := time.Now().Add(-14 * 24 * time.Hour)
 	recent := time.Now()
 	setupWikiDir(t, repoRoot, map[string]time.Time{
-		"old-page.md":    old,
-		"fresh-page.md":  recent,
-		"_schema.md":     old, // should be skipped (underscore prefix)
+		"old-page.md":   old,
+		"fresh-page.md": recent,
+		"_schema.md":    old, // should be skipped (underscore prefix)
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 
 	assert.Len(t, actions, 1)
 	assert.Equal(t, "staleness", actions[0].Watch)
@@ -153,7 +155,7 @@ func TestTick_Staleness_NoStaleFiles(t *testing.T) {
 		"fresh.md": time.Now(),
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Empty(t, actions)
 }
 
@@ -164,7 +166,7 @@ func TestTick_Staleness_NoWikiDir(t *testing.T) {
 		},
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Len(t, actions, 1)
 	assert.False(t, actions[0].Success)
 	assert.Contains(t, actions[0].Error, "readdir")
@@ -188,7 +190,7 @@ func TestTick_Debt_OverThreshold(t *testing.T) {
 		"- Normal log entry",
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Len(t, actions, 1)
 	assert.Equal(t, "debt", actions[0].Watch)
 	assert.Contains(t, actions[0].Target, "count=3")
@@ -207,7 +209,7 @@ func TestTick_Debt_UnderThreshold(t *testing.T) {
 		"- Normal entry",
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Empty(t, actions)
 }
 
@@ -218,7 +220,7 @@ func TestTick_Debt_NoLogFile(t *testing.T) {
 		},
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Empty(t, actions)
 }
 
@@ -235,7 +237,7 @@ func TestTick_Ingest_DetectsRawFiles(t *testing.T) {
 
 	setupRawDir(t, repoRoot, []string{"new-doc.md", "draft.md"})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Len(t, actions, 2)
 	assert.Equal(t, "ingest", actions[0].Watch)
 }
@@ -247,8 +249,29 @@ func TestTick_Ingest_NoRawDir(t *testing.T) {
 		},
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	assert.Empty(t, actions)
+}
+
+func TestTick_Ingest_SkipsNonRegularFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior differs on Windows")
+	}
+
+	d, repoRoot := newTestDaemon(t, DaemonOpts{
+		Watches: WatchOpts{
+			Ingest: WatchDef{Enabled: true, Action: "log-only"},
+		},
+	})
+
+	rawDir := filepath.Join(repoRoot, ".wiki", "raw")
+	require.NoError(t, os.MkdirAll(rawDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(rawDir, "new-doc.md"), []byte("data"), 0o644))
+	require.NoError(t, os.Symlink(filepath.Join(rawDir, "new-doc.md"), filepath.Join(rawDir, "linked-doc.md")))
+
+	actions := d.tick(context.Background())
+	require.Len(t, actions, 1)
+	assert.Equal(t, "new-doc.md", actions[0].Target)
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +299,7 @@ func TestHandleAction_CreateIssue(t *testing.T) {
 		"stale.md": old,
 	})
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
 	require.Len(t, actions, 1)
 	assert.True(t, actions[0].Success)
 	assert.Contains(t, issueTitles[0], "staleness")
@@ -290,6 +313,7 @@ func TestHandleAction_CreateIssue(t *testing.T) {
 func TestHandleAction_AutoSync_RespectsMaxConcurrent(t *testing.T) {
 	d, repoRoot := newTestDaemon(t, DaemonOpts{
 		MaxConcurrent: 1,
+		RunnerName:    "codex",
 		Watches: WatchOpts{
 			Staleness: WatchDef{Enabled: true, Action: "auto-sync", Threshold: "1h"},
 		},
@@ -305,13 +329,49 @@ func TestHandleAction_AutoSync_RespectsMaxConcurrent(t *testing.T) {
 	_, err := d.workspace.Create("existing")
 	require.NoError(t, err)
 
-	actions := d.tick()
+	actions := d.tick(context.Background())
+	require.Len(t, actions, 3)
+	assert.True(t, actions[0].Success)
+	assert.Equal(t, "queue", actions[0].Action)
+	assert.True(t, actions[1].Success)
+	assert.Equal(t, "queue", actions[1].Action)
+	assert.False(t, actions[2].Success)
+	assert.Contains(t, actions[2].Error, "max concurrent")
+}
 
-	// Both pages are stale, but both should fail due to max concurrent.
-	for _, a := range actions {
-		assert.False(t, a.Success)
-		assert.Contains(t, a.Error, "max concurrent")
-	}
+func TestRefreshJobCounts_IncludesQueuedWorktrees(t *testing.T) {
+	d, _ := newTestDaemon(t, DaemonOpts{})
+	wt, err := d.workspace.Create("queued")
+	require.NoError(t, err)
+	require.NoError(t, d.workspace.UpdateStatus(wt.ID, jobStateQueued))
+
+	snapshot := &StatusSnapshot{}
+	d.refreshJobCounts(snapshot)
+
+	assert.Equal(t, 1, snapshot.JobCounts.Queued)
+	assert.Equal(t, 0, snapshot.JobCounts.Running)
+}
+
+func TestTick_PropagatesContextToJobExecution(t *testing.T) {
+	d, repoRoot := newTestDaemon(t, DaemonOpts{
+		RunnerName: "codex",
+		Watches: WatchOpts{
+			Ingest: WatchDef{Enabled: true, Action: "auto-ingest"},
+		},
+	})
+	setupRawDir(t, repoRoot, []string{"new-doc.md"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	runner := &contextAwareRunner{}
+	d.runner = runner
+
+	actions := d.tick(ctx)
+	require.Len(t, actions, 2)
+	assert.True(t, runner.sawCanceled)
+	assert.False(t, actions[len(actions)-1].Success)
+	assert.Contains(t, actions[len(actions)-1].Error, "context canceled")
 }
 
 // ---------------------------------------------------------------------------
@@ -401,9 +461,9 @@ func (m *mockTracker) CreateIssue(title, body string) (string, error) {
 	return "", nil
 }
 
-func (m *mockTracker) CloseIssue(_ string) error    { return nil }
-func (m *mockTracker) AddLabel(_, _ string) error    { return nil }
-func (m *mockTracker) Comment(_, _ string) error     { return nil }
+func (m *mockTracker) CloseIssue(_ string) error  { return nil }
+func (m *mockTracker) AddLabel(_, _ string) error { return nil }
+func (m *mockTracker) Comment(_, _ string) error  { return nil }
 
 // ---------------------------------------------------------------------------
 // countDebtEntries
@@ -444,6 +504,7 @@ func TestHandleAction_UnknownAction(t *testing.T) {
 func TestHandleAction_AutoSync_Success(t *testing.T) {
 	d, _ := newTestDaemon(t, DaemonOpts{
 		MaxConcurrent: 5,
+		RunnerName:    "codex",
 	})
 
 	a := d.handleAction("staleness", "auto-sync", "page.md")
@@ -459,6 +520,7 @@ func TestHandleAction_AutoSync_Success(t *testing.T) {
 func TestHandleAction_AutoSync_RunnerFails(t *testing.T) {
 	d, _ := newTestDaemon(t, DaemonOpts{
 		MaxConcurrent: 5,
+		RunnerName:    "codex",
 	})
 
 	// Replace runner with one that fails.
@@ -469,8 +531,39 @@ func TestHandleAction_AutoSync_RunnerFails(t *testing.T) {
 	assert.Contains(t, a.Error, "runner failed")
 }
 
+func TestHandleAction_AutoSync_SkipsWithoutCodingRunner(t *testing.T) {
+	d, _ := newTestDaemon(t, DaemonOpts{
+		ExecutionMode: executionModeProviderPrimary,
+	})
+	d.runner = nil
+	d.config.RunnerName = ""
+	d.cascade = &agent.ProviderCascade{}
+
+	a := d.handleAction("staleness", "auto-sync", "page.md")
+	assert.False(t, a.Success)
+	assert.Contains(t, a.Error, "no coding-agent runner configured")
+
+	count, err := d.workspace.ActiveCount()
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
+}
+
 type failingRunner struct{}
 
-func (f *failingRunner) Run(_ context.Context, _, _ string, _ []string) (*RunResult, error) {
+func (f *failingRunner) Run(_ context.Context, _, _ string, _ []string, _ string) (*RunResult, error) {
 	return nil, fmt.Errorf("runner failed")
+}
+
+type contextAwareRunner struct {
+	sawCanceled bool
+}
+
+func (r *contextAwareRunner) Run(ctx context.Context, _, _ string, _ []string, _ string) (*RunResult, error) {
+	select {
+	case <-ctx.Done():
+		r.sawCanceled = true
+		return nil, ctx.Err()
+	default:
+		return &RunResult{}, nil
+	}
 }

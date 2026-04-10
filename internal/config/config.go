@@ -60,9 +60,10 @@ type DaemonConfig struct {
 	Enabled       bool        `yaml:"enabled"`
 	PollInterval  int         `yaml:"pollInterval"` // seconds
 	MaxConcurrent int         `yaml:"maxConcurrent"`
-	Runner        string      `yaml:"runner"`      // claude | codex | gemini | noop
-	RunnerModel   string      `yaml:"runnerModel"` // optional model override for runner
-	Tracker       string      `yaml:"tracker"`     // github | linear | none
+	ExecutionMode string      `yaml:"executionMode"` // coding-agent-primary | provider-primary
+	Runner        string      `yaml:"runner"`        // claude | codex | gemini | noop
+	RunnerModel   string      `yaml:"runnerModel"`   // optional model override for runner
+	Tracker       string      `yaml:"tracker"`       // github | linear | none
 	Watches       WatchConfig `yaml:"watches"`
 }
 
@@ -294,6 +295,15 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("assistiveAgent.providers[%d].capabilityProfile %q is invalid (expected one of: balanced, constrained-local, frontier-large-context)", i, c.AssistiveAgent.Providers[i].CapabilityProfile)
 		}
 		c.AssistiveAgent.Providers[i].CapabilityProfile = profile
+	}
+	if c.Daemon.ExecutionMode == "" {
+		c.Daemon.ExecutionMode = "coding-agent-primary"
+	} else {
+		switch c.Daemon.ExecutionMode {
+		case "coding-agent-primary", "provider-primary":
+		default:
+			return fmt.Errorf("daemon.executionMode %q is invalid (expected coding-agent-primary or provider-primary)", c.Daemon.ExecutionMode)
+		}
 	}
 	return nil
 }

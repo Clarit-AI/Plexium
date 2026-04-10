@@ -126,31 +126,50 @@ func runSetupCommand(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Printf("Plexium setup for %s\n", capitalizeFirst(result.Agent))
-	fmt.Printf("Repository: %s\n", result.RepoRoot)
-	for _, step := range result.Steps {
-		fmt.Printf("- %s: %s\n", step.Name, step.Message)
-	}
-
-	passCount, warnCount, failCount := result.Verify.summary()
-	fmt.Printf("Verification: %d pass, %d warning, %d fail\n", passCount, warnCount, failCount)
-	if !result.Verify.Configured {
-		fmt.Printf("Native MCP command: %s\n", result.ConnectPlan.Command)
-		if !writeConfig {
-			fmt.Println("Run the command above or rerun with --write-config to apply it for you.")
-		}
-	}
-	if len(result.NextSteps) > 0 {
-		fmt.Println("What to do next:")
-		for i, step := range result.NextSteps {
-			fmt.Printf("  %d. %s\n", i+1, step)
-		}
-	}
+	fmt.Fprint(cmd.OutOrStdout(), formatSetupSummary(result, writeConfig))
 	if result.Verify.Ready {
-		fmt.Println("Plexium tooling is wired. The wiki scaffold is intentionally minimal until you run `plexium convert` and let an agent enrich it.")
 		return nil
 	}
 	return fmt.Errorf("setup completed with verification failures")
+}
+
+func formatSetupSummary(result *setupResult, writeConfig bool) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "Plexium setup for %s\n", capitalizeFirst(result.Agent))
+	fmt.Fprintf(&b, "Repository: %s\n", result.RepoRoot)
+
+	if len(result.Steps) > 0 {
+		b.WriteString("\nCompleted\n")
+		for _, step := range result.Steps {
+			fmt.Fprintf(&b, "  - %-10s %s\n", step.Name+":", step.Message)
+		}
+	}
+
+	passCount, warnCount, failCount := result.Verify.summary()
+	b.WriteString("\nVerification\n")
+	fmt.Fprintf(&b, "  %d pass, %d warning, %d fail\n", passCount, warnCount, failCount)
+
+	if !result.Verify.Configured {
+		b.WriteString("\nConnect\n")
+		fmt.Fprintf(&b, "  %s\n", result.ConnectPlan.Command)
+		if !writeConfig {
+			b.WriteString("  Run the command above or rerun with --write-config to apply it for you.\n")
+		}
+	}
+
+	if len(result.NextSteps) > 0 {
+		b.WriteString("\nNext Steps\n")
+		for i, step := range result.NextSteps {
+			fmt.Fprintf(&b, "  %d. %s\n", i+1, step)
+		}
+	}
+
+	if result.Verify.Ready {
+		b.WriteString("\nPlexium tooling is wired. The wiki scaffold is intentionally minimal until you run `plexium convert` and let an agent enrich it.\n")
+	}
+
+	return b.String()
 }
 
 func runVerifyCommand(cmd *cobra.Command, args []string) error {
@@ -326,6 +345,12 @@ func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, e
 		})
 	}
 
+	daemonStep, err := configureDaemonRunnerInConfig(repoRoot, normalizedAgent)
+	if err != nil {
+		return nil, fmt.Errorf("configure daemon runner: %w", err)
+	}
+	result.Steps = append(result.Steps, daemonStep)
+
 	result.Steps = append(result.Steps, maybeConfigureAssistiveProvider(repoRoot, normalizedAgent, opts))
 
 	result.Verify, err = verifyAgent(repoRoot, normalizedAgent)
@@ -461,7 +486,7 @@ func maybeConfigureAssistiveProvider(repoRoot, agentName string, opts setupAgent
 
 	fmt.Fprintln(opts.Stdout)
 	fmt.Fprintln(opts.Stdout, "No assistive provider is configured yet.")
-	fmt.Fprintln(opts.Stdout, "Plexium works without one, but autonomous upkeep, LLM lint, and maintenance helpers need Ollama or OpenRouter.")
+	fmt.Fprintln(opts.Stdout, "Plexium works without one. The daemon can use your configured Claude/Codex/Gemini runner, but LLM lint and provider-cascade helpers need Ollama or OpenRouter.")
 	input := opts.Stdin
 	if input == nil {
 		input = os.Stdin
@@ -509,6 +534,65 @@ func enableMementoInConfig(repoRoot string) error {
 	cfg.Integrations.Memento = true
 	cfg.Enforcement.MementoGate = true
 	return config.SaveToDir(repoRoot, cfg)
+}
+
+func configureDaemonRunnerInConfig(repoRoot, agent string) (setupStep, error) {
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		return setupStep{}, err
+	}
+
+	normalizedAgent := normalizeAgentName(agent)
+	changed := false
+	seededDefaults := false
+
+	if !cfg.Daemon.Enabled {
+		cfg.Daemon.Enabled = true
+		changed = true
+	}
+	if cfg.Daemon.Runner != normalizedAgent {
+		cfg.Daemon.Runner = normalizedAgent
+		changed = true
+	}
+	if cfg.Daemon.ExecutionMode == "" {
+		cfg.Daemon.ExecutionMode = "coding-agent-primary"
+		changed = true
+	}
+	if cfg.Daemon.PollInterval <= 0 {
+		cfg.Daemon.PollInterval = 300
+		changed = true
+	}
+	if cfg.Daemon.MaxConcurrent <= 0 {
+		cfg.Daemon.MaxConcurrent = 2
+		changed = true
+	}
+	if cfg.Daemon.Tracker == "" {
+		cfg.Daemon.Tracker = "none"
+		changed = true
+	}
+	if daemonEnabledWatchCount(cfg) == 0 {
+		cfg.Daemon.Watches.Staleness = config.WatchEntry{Enabled: true, Threshold: "7d", Action: "auto-sync"}
+		cfg.Daemon.Watches.Lint = config.WatchEntry{Enabled: true, Action: "log-only"}
+		cfg.Daemon.Watches.Ingest = config.WatchEntry{Enabled: true, WatchDir: ".wiki/raw/", Action: "auto-ingest"}
+		cfg.Daemon.Watches.Debt = config.WatchEntry{Enabled: true, MaxDebt: 10, Action: "log-only"}
+		changed = true
+		seededDefaults = true
+	}
+
+	if changed {
+		if err := config.SaveToDir(repoRoot, cfg); err != nil {
+			return setupStep{}, err
+		}
+	}
+
+	message := fmt.Sprintf("daemon runner set to %s", capitalizeFirst(normalizedAgent))
+	if seededDefaults {
+		message += " with default watches enabled"
+	} else if !changed {
+		message = fmt.Sprintf("daemon runner already configured for %s", capitalizeFirst(normalizedAgent))
+	}
+
+	return setupStep{Name: "daemon", Status: "pass", Message: message}, nil
 }
 
 func verifyAgent(repoRoot, agent string) (*verifyResult, error) {
@@ -618,6 +702,14 @@ func verifyAgent(repoRoot, agent string) (*verifyResult, error) {
 		Remediation: lintRemediation,
 	})
 
+	daemonRunnerStatus, daemonRunnerMessage, daemonRunnerRemediation := verifyDaemonRunner(cfg, normalizedAgent)
+	result.Checks = append(result.Checks, verifyCheck{
+		Name:        "daemon-runner",
+		Status:      daemonRunnerStatus,
+		Message:     daemonRunnerMessage,
+		Remediation: daemonRunnerRemediation,
+	})
+
 	configured, configLocation, err := detectMCPConfig(repoRoot, normalizedAgent)
 	if err != nil {
 		return nil, err
@@ -656,6 +748,52 @@ func verifyAgent(repoRoot, agent string) (*verifyResult, error) {
 	return result, nil
 }
 
+func verifyDaemonRunner(cfg *config.Config, agent string) (status, message, remediation string) {
+	if cfg == nil {
+		return "warning", "daemon runner could not be verified because config is unavailable", "Run `plexium setup " + agent + "`."
+	}
+
+	if cfg.Daemon.Runner == "" {
+		return "warning", fmt.Sprintf("daemon runner is not configured for %s yet", capitalizeFirst(agent)), fmt.Sprintf("Run `plexium setup %s` to wire the daemon runner.", agent)
+	}
+
+	if cfg.Daemon.Runner != agent {
+		return "warning", fmt.Sprintf("daemon runner is set to %s, not %s", capitalizeFirst(cfg.Daemon.Runner), capitalizeFirst(agent)), fmt.Sprintf("Rerun `plexium setup %s` or update `.plexium/config.yml` manually.", agent)
+	}
+
+	watchCount := daemonEnabledWatchCount(cfg)
+	watchLabel := "watches"
+	if watchCount == 1 {
+		watchLabel = "watch"
+	}
+	if watchCount == 0 {
+		return "warning", fmt.Sprintf("daemon runner is set to %s, but no daemon watches are enabled", capitalizeFirst(agent)), "Enable at least one `daemon.watches.*` entry in `.plexium/config.yml` before running `plexium agent start`."
+	}
+
+	return "pass", fmt.Sprintf("daemon runner is configured for %s (%d %s enabled)", capitalizeFirst(agent), watchCount, watchLabel), ""
+}
+
+func daemonEnabledWatchCount(cfg *config.Config) int {
+	if cfg == nil {
+		return 0
+	}
+
+	count := 0
+	if cfg.Daemon.Watches.Staleness.Enabled {
+		count++
+	}
+	if cfg.Daemon.Watches.Lint.Enabled {
+		count++
+	}
+	if cfg.Daemon.Watches.Ingest.Enabled {
+		count++
+	}
+	if cfg.Daemon.Watches.Debt.Enabled {
+		count++
+	}
+	return count
+}
+
 func (r *verifyResult) summary() (passCount, warnCount, failCount int) {
 	for _, check := range r.Checks {
 		switch check.Status {
@@ -675,6 +813,7 @@ func buildSetupNextSteps(result *setupResult) []string {
 		"Run `plexium convert` to replace the starter scaffold with grounded project pages.",
 		"Run `plexium retrieve \"what does this project do?\"` to inspect what the wiki currently knows.",
 		fmt.Sprintf("Run `plexium verify %s` or `plexium doctor` after major changes.", result.Agent),
+		fmt.Sprintf("Run `plexium agent start` when you want background upkeep with %s as the daemon runner.", capitalizeFirst(result.Agent)),
 	}
 
 	assistiveConfigured := false

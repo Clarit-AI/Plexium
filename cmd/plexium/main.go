@@ -119,6 +119,8 @@ func init() {
 	agentSetupCmd.Flags().String("api-key-file", "", "Read OpenRouter API key from a file")
 	agentSetupCmd.Flags().Bool("api-key-stdin", false, "Read OpenRouter API key from stdin")
 	agentSetupCmd.Flags().String("model", "", "Select the OpenRouter model to write into assistiveAgent config")
+	agentSetupCmd.Flags().Float64("daily-budget-usd", 0, "Optional daily assistive-provider budget in USD (0 = unlimited)")
+	agentSetupCmd.Flags().String("execution-mode", "", "Daemon upkeep mode: coding-agent-primary|provider-primary")
 	agentTestCmd.Flags().String("provider", "", "Test a specific provider")
 
 	// Register subcommands
@@ -947,9 +949,12 @@ var daemonCmd = &cobra.Command{
 			RepoRoot:      repoRoot,
 			PollInterval:  time.Duration(pollInterval) * time.Second,
 			MaxConcurrent: maxConcurrent,
+			RunnerName:    runnerType,
+			Config:        cfg,
 		}
 
 		if cfg != nil {
+			opts.ExecutionMode = cfg.Daemon.ExecutionMode
 			opts.Watches = daemon.WatchOpts{
 				Staleness: daemon.WatchDef{
 					Enabled:   cfg.Daemon.Watches.Staleness.Enabled,
@@ -972,7 +977,8 @@ var daemonCmd = &cobra.Command{
 			}
 		}
 
-		d := daemon.NewDaemon(opts, workspace, tracker, runner)
+		cascade, rateTracker := buildCascadeFromConfig(cfg)
+		d := daemon.NewDaemon(opts, workspace, tracker, runner, cascade, rateTracker)
 
 		fmt.Printf("Plexium daemon starting (poll=%ds, maxConcurrent=%d)\n", pollInterval, maxConcurrent)
 
@@ -1090,11 +1096,26 @@ var agentStartCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("finding executable: %w", err)
 		}
+		if err := os.MkdirAll(filepath.Dir(pidFile), 0o755); err != nil {
+			return fmt.Errorf("creating daemon directory: %w", err)
+		}
+
+		outLog, err := os.OpenFile(filepath.Join(repoRoot, ".plexium", "daemon.out.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return fmt.Errorf("opening daemon stdout log: %w", err)
+		}
+		defer outLog.Close()
+		errLog, err := os.OpenFile(filepath.Join(repoRoot, ".plexium", "daemon.err.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return fmt.Errorf("opening daemon stderr log: %w", err)
+		}
+		defer errLog.Close()
 
 		proc := exec.Command(exe, "daemon")
 		proc.Dir = repoRoot
-		proc.Stdout = nil
-		proc.Stderr = nil
+		proc.Stdout = outLog
+		proc.Stderr = errLog
+		proc.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 		if err := proc.Start(); err != nil {
 			return fmt.Errorf("starting daemon: %w", err)
@@ -1108,10 +1129,6 @@ var agentStartCmd = &cobra.Command{
 			return fmt.Errorf("daemon exited immediately after start (PID %d)", pid)
 		}
 
-		if err := os.MkdirAll(filepath.Dir(pidFile), 0o755); err != nil {
-			_ = proc.Process.Kill()
-			return fmt.Errorf("creating PID directory: %w", err)
-		}
 		if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0o644); err != nil {
 			_ = proc.Process.Kill()
 			return fmt.Errorf("writing PID file: %w", err)
@@ -1226,64 +1243,17 @@ var agentStatusCmd = &cobra.Command{
 
 		cfg, _ := config.LoadFromDir(repoRoot)
 		outputJSON, _ := cmd.Flags().GetBool("output-json")
-
-		cascade, rateTracker := buildCascadeFromConfig(cfg)
-
-		type providerStatus struct {
-			Name      string  `json:"name"`
-			Available bool    `json:"available"`
-			CostUSD   float64 `json:"dailyCostUSD"`
-			Requests  int     `json:"dailyRequests"`
-		}
-
-		var statuses []providerStatus
-		enabled := cfg != nil && cfg.AssistiveAgent.Enabled
-		for _, pc := range cfg.AssistiveAgent.Providers {
-			if !pc.Enabled {
-				continue
-			}
-			usage, _ := rateTracker.GetDailyUsage(pc.Name)
-			statuses = append(statuses, providerStatus{
-				Name:      pc.Name,
-				Available: true,
-				CostUSD:   usage.CostUSD,
-				Requests:  usage.Requests,
-			})
-		}
-
-		status := struct {
-			Enabled   bool             `json:"enabled"`
-			Providers []providerStatus `json:"providers"`
-			Budget    float64          `json:"dailyBudgetUSD"`
-		}{
-			Enabled:   enabled,
-			Providers: statuses,
-			Budget:    cfg.AssistiveAgent.Budget.DailyUSD,
+		status, err := collectAgentStatus(repoRoot, cfg)
+		if err != nil {
+			return err
 		}
 
 		if outputJSON {
-			data, _ := json.MarshalIndent(status, "", "  ")
-			fmt.Println(string(data))
+			fmt.Println(marshalAgentStatus(status))
 			return nil
 		}
 
-		fmt.Printf("Assistive Agent: %s\n", map[bool]string{true: "enabled", false: "disabled"}[enabled])
-
-		// Show daemon status
-		pidFile := filepath.Join(repoRoot, ".plexium", "daemon.pid")
-		if pid, pidErr := readPIDFile(pidFile); pidErr == nil && processAlive(pid) {
-			fmt.Printf("Daemon: running (PID %d)\n", pid)
-		} else {
-			fmt.Println("Daemon: stopped")
-		}
-
-		fmt.Printf("Daily budget: $%.2f\n\n", status.Budget)
-		fmt.Println("Providers:")
-		for _, s := range statuses {
-			fmt.Printf("  %s: available=%v requests=%d cost=$%.4f\n", s.Name, s.Available, s.Requests, s.CostUSD)
-		}
-
-		_ = cascade // cascade built for future health check expansion
+		fmt.Print(formatAgentStatus(status))
 		return nil
 	},
 }
@@ -1432,7 +1402,7 @@ var orchestrateCmd = &cobra.Command{
 
 		for _, role := range roles {
 			prompt := fmt.Sprintf("Wiki maintenance for issue %s. Role: %s. Workspace: %s", issueID, role, wt.Path)
-			result, runErr := runner.Run(context.Background(), role, prompt, nil)
+			result, runErr := runner.Run(context.Background(), role, prompt, nil, wt.Path)
 			if runErr != nil {
 				fmt.Fprintf(os.Stderr, "  %s: failed (%v)\n", role, runErr)
 				continue
@@ -1693,14 +1663,18 @@ var agentSetupCmd = &cobra.Command{
 			return err
 		}
 		result, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{
-			APIKey: apiKey,
-			Stdin:  cmd.InOrStdin(),
-			Model:  strings.TrimSpace(mustGetString(cmd, "model")),
-			Stdout: cmd.OutOrStdout(),
-			Stderr: cmd.ErrOrStderr(),
+			APIKey:         apiKey,
+			Stdin:          cmd.InOrStdin(),
+			Model:          strings.TrimSpace(mustGetString(cmd, "model")),
+			DailyBudgetUSD: resolveSetupBudget(cmd),
+			Stdout:         cmd.OutOrStdout(),
+			Stderr:         cmd.ErrOrStderr(),
 		})
 		if err != nil {
 			return fmt.Errorf("setup failed: %w", err)
+		}
+		if err := applySetupExecutionMode(repoRoot, strings.TrimSpace(mustGetString(cmd, "execution-mode"))); err != nil {
+			return err
 		}
 
 		fmt.Println()
@@ -1759,9 +1733,53 @@ func resolveSetupAPIKey(cmd *cobra.Command, stdin io.Reader) (string, error) {
 	return "", nil
 }
 
+func resolveSetupBudget(cmd *cobra.Command) *float64 {
+	if !cmd.Flags().Changed("daily-budget-usd") {
+		return nil
+	}
+	value, _ := cmd.Flags().GetFloat64("daily-budget-usd")
+	return &value
+}
+
 func mustGetString(cmd *cobra.Command, name string) string {
 	value, _ := cmd.Flags().GetString(name)
 	return value
+}
+
+func applySetupExecutionMode(repoRoot, mode string) error {
+	if mode == "" {
+		return nil
+	}
+
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		return fmt.Errorf("load config for execution mode update: %w", err)
+	}
+
+	switch mode {
+	case "coding-agent-primary", "provider-primary":
+	default:
+		return fmt.Errorf("invalid --execution-mode %q (expected coding-agent-primary or provider-primary)", mode)
+	}
+
+	if mode == "provider-primary" {
+		hasProvider := false
+		for _, provider := range cfg.AssistiveAgent.Providers {
+			if provider.Enabled {
+				hasProvider = true
+				break
+			}
+		}
+		if !hasProvider {
+			return fmt.Errorf("provider-primary requires at least one enabled assistive provider")
+		}
+	}
+
+	cfg.Daemon.ExecutionMode = mode
+	if err := config.SaveToDir(repoRoot, cfg); err != nil {
+		return fmt.Errorf("save execution mode: %w", err)
+	}
+	return nil
 }
 
 func main() {

@@ -5,9 +5,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/Clarit-AI/Plexium/internal/agent"
+	"github.com/Clarit-AI/Plexium/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -19,6 +22,9 @@ type DaemonOpts struct {
 	RepoRoot      string
 	PollInterval  time.Duration // default 5m
 	MaxConcurrent int           // default 2
+	RunnerName    string
+	ExecutionMode string
+	Config        *config.Config
 	Watches       WatchOpts
 }
 
@@ -40,9 +46,9 @@ type WatchDef struct {
 
 // TickAction records one action taken during a daemon tick.
 type TickAction struct {
-	Watch   string `json:"watch"`            // staleness | lint | ingest | debt
-	Action  string `json:"action"`           // what was done
-	Target  string `json:"target"`           // file/page affected
+	Watch   string `json:"watch"`  // staleness | lint | ingest | debt
+	Action  string `json:"action"` // what was done
+	Target  string `json:"target"` // file/page affected
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
 }
@@ -59,13 +65,19 @@ type Daemon struct {
 	workspace     *WorkspaceMgr
 	tracker       TrackerAdapter
 	runner        RunnerAdapter
+	cascade       *agent.ProviderCascade
+	rateTracker   *agent.RateLimitTracker
 	pollInterval  time.Duration
 	maxConcurrent int
 	stopCh        chan struct{}
+	stopOnce      sync.Once
+	ctxMu         sync.RWMutex
+	runCtx        context.Context
+	runCancel     context.CancelFunc
 }
 
 // NewDaemon creates a Daemon with sensible defaults for zero-value fields.
-func NewDaemon(opts DaemonOpts, workspace *WorkspaceMgr, tracker TrackerAdapter, runner RunnerAdapter) *Daemon {
+func NewDaemon(opts DaemonOpts, workspace *WorkspaceMgr, tracker TrackerAdapter, runner RunnerAdapter, cascade *agent.ProviderCascade, rateTracker *agent.RateLimitTracker) *Daemon {
 	if opts.PollInterval <= 0 {
 		opts.PollInterval = 5 * time.Minute
 	}
@@ -77,6 +89,8 @@ func NewDaemon(opts DaemonOpts, workspace *WorkspaceMgr, tracker TrackerAdapter,
 		workspace:     workspace,
 		tracker:       tracker,
 		runner:        runner,
+		cascade:       cascade,
+		rateTracker:   rateTracker,
 		pollInterval:  opts.PollInterval,
 		maxConcurrent: opts.MaxConcurrent,
 		stopCh:        make(chan struct{}),
@@ -86,166 +100,55 @@ func NewDaemon(opts DaemonOpts, workspace *WorkspaceMgr, tracker TrackerAdapter,
 // Run starts the poll loop. It executes one tick immediately, then ticks on
 // every PollInterval. It exits when ctx is cancelled or Stop() is called.
 func (d *Daemon) Run(ctx context.Context) error {
-	// Initial tick.
-	d.tick()
+	runCtx, cancel := context.WithCancel(ctx)
+	d.setRunContext(runCtx, cancel)
+	defer d.clearRunContext()
+
+	d.writeLifecycleSnapshot("running")
+	d.runTick(runCtx)
 
 	ticker := time.NewTicker(d.pollInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-runCtx.Done():
+			select {
+			case <-d.stopCh:
+				return nil
+			default:
+				return runCtx.Err()
+			}
 		case <-d.stopCh:
 			return nil
 		case <-ticker.C:
-			d.tick()
+			d.runTick(runCtx)
 		}
 	}
 }
 
 // Stop signals the daemon to exit its Run loop.
 func (d *Daemon) Stop() {
-	select {
-	case d.stopCh <- struct{}{}:
-	default:
-	}
+	d.stopOnce.Do(func() {
+		close(d.stopCh)
+		d.cancelRunContext()
+	})
 }
 
 // tick runs all enabled watches and returns the actions taken.
-func (d *Daemon) tick() []TickAction {
-	var actions []TickAction
-
-	if d.config.Watches.Staleness.Enabled {
-		actions = append(actions, d.checkStaleness()...)
-	}
-	if d.config.Watches.Lint.Enabled {
-		actions = append(actions, d.checkLint()...)
-	}
-	if d.config.Watches.Ingest.Enabled {
-		actions = append(actions, d.checkIngest()...)
-	}
-	if d.config.Watches.Debt.Enabled {
-		actions = append(actions, d.checkDebt()...)
-	}
-
-	return actions
-}
-
-// ---------------------------------------------------------------------------
-// Watch: staleness
-// ---------------------------------------------------------------------------
-
-// checkStaleness scans .wiki/ for markdown files whose modification time
-// exceeds the configured threshold.
-func (d *Daemon) checkStaleness() []TickAction {
-	threshold := parseDuration(d.config.Watches.Staleness.Threshold, 7*24*time.Hour)
-	cutoff := time.Now().Add(-threshold)
-	wikiRoot := filepath.Join(d.config.RepoRoot, ".wiki")
-
-	var actions []TickAction
-
-	entries, err := os.ReadDir(wikiRoot)
-	if err != nil {
-		return []TickAction{{
-			Watch: "staleness", Action: "scan", Target: wikiRoot,
-			Success: false, Error: fmt.Sprintf("readdir: %v", err),
-		}}
-	}
-
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		if strings.HasPrefix(e.Name(), "_") {
-			continue // skip control files (_schema.md, _index.md, _log.md)
-		}
-
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-
-		if info.ModTime().Before(cutoff) {
-			action := d.handleAction("staleness", d.config.Watches.Staleness.Action, e.Name())
-			actions = append(actions, action)
-		}
-	}
-
-	return actions
-}
-
-// ---------------------------------------------------------------------------
-// Watch: lint (stub — delegates to runner)
-// ---------------------------------------------------------------------------
-
-func (d *Daemon) checkLint() []TickAction {
-	// In a full implementation this would run `plexium lint --deterministic`
-	// and parse the output. For now it logs the intent.
-	return []TickAction{{
-		Watch:   "lint",
-		Action:  d.config.Watches.Lint.Action,
-		Target:  ".wiki/",
-		Success: true,
-	}}
-}
-
-// ---------------------------------------------------------------------------
-// Watch: ingest
-// ---------------------------------------------------------------------------
-
-// checkIngest looks for files in .wiki/raw/ that need ingestion.
-func (d *Daemon) checkIngest() []TickAction {
-	rawDir := filepath.Join(d.config.RepoRoot, ".wiki", "raw")
-	entries, err := os.ReadDir(rawDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // no raw dir → nothing to ingest
-		}
-		return []TickAction{{
-			Watch: "ingest", Action: "scan", Target: rawDir,
-			Success: false, Error: fmt.Sprintf("readdir: %v", err),
-		}}
-	}
-
-	var actions []TickAction
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		action := d.handleAction("ingest", d.config.Watches.Ingest.Action, e.Name())
-		actions = append(actions, action)
+func (d *Daemon) tick(ctx context.Context) []TickAction {
+	jobs, actions := d.discoverJobs()
+	if len(jobs) > 0 && d.canExecuteJobs() {
+		actions = append(actions, d.executeJob(ctx, jobs[0]))
 	}
 	return actions
 }
 
-// ---------------------------------------------------------------------------
-// Watch: debt
-// ---------------------------------------------------------------------------
-
-// checkDebt counts lines containing "WIKI-DEBT" in _log.md and fires if the
-// count exceeds the threshold.
-func (d *Daemon) checkDebt() []TickAction {
-	logPath := filepath.Join(d.config.RepoRoot, ".wiki", "_log.md")
-	count, err := countDebtEntries(logPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return []TickAction{{
-			Watch: "debt", Action: "scan", Target: logPath,
-			Success: false, Error: fmt.Sprintf("read log: %v", err),
-		}}
-	}
-
-	maxDebt := parseIntThreshold(d.config.Watches.Debt.Threshold, 10)
-	if count >= maxDebt {
-		action := d.handleAction("debt", d.config.Watches.Debt.Action,
-			fmt.Sprintf("WIKI-DEBT count=%d (threshold=%d)", count, maxDebt))
-		return []TickAction{action}
-	}
-
-	return nil
+func (d *Daemon) runTick(ctx context.Context) {
+	startedAt := time.Now()
+	d.writeTickStarted(startedAt)
+	actions := d.tick(ctx)
+	d.writeTickCompleted(startedAt, actions)
 }
 
 // countDebtEntries counts lines containing "WIKI-DEBT" in the given file.
@@ -292,6 +195,11 @@ func (d *Daemon) handleAction(watch, action, target string) TickAction {
 		}
 
 	case "auto-sync", "auto-fix", "auto-ingest":
+		if !d.canExecuteJobs() || d.runner == nil || strings.TrimSpace(d.config.RunnerName) == "" || d.config.RunnerName == "noop" {
+			ta.Success = false
+			ta.Error = "execution skipped: no coding-agent runner configured"
+			return ta
+		}
 		active, err := d.workspace.ActiveCount()
 		if err != nil {
 			ta.Success = false
@@ -313,7 +221,7 @@ func (d *Daemon) handleAction(watch, action, target string) TickAction {
 		}
 
 		prompt := fmt.Sprintf("Run %s on target: %s", action, target)
-		_, runErr := d.runner.Run(context.Background(), watch, prompt, nil)
+		_, runErr := d.runner.Run(d.lifecycleContext(), watch, prompt, nil, wt.Path)
 
 		if runErr != nil {
 			_ = d.workspace.UpdateStatus(wt.ID, "failed")
@@ -332,6 +240,38 @@ func (d *Daemon) handleAction(watch, action, target string) TickAction {
 	}
 
 	return ta
+}
+
+func (d *Daemon) setRunContext(ctx context.Context, cancel context.CancelFunc) {
+	d.ctxMu.Lock()
+	defer d.ctxMu.Unlock()
+	d.runCtx = ctx
+	d.runCancel = cancel
+}
+
+func (d *Daemon) clearRunContext() {
+	d.ctxMu.Lock()
+	defer d.ctxMu.Unlock()
+	d.runCtx = nil
+	d.runCancel = nil
+}
+
+func (d *Daemon) cancelRunContext() {
+	d.ctxMu.RLock()
+	cancel := d.runCancel
+	d.ctxMu.RUnlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (d *Daemon) lifecycleContext() context.Context {
+	d.ctxMu.RLock()
+	defer d.ctxMu.RUnlock()
+	if d.runCtx != nil {
+		return d.runCtx
+	}
+	return context.Background()
 }
 
 // ---------------------------------------------------------------------------
@@ -372,4 +312,198 @@ func parseIntThreshold(s string, defaultVal int) int {
 		return n
 	}
 	return defaultVal
+}
+
+func (d *Daemon) writeLifecycleSnapshot(state string) {
+	snapshot := d.loadOrInitSnapshot()
+	if snapshot.StartedAt.IsZero() {
+		snapshot.StartedAt = time.Now()
+	}
+	d.applySnapshotDefaults(snapshot)
+	snapshot.State = state
+	d.refreshJobCounts(snapshot)
+	_ = saveStatusSnapshot(d.config.RepoRoot, snapshot)
+}
+
+func (d *Daemon) writeTickStarted(startedAt time.Time) {
+	snapshot := d.loadOrInitSnapshot()
+	if snapshot.StartedAt.IsZero() {
+		snapshot.StartedAt = startedAt
+	}
+	d.applySnapshotDefaults(snapshot)
+	snapshot.State = "ticking"
+	snapshot.LastTickStartedAt = startedAt
+	d.refreshJobCounts(snapshot)
+	_ = saveStatusSnapshot(d.config.RepoRoot, snapshot)
+}
+
+func (d *Daemon) writeTickCompleted(startedAt time.Time, actions []TickAction) {
+	snapshot := d.loadOrInitSnapshot()
+
+	completedAt := time.Now()
+	failures := 0
+	recorded := make([]RecordedTickAction, 0, len(actions))
+	for _, action := range actions {
+		if !action.Success {
+			failures++
+		}
+		recorded = append(recorded, RecordedTickAction{
+			At:      completedAt,
+			Watch:   action.Watch,
+			Action:  action.Action,
+			Target:  action.Target,
+			Success: action.Success,
+			Error:   action.Error,
+		})
+	}
+
+	d.applySnapshotDefaults(snapshot)
+	snapshot.State = "idle"
+	if snapshot.StartedAt.IsZero() {
+		snapshot.StartedAt = startedAt
+	}
+	snapshot.LastTickStartedAt = startedAt
+	snapshot.LastTickCompletedAt = completedAt
+	snapshot.LastTickDurationMs = completedAt.Sub(startedAt).Milliseconds()
+	snapshot.LastTickActionCount = len(actions)
+	snapshot.LastTickFailureCount = failures
+	snapshot.TickCount++
+	snapshot.RecentActions = append(recorded, snapshot.RecentActions...)
+	if len(snapshot.RecentActions) > maxRecentActions {
+		snapshot.RecentActions = snapshot.RecentActions[:maxRecentActions]
+	}
+	d.refreshJobCounts(snapshot)
+	_ = saveStatusSnapshot(d.config.RepoRoot, snapshot)
+}
+
+func (d *Daemon) loadOrInitSnapshot() *StatusSnapshot {
+	snapshot, _ := LoadStatusSnapshot(d.config.RepoRoot)
+	if snapshot == nil {
+		snapshot = &StatusSnapshot{}
+	}
+	return snapshot
+}
+
+func (d *Daemon) canExecuteJobs() bool {
+	switch normalizeExecutionMode(d.config.ExecutionMode) {
+	case executionModeProviderPrimary:
+		return d.cascade != nil
+	default:
+		return d.runner != nil && strings.TrimSpace(d.config.RunnerName) != "" && d.config.RunnerName != "noop"
+	}
+}
+
+func (d *Daemon) applySnapshotDefaults(snapshot *StatusSnapshot) {
+	snapshot.Runner = d.config.RunnerName
+	snapshot.ExecutionMode = normalizeExecutionMode(d.config.ExecutionMode)
+	snapshot.PollIntervalSeconds = int(d.pollInterval / time.Second)
+	snapshot.MaxConcurrent = d.maxConcurrent
+	snapshot.Watches = []WatchSnapshot{
+		{Name: "staleness", Enabled: d.config.Watches.Staleness.Enabled, Action: d.config.Watches.Staleness.Action, Threshold: d.config.Watches.Staleness.Threshold},
+		{Name: "lint", Enabled: d.config.Watches.Lint.Enabled, Action: d.config.Watches.Lint.Action, Threshold: d.config.Watches.Lint.Threshold},
+		{Name: "ingest", Enabled: d.config.Watches.Ingest.Enabled, Action: d.config.Watches.Ingest.Action, Threshold: d.config.Watches.Ingest.Threshold},
+		{Name: "debt", Enabled: d.config.Watches.Debt.Enabled, Action: d.config.Watches.Debt.Action, Threshold: d.config.Watches.Debt.Threshold},
+	}
+}
+
+func (d *Daemon) refreshJobCounts(snapshot *StatusSnapshot) {
+	worktrees, err := d.workspace.List()
+	if err != nil {
+		return
+	}
+	counts := JobCountsSnapshot{}
+	for _, wt := range worktrees {
+		switch wt.Status {
+		case jobStateQueued:
+			counts.Queued++
+		case "running":
+			counts.Running++
+		case "completed":
+			counts.Completed++
+		case "failed":
+			counts.Failed++
+		case jobStateAttentionNeeded:
+			counts.AttentionNeeded++
+		}
+	}
+	if snapshot.CurrentJob != nil && snapshot.CurrentJob.State == jobStateQueued && counts.Queued == 0 {
+		counts.Queued = 1
+	}
+	if snapshot.CurrentJob != nil && snapshot.CurrentJob.State == jobStateRunning && counts.Running == 0 {
+		counts.Running = 1
+	}
+	snapshot.JobCounts = counts
+}
+
+func cloneJobSnapshot(job *DaemonJobSnapshot) *DaemonJobSnapshot {
+	if job == nil {
+		return nil
+	}
+	cp := *job
+	if job.ChangedFiles != nil {
+		cp.ChangedFiles = append([]string{}, job.ChangedFiles...)
+	}
+	if job.AppliedFiles != nil {
+		cp.AppliedFiles = append([]string{}, job.AppliedFiles...)
+	}
+	return &cp
+}
+
+func (d *Daemon) persistCurrentJob(job *DaemonJobSnapshot) {
+	snapshot := d.loadOrInitSnapshot()
+	d.applySnapshotDefaults(snapshot)
+	snapshot.State = "working"
+	snapshot.CurrentActor = job.PrimaryActor
+	snapshot.DelegatedActor = job.DelegatedActor
+	snapshot.CurrentJob = cloneJobSnapshot(job)
+	d.refreshJobCounts(snapshot)
+	_ = saveStatusSnapshot(d.config.RepoRoot, snapshot)
+}
+
+func (d *Daemon) persistJobPhase(job *DaemonJobSnapshot, phase string) {
+	job.Phase = phase
+	snapshot := d.loadOrInitSnapshot()
+	d.applySnapshotDefaults(snapshot)
+	snapshot.State = "working"
+	snapshot.CurrentActor = job.PrimaryActor
+	snapshot.DelegatedActor = job.DelegatedActor
+	snapshot.CurrentJob = cloneJobSnapshot(job)
+	d.refreshJobCounts(snapshot)
+	_ = saveStatusSnapshot(d.config.RepoRoot, snapshot)
+}
+
+func (d *Daemon) persistCompletedJob(job *DaemonJobSnapshot) {
+	snapshot := d.loadOrInitSnapshot()
+	d.applySnapshotDefaults(snapshot)
+	snapshot.State = "idle"
+	snapshot.CurrentActor = job.PrimaryActor
+	snapshot.DelegatedActor = job.DelegatedActor
+	snapshot.CurrentJob = nil
+	snapshot.LastCompletedJob = cloneJobSnapshot(job)
+	d.refreshJobCounts(snapshot)
+	_ = saveStatusSnapshot(d.config.RepoRoot, snapshot)
+}
+
+func (d *Daemon) persistFailedJob(job *DaemonJobSnapshot) {
+	snapshot := d.loadOrInitSnapshot()
+	d.applySnapshotDefaults(snapshot)
+	snapshot.State = "idle"
+	snapshot.CurrentActor = job.PrimaryActor
+	snapshot.DelegatedActor = job.DelegatedActor
+	snapshot.CurrentJob = nil
+	snapshot.LastFailure = cloneJobSnapshot(job)
+	d.refreshJobCounts(snapshot)
+	_ = saveStatusSnapshot(d.config.RepoRoot, snapshot)
+}
+
+func (d *Daemon) persistAttentionJob(job *DaemonJobSnapshot) {
+	snapshot := d.loadOrInitSnapshot()
+	d.applySnapshotDefaults(snapshot)
+	snapshot.State = "idle"
+	snapshot.CurrentActor = job.PrimaryActor
+	snapshot.DelegatedActor = job.DelegatedActor
+	snapshot.CurrentJob = nil
+	snapshot.LastCompletedJob = cloneJobSnapshot(job)
+	d.refreshJobCounts(snapshot)
+	_ = saveStatusSnapshot(d.config.RepoRoot, snapshot)
 }

@@ -538,13 +538,13 @@ plexium pageindex connect codex --write-config
 
 ### `plexium agent status` [Stable]
 
-Show provider cascade health and cost tracking.
+Show daemon activity, provider health, and cost tracking.
 
 ```bash
 plexium agent status
 ```
 
-Displays each configured provider's health, daily request counts, spend, and rate limit state from `.plexium/agent-state.json`.
+Displays the daemon runner, watches, recent activity, worktree counts, and each configured provider's health plus daily usage from `.plexium/agent-state.json`.
 
 ---
 
@@ -572,7 +572,7 @@ Show daily spend per provider.
 plexium agent spend
 ```
 
-Loads state from `.plexium/agent-state.json` and compares spend against the configured daily budget.
+Loads state from `.plexium/agent-state.json` and compares spend against the configured daily budget when one is set. A budget of `0` means unlimited.
 
 ---
 
@@ -599,9 +599,9 @@ plexium bootstrap
 
 ---
 
-### `plexium agent start` [Stub]
+### `plexium agent start` [Experimental]
 
-Prints a message. Does not start a background process.
+Starts the background daemon for the current repository and writes `.plexium/daemon.pid`.
 
 ```bash
 plexium agent start
@@ -609,9 +609,9 @@ plexium agent start
 
 ---
 
-### `plexium agent stop` [Stub]
+### `plexium agent stop` [Experimental]
 
-Prints a message. Does not stop anything.
+Stops the background daemon referenced by `.plexium/daemon.pid`.
 
 ```bash
 plexium agent stop

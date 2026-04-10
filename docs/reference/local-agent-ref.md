@@ -206,10 +206,10 @@ ollama serve
     --chat-template-kwargs '{"enable_thinking":false}' \
     --ctx-size 32768
 
-# Option C: plexium manages it
-plexium agent start                   # Starts Ollama with configured model
-plexium agent status                  # Check if local agent is running
-plexium agent stop                    # Stop the local agent
+# Option C: plexium manages the background daemon
+plexium agent start                   # Starts the daemon with the configured runner/watches
+plexium agent status                  # Check daemon and provider state
+plexium agent stop                    # Stop the daemon
 ```
 
 ### The System Prompt for the Local Agent
@@ -458,9 +458,9 @@ localAgent:
 
 | Command | Description |
 |---------|-------------|
-| `plexium agent start` | Start the local assistive agent (launches Ollama if needed) |
-| `plexium agent stop` | Stop the local agent |
-| `plexium agent status` | Check local agent health, model loaded, memory usage |
+| `plexium agent start` | Start the background daemon with the configured runner and watches |
+| `plexium agent stop` | Stop the background daemon |
+| `plexium agent status` | Check daemon status plus provider health and spend |
 | `plexium agent benchmark` | Run a diagnostic task set to verify local agent quality |
 
 ### Add to Phase 3 Scope (§22)
@@ -488,7 +488,7 @@ localAgent:
 
 ```
 ### Local Agent
-- [ ] `plexium agent start` launches Ollama and loads configured model
+- [ ] `plexium agent start` launches the background daemon with the configured runner
 - [ ] `plexium agent status` reports model name, memory usage, and health
 - [ ] Tasks routed to local agent produce valid YAML frontmatter
 - [ ] Tasks routed to local agent produce valid JSON manifest updates

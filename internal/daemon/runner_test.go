@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,7 +45,7 @@ func TestBuildPrompt_EmptyRole(t *testing.T) {
 
 func TestNoOpRunner_ReturnsEmptyResult(t *testing.T) {
 	runner := NewNoOpRunner()
-	result, err := runner.Run(context.Background(), "coder", "do something", []string{"page.md"})
+	result, err := runner.Run(context.Background(), "coder", "do something", []string{"page.md"}, "")
 
 	require.NoError(t, err)
 	assert.Equal(t, "", result.Output)
@@ -126,7 +127,7 @@ printf 'codex final output' > "$out"
 	t.Setenv("CODEX_TEST_LOG", logPath)
 
 	runner := NewCodexRunner("o3")
-	result, err := runner.Run(context.Background(), "coder", "fix bug", []string{"modules/auth.md"})
+	result, err := runner.Run(context.Background(), "coder", "fix bug", []string{"modules/auth.md"}, "")
 	require.NoError(t, err)
 	assert.Equal(t, "codex final output", result.Output)
 
@@ -140,11 +141,43 @@ printf 'codex final output' > "$out"
 	assert.Contains(t, got, "o3")
 }
 
+func TestCodexRunner_RunSetsWorkingDirectory(t *testing.T) {
+	binDir := t.TempDir()
+	workdir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "codex-pwd.txt")
+
+	script := `#!/bin/sh
+pwd > "$CODEX_TEST_PWD"
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output-last-message" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+done
+printf 'codex final output' > "$out"
+`
+	scriptPath := filepath.Join(binDir, "codex")
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CODEX_TEST_PWD", logPath)
+
+	runner := NewCodexRunner("o3")
+	_, err := runner.Run(context.Background(), "coder", "fix bug", []string{"modules/auth.md"}, workdir)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	assert.Equal(t, workdir, strings.TrimSpace(string(data)))
+}
+
 func TestCodexRunner_RunReturnsResultWhenCLIIsMissing(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
 	runner := NewCodexRunner("o3")
-	result, err := runner.Run(context.Background(), "coder", "fix bug", nil)
+	result, err := runner.Run(context.Background(), "coder", "fix bug", nil, "")
 	require.Error(t, err)
 	require.NotNil(t, result)
 	assert.Contains(t, err.Error(), "codex CLI not found")
@@ -165,7 +198,7 @@ exit 7
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	runner := NewCodexRunner("")
-	result, err := runner.Run(context.Background(), "coder", "fix bug", nil)
+	result, err := runner.Run(context.Background(), "coder", "fix bug", nil, "")
 	require.Error(t, err)
 	require.NotNil(t, result)
 	assert.Contains(t, err.Error(), "codex exec failed")
@@ -194,7 +227,7 @@ rm -f "$out"
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	runner := NewCodexRunner("")
-	result, err := runner.Run(context.Background(), "coder", "fix bug", nil)
+	result, err := runner.Run(context.Background(), "coder", "fix bug", nil, "")
 	require.Error(t, err)
 	require.NotNil(t, result)
 	assert.Contains(t, err.Error(), "reading Codex final output")

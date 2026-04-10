@@ -110,6 +110,13 @@ func (s *Scanner) Scan(root string) ([]File, error) {
 			isSymlink = true
 		}
 
+		// Skip special filesystem entries like sockets, devices, and named pipes.
+		// They are not readable repository content and can fail with errors such as
+		// "operation not supported on socket" when scanned as ordinary files.
+		if !info.IsDir() && !isSymlink && !info.Mode().IsRegular() {
+			return nil
+		}
+
 		// Check exclude patterns first (exclude takes precedence)
 		if s.matches(relPath, s.exclude) {
 			if info.IsDir() {

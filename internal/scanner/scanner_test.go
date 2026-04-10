@@ -1,8 +1,10 @@
 package scanner
 
 import (
+	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,11 +32,11 @@ func TestScanner_Scan(t *testing.T) {
 
 	// Create test files
 	files := map[string]string{
-		"src/main.go":         "package main",
-		"src/auth/login.go":   "package auth",
-		"docs/guide.md":       "# Guide",
-		"docs/guides/api.md":  "# API Guide",
-		"README.md":           "# Readme",
+		"src/main.go":        "package main",
+		"src/auth/login.go":  "package auth",
+		"docs/guide.md":      "# Guide",
+		"docs/guides/api.md": "# API Guide",
+		"README.md":          "# Readme",
 	}
 	for path, content := range files {
 		err = os.WriteFile(filepath.Join(tmpDir, path), []byte(content), 0644)
@@ -126,6 +128,40 @@ func TestScanner_Scan_DeterministicOrder(t *testing.T) {
 
 	// Should be sorted alphabetically
 	assert.Equal(t, []string{"src/a-file.go", "src/m-file.go", "src/z-file.go"}, filepaths(results))
+}
+
+func TestScanner_Scan_SkipsUnixSocket(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix sockets are not supported on Windows")
+	}
+
+	tmpDir := t.TempDir()
+
+	err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0o755)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# Readme"), 0o644)
+	require.NoError(t, err)
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	t.Cleanup(func() {
+		_ = os.Chdir(cwd)
+	})
+
+	listener, err := net.Listen("unix", filepath.Join(".beads", "bd.sock"))
+	require.NoError(t, err)
+	defer listener.Close()
+
+	s, err := New([]string{"**/*"}, nil)
+	require.NoError(t, err)
+
+	results, err := s.Scan(tmpDir)
+	require.NoError(t, err)
+
+	paths := filepaths(results)
+	assert.Contains(t, paths, "README.md")
+	assert.NotContains(t, paths, ".beads/bd.sock")
 }
 
 func TestExpandHome(t *testing.T) {

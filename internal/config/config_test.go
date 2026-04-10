@@ -172,6 +172,17 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr:                   false,
 			expectedCapabilityProfile: "frontier-large-context",
 		},
+		{
+			name: "invalid execution mode",
+			cfg: Config{
+				Version: 1,
+				Wiki:    Wiki{Root: ".wiki"},
+				Sources: Sources{Include: []string{"**/*.go"}},
+				Daemon:  DaemonConfig{ExecutionMode: "typo-mode"},
+			},
+			wantErr: true,
+			errMsg:  "daemon.executionMode",
+		},
 	}
 
 	for _, tt := range tests {
