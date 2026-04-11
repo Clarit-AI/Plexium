@@ -484,7 +484,7 @@ func (d *Daemon) persistCompletedJob(job *DaemonJobSnapshot) {
 	_ = saveStatusSnapshot(d.config.RepoRoot, snapshot)
 }
 
-func (d *Daemon) persistFailedJob(job *DaemonJobSnapshot) {
+func (d *Daemon) persistFailedJob(job *DaemonJobSnapshot) error {
 	snapshot := d.loadOrInitSnapshot()
 	d.applySnapshotDefaults(snapshot)
 	snapshot.State = "idle"
@@ -493,7 +493,7 @@ func (d *Daemon) persistFailedJob(job *DaemonJobSnapshot) {
 	snapshot.CurrentJob = nil
 	snapshot.LastFailure = cloneJobSnapshot(job)
 	d.refreshJobCounts(snapshot)
-	_ = saveStatusSnapshot(d.config.RepoRoot, snapshot)
+	return saveStatusSnapshot(d.config.RepoRoot, snapshot)
 }
 
 func (d *Daemon) persistAttentionJob(job *DaemonJobSnapshot) {

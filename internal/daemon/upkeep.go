@@ -458,7 +458,7 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 		return action
 	}
 
-	if a, cancelled := d.abortIfCancelled(ctx, wt, jobSnapshot, "buildContextPages", &action); cancelled {
+	if a, cancelled, _ := d.abortIfCancelled(ctx, wt, jobSnapshot, "buildContextPages", &action); cancelled {
 		return a
 	}
 
@@ -482,7 +482,7 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 		return action
 	}
 
-	if a, cancelled := d.abortIfCancelled(ctx, wt, result, "execution", &action); cancelled {
+	if a, cancelled, _ := d.abortIfCancelled(ctx, wt, result, "execution", &action); cancelled {
 		return a
 	}
 
@@ -499,7 +499,7 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 	result.ChangedFiles = changedFiles
 	d.persistJobPhase(result, jobPhaseValidating)
 
-	if a, cancelled := d.abortIfCancelled(ctx, wt, result, "collectChanges", &action); cancelled {
+	if a, cancelled, _ := d.abortIfCancelled(ctx, wt, result, "collectChanges", &action); cancelled {
 		return a
 	}
 
@@ -523,7 +523,7 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 		return action
 	}
 
-	if a, cancelled := d.abortIfCancelled(ctx, wt, result, "updateManifest", &action); cancelled {
+	if a, cancelled, _ := d.abortIfCancelled(ctx, wt, result, "updateManifest", &action); cancelled {
 		return a
 	}
 
@@ -539,7 +539,7 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 	}
 	result.ChangedFiles = changedFiles
 
-	if a, cancelled := d.abortIfCancelled(ctx, wt, result, "applyPrep", &action); cancelled {
+	if a, cancelled, _ := d.abortIfCancelled(ctx, wt, result, "applyPrep", &action); cancelled {
 		return a
 	}
 
@@ -580,19 +580,33 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 // abortIfCancelled checks whether the context has been cancelled and, if so,
 // marks the job as failed and populates the tick action. Returns true when
 // the caller should return immediately.
-func (d *Daemon) abortIfCancelled(ctx context.Context, wt *Worktree, snapshot *DaemonJobSnapshot, phase string, action *TickAction) (TickAction, bool) {
+func (d *Daemon) abortIfCancelled(ctx context.Context, wt *Worktree, snapshot *DaemonJobSnapshot, phase string, action *TickAction) (TickAction, bool, error) {
 	if ctx.Err() == nil {
-		return TickAction{}, false
+		return TickAction{}, false, nil
 	}
+	var persistErr error
 	if err := d.workspace.UpdateStatus(wt.ID, jobStateFailed); err != nil {
-		fmt.Fprintf(os.Stderr, "daemon: failed to update workspace status on cancellation: %v\n", err)
+		persistErr = fmt.Errorf("update workspace status on cancellation: %w", err)
+		fmt.Fprintf(os.Stderr, "daemon: %v\n", persistErr)
 	}
 	snapshot.State = jobStateFailed
 	snapshot.Error = fmt.Sprintf("cancelled during %s: %v", phase, ctx.Err())
 	snapshot.CompletedAt = time.Now()
-	d.persistFailedJob(snapshot)
-	action.Error = snapshot.Error
-	return *action, true
+	if err := d.persistFailedJob(snapshot); err != nil {
+		pe := fmt.Errorf("persist failed job on cancellation: %w", err)
+		fmt.Fprintf(os.Stderr, "daemon: %v\n", pe)
+		if persistErr != nil {
+			persistErr = fmt.Errorf("%v; %w", persistErr, pe)
+		} else {
+			persistErr = pe
+		}
+	}
+	if persistErr != nil {
+		action.Error = fmt.Sprintf("%s (persistence error: %v)", snapshot.Error, persistErr)
+	} else {
+		action.Error = snapshot.Error
+	}
+	return *action, true, persistErr
 }
 
 func (d *Daemon) buildContextPages(job *upkeepJob) ([]string, error) {
