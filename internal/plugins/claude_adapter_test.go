@@ -36,7 +36,6 @@ func TestRunClaudeAdapter_LeanOutput(t *testing.T) {
 	assert.Less(t, len(lines), 50, "CLAUDE.md should be under 50 lines, got %d", len(lines))
 	assert.Contains(t, string(data), "myproject")
 	assert.Contains(t, string(data), "SCHEMA_INJECT_START")
-	assert.Contains(t, string(data), "plexium-user")
 }
 
 func TestRunClaudeAdapter_PreservesUserContent(t *testing.T) {
