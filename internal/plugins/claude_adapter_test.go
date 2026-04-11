@@ -115,6 +115,26 @@ func TestRunClaudeAdapter_CreatesClaudeHooks(t *testing.T) {
 	assert.FileExists(t, filepath.Join(repoRoot, ".claude", "settings.json"))
 }
 
+func TestExtractSchemaDigest_SkipsFrontmatterComments(t *testing.T) {
+	repoRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(repoRoot, ".wiki"), 0o755))
+
+	schema := "---\nschema-version: 1\n# this is a YAML comment\ntitle: Schema\n---\n# Wiki Schema\nThis is the schema.\n"
+	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, ".wiki", "_schema.md"), []byte(schema), 0o644))
+
+	digest := extractSchemaDigest(repoRoot)
+	assert.Contains(t, digest, "# Wiki Schema", "markdown heading should be included")
+	assert.Contains(t, digest, "This is the schema.", "first paragraph should be included")
+	assert.NotContains(t, digest, "this is a YAML comment", "YAML comment should not appear in digest")
+	assert.NotContains(t, digest, "schema-version", "frontmatter fields should not appear in digest")
+}
+
+func TestExtractSchemaDigest_NoSchema(t *testing.T) {
+	repoRoot := t.TempDir()
+	digest := extractSchemaDigest(repoRoot)
+	assert.Contains(t, digest, "Run `plexium init`")
+}
+
 func TestDetectProjectName_GoMod(t *testing.T) {
 	repoRoot := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, "go.mod"), []byte("module github.com/org/myapp\n"), 0o644))

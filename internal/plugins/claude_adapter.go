@@ -120,17 +120,22 @@ func extractSchemaDigest(repoRoot string) string {
 		return "Run `plexium init` to generate the wiki schema."
 	}
 
-	// Extract first heading and first paragraph
+	// Extract first heading and first paragraph, skipping any YAML frontmatter
 	lines := strings.Split(string(data), "\n")
 	var digest []string
 	inContent := false
+	inFrontmatter := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "---") {
+			inFrontmatter = !inFrontmatter
+			continue
+		}
+		if inFrontmatter {
+			continue // skip YAML comments and fields inside frontmatter
+		}
 		if trimmed == "" && inContent {
 			break
-		}
-		if strings.HasPrefix(trimmed, "---") {
-			continue // skip frontmatter delimiters
 		}
 		if strings.HasPrefix(trimmed, "#") || (inContent && trimmed != "") {
 			digest = append(digest, line)
