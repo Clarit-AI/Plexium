@@ -106,6 +106,13 @@ func ListAdapters(repoRoot string) ([]AdapterInfo, error) {
 	return adapters, nil
 }
 
+// builtinGoAdapters maps adapter names to Go-native implementations that
+// replace plugin.sh execution. Adapters not in this map fall through to
+// shell script execution.
+var builtinGoAdapters = map[string]func(string) error{
+	"claude": RunClaudeAdapter,
+}
+
 // InstallAdapter materializes an adapter into .plexium/plugins and runs it.
 func InstallAdapter(repoRoot, name, pluginPath string) (*InstallResult, error) {
 	manifest, srcDir, builtIn, err := resolveInstallSource(name, pluginPath)
@@ -144,13 +151,20 @@ func InstallAdapter(repoRoot, name, pluginPath string) (*InstallResult, error) {
 		}
 	}
 
-	scriptPath := filepath.Join(stagedDir, "plugin.sh")
-	if err := os.Chmod(scriptPath, 0o755); err != nil {
-		return nil, fmt.Errorf("making plugin executable: %w", err)
-	}
+	// Use Go-native adapter if available, otherwise fall through to plugin.sh
+	if goAdapter, ok := builtinGoAdapters[name]; ok && builtIn {
+		if err := goAdapter(repoRoot); err != nil {
+			return nil, fmt.Errorf("running Go adapter for %s: %w", name, err)
+		}
+	} else {
+		scriptPath := filepath.Join(stagedDir, "plugin.sh")
+		if err := os.Chmod(scriptPath, 0o755); err != nil {
+			return nil, fmt.Errorf("making plugin executable: %w", err)
+		}
 
-	if err := runAdapterScript(repoRoot, scriptPath); err != nil {
-		return nil, err
+		if err := runAdapterScript(repoRoot, scriptPath); err != nil {
+			return nil, err
+		}
 	}
 
 	generatedFile := manifest.InstructionFile

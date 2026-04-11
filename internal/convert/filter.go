@@ -25,6 +25,7 @@ type FilterResult struct {
 // DefaultInclude patterns for conversion.
 var DefaultInclude = []string{
 	"README.md", "**/README.md",
+	"**/*.md",
 	"docs/*.md", "docs/**/*.md", "doc/*.md", "doc/**/*.md",
 	"adr/*.md", "adr/**/*.md", "decisions/*.md", "decisions/**/*.md",
 	"docs/decisions/*.md", "docs/decisions/**/*.md",

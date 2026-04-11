@@ -802,6 +802,9 @@ func loadExistingSetupState(repoRoot, configPath string) (*existingSetupState, e
 	state := &existingSetupState{}
 	data, err := os.ReadFile(configPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return state, nil // fresh install, no config yet
+		}
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 

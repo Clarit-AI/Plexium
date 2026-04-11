@@ -127,12 +127,48 @@ func init() {
 	ciCmd.AddCommand(ciiCheckCmd)
 	hookCmd.AddCommand(hookPreCommitCmd)
 	hookCmd.AddCommand(hookPostCommitCmd)
+	hookCmd.AddCommand(hookPostEditCmd)
 	pageidxCmd.AddCommand(pageidxServeCmd)
 	beadsCmd.AddCommand(beadsLinkCmd)
 	beadsCmd.AddCommand(beadsUnlinkCmd)
 	beadsCmd.AddCommand(beadsPagesCmd)
 	beadsCmd.AddCommand(beadsTasksCmd)
 	beadsCmd.AddCommand(beadsScanCmd)
+
+	// Command groups for organized help output
+	rootCmd.AddGroup(
+		&cobra.Group{ID: "start", Title: "Getting Started"},
+		&cobra.Group{ID: "daily", Title: "Daily Use"},
+		&cobra.Group{ID: "agent", Title: "Agent Management"},
+		&cobra.Group{ID: "advanced", Title: "Advanced"},
+	)
+
+	// Getting Started
+	initCmd.GroupID = "start"
+	convertCmd.GroupID = "start"
+
+	// Daily Use
+	syncCmd.GroupID = "daily"
+	lintCmd.GroupID = "daily"
+	retrieveCmd.GroupID = "daily"
+	compileCmd.GroupID = "daily"
+	doctorCmd.GroupID = "daily"
+
+	// Agent Management
+	agentCmd.GroupID = "agent"
+	daemonCmd.GroupID = "agent"
+
+	// Advanced
+	publishCmd.GroupID = "advanced"
+	ghWikiSyncCmd.GroupID = "advanced"
+	migrateCmd.GroupID = "advanced"
+	ciCmd.GroupID = "advanced"
+	pluginCmd.GroupID = "advanced"
+	hookCmd.GroupID = "advanced"
+	beadsCmd.GroupID = "advanced"
+	orchestrateCmd.GroupID = "advanced"
+	bootstrapCmd.GroupID = "advanced"
+	pageidxCmd.GroupID = "advanced"
 
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(convertCmd)
@@ -168,9 +204,9 @@ var initCmd = &cobra.Command{
 		withBeads, _ := cmd.Flags().GetBool("with-beads")
 		withPageIndex, _ := cmd.Flags().GetBool("with-pageindex")
 
-		repoRoot, err := os.Getwd()
+		repoRoot, err := currentGitRepoRoot()
 		if err != nil {
-			return fmt.Errorf("getting working directory: %w", err)
+			return fmt.Errorf("plexium init requires a git repository — run 'git init' first, then retry")
 		}
 
 		outputJSON, _ := cmd.Flags().GetBool("output-json")
@@ -757,6 +793,20 @@ var hookPostCommitCmd = &cobra.Command{
 			return fmt.Errorf("post-commit hook failed: %w", err)
 		}
 
+		return nil
+	},
+}
+
+var hookPostEditCmd = &cobra.Command{
+	Use:   "post-edit",
+	Short: "Advisory hook: remind agent to update wiki after editing source files",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot, err := os.Getwd()
+		if err != nil {
+			return nil // advisory — never fail
+		}
+		h := hook.NewPostEditHook(repoRoot)
+		_ = h.Run(cmd.InOrStdin())
 		return nil
 	},
 }

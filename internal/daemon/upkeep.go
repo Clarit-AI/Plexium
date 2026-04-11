@@ -458,6 +458,10 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 		return action
 	}
 
+	if a, cancelled, _ := d.abortIfCancelled(ctx, wt, jobSnapshot, "buildContextPages", &action); cancelled {
+		return a
+	}
+
 	var result *DaemonJobSnapshot
 	switch normalizeExecutionMode(d.config.ExecutionMode) {
 	case executionModeProviderPrimary:
@@ -478,6 +482,10 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 		return action
 	}
 
+	if a, cancelled, _ := d.abortIfCancelled(ctx, wt, result, "execution", &action); cancelled {
+		return a
+	}
+
 	changedFiles, err := collectWorkspaceChanges(wt.Path)
 	if err != nil {
 		_ = d.workspace.UpdateStatus(wt.ID, jobStateFailed)
@@ -490,6 +498,10 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 	}
 	result.ChangedFiles = changedFiles
 	d.persistJobPhase(result, jobPhaseValidating)
+
+	if a, cancelled, _ := d.abortIfCancelled(ctx, wt, result, "collectChanges", &action); cancelled {
+		return a
+	}
 
 	if len(changedFiles) == 0 {
 		_ = d.workspace.UpdateStatus(wt.ID, jobStateFailed)
@@ -511,6 +523,10 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 		return action
 	}
 
+	if a, cancelled, _ := d.abortIfCancelled(ctx, wt, result, "updateManifest", &action); cancelled {
+		return a
+	}
+
 	changedFiles, err = collectWorkspaceChanges(wt.Path)
 	if err != nil {
 		_ = d.workspace.UpdateStatus(wt.ID, jobStateFailed)
@@ -522,6 +538,10 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 		return action
 	}
 	result.ChangedFiles = changedFiles
+
+	if a, cancelled, _ := d.abortIfCancelled(ctx, wt, result, "applyPrep", &action); cancelled {
+		return a
+	}
 
 	d.persistJobPhase(result, jobPhaseApplying)
 	appliedFiles, applyOutcome, attentionNeeded, applyErr := applyWorkspaceChanges(d.config.RepoRoot, wt.Path, d.wikiRootRel(), changedFiles)
@@ -555,6 +575,38 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 		action.Target = job.Target
 	}
 	return action
+}
+
+// abortIfCancelled checks whether the context has been cancelled and, if so,
+// marks the job as failed and populates the tick action. Returns true when
+// the caller should return immediately.
+func (d *Daemon) abortIfCancelled(ctx context.Context, wt *Worktree, snapshot *DaemonJobSnapshot, phase string, action *TickAction) (TickAction, bool, error) {
+	if ctx.Err() == nil {
+		return TickAction{}, false, nil
+	}
+	var persistErr error
+	if err := d.workspace.UpdateStatus(wt.ID, jobStateFailed); err != nil {
+		persistErr = fmt.Errorf("update workspace status on cancellation: %w", err)
+		fmt.Fprintf(os.Stderr, "daemon: %v\n", persistErr)
+	}
+	snapshot.State = jobStateFailed
+	snapshot.Error = fmt.Sprintf("cancelled during %s: %v", phase, ctx.Err())
+	snapshot.CompletedAt = time.Now()
+	if err := d.persistFailedJob(snapshot); err != nil {
+		pe := fmt.Errorf("persist failed job on cancellation: %w", err)
+		fmt.Fprintf(os.Stderr, "daemon: %v\n", pe)
+		if persistErr != nil {
+			persistErr = fmt.Errorf("%v; %w", persistErr, pe)
+		} else {
+			persistErr = pe
+		}
+	}
+	if persistErr != nil {
+		action.Error = fmt.Sprintf("%s (persistence error: %v)", snapshot.Error, persistErr)
+	} else {
+		action.Error = snapshot.Error
+	}
+	return *action, true, persistErr
 }
 
 func (d *Daemon) buildContextPages(job *upkeepJob) ([]string, error) {
@@ -700,6 +752,7 @@ func applyWorkspaceChanges(repoRoot, workdir, wikiRoot string, changedFiles []st
 	var applied []string
 	for _, rel := range changedFiles {
 		if !isAllowedApplyPath(rel, wikiRoot) {
+			fmt.Fprintf(os.Stderr, "daemon: skipped file outside wiki scope: %s\n", rel)
 			return nil, fmt.Sprintf("left in workspace for review (%s outside allowed apply scope)", rel), true, nil
 		}
 		src := filepath.Join(workdir, rel)

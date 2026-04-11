@@ -1,0 +1,32 @@
+# Claude Code — {{.ProjectName}}
+
+You are working on a Plexium-managed repository{{if .DetectedStack}} [{{.DetectedStack}}]{{end}}.
+
+Plexium maintains a persistent wiki in `.wiki/` that agents keep up to date.
+
+## Before code changes
+- Read `.wiki/_schema.md` for the wiki constitution and ownership rules
+- Read `.wiki/_index.md` for orientation
+- Read relevant `.wiki/modules/*.md` pages for your work area
+
+## After code changes
+- Update affected wiki pages in `.wiki/`
+- Never modify pages with `ownership: human-authored`
+- Add an entry to `.wiki/_log.md`
+
+## Wiki Schema
+<!-- SCHEMA_INJECT_START -->
+{{.SchemaDigest}}
+<!-- SCHEMA_INJECT_END -->
+
+## Commands
+```
+plexium convert    # Bootstrap wiki from repository
+plexium sync       # Update wiki after source changes
+plexium lint       # Check wiki health
+plexium retrieve   # Query the wiki
+```
+
+## Full Protocol
+Use the `/plexium-user` skill for the complete wiki maintenance workflow.
+Use the `/plexium-dev` skill when contributing to Plexium itself.

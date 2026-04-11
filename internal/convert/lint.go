@@ -73,7 +73,11 @@ func (cl *ConvertLinter) Analyze(pages []PageData, eligible []scanner.File) *Lin
 	if totalEligibleDirs > 0 {
 		result.GapScore = float64(documentedDirs) / float64(totalEligibleDirs)
 	} else {
-		result.GapScore = 1.0
+		if len(pages) > 0 {
+			result.GapScore = 1.0
+		} else {
+			result.GapScore = 0.0
+		}
 	}
 
 	return result
