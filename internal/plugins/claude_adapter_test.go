@@ -135,18 +135,38 @@ func TestRunClaudeAdapter_CreatesClaudeHooks(t *testing.T) {
 			continue
 		}
 		matcher, _ := m["matcher"].(string)
-		if strings.Contains(matcher, "Write") || strings.Contains(matcher, "Edit") {
+		// Support "Write", "Edit", or "Write|Edit" (pipe-separated)
+		isExactMatch := matcher == "Write" || matcher == "Edit"
+		isCombinedMatch := func() bool {
+			for _, part := range strings.Split(matcher, "|") {
+				if part == "Write" || part == "Edit" {
+					return true
+				}
+			}
+			return false
+		}()
+		if isExactMatch || isCombinedMatch {
 			found = true
 			hookSlice, ok := m["hooks"].([]any)
 			require.True(t, ok, "hook entry should have hooks array")
 			require.NotEmpty(t, hookSlice, "hooks array should not be empty")
-			hook, ok := hookSlice[0].(map[string]any)
-			require.True(t, ok, "first hook should be a map")
-			assert.Equal(t, "plexium hook post-edit", hook["command"])
+
+			hasPostEditHook := false
+			for _, h := range hookSlice {
+				hook, ok := h.(map[string]any)
+				if !ok {
+					continue
+				}
+				if hook["command"] == "plexium hook post-edit" {
+					hasPostEditHook = true
+					break
+				}
+			}
+			assert.True(t, hasPostEditHook, "PostToolUse Write|Edit hook should include plexium hook post-edit")
 			break
 		}
 	}
-	assert.True(t, found, "PostToolUse should contain a hook for Write|Edit with plexium hook post-edit")
+	assert.True(t, found, "PostToolUse should contain a hook for Write or Edit")
 }
 
 func TestExtractSchemaDigest_SkipsFrontmatterComments(t *testing.T) {
