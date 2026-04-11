@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,9 @@ func TestRunClaudeAdapter_LeanOutput(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(repoRoot, "CLAUDE.md"))
 	require.NoError(t, err)
 
-	lines := strings.Split(string(data), "\n")
+	// Trim trailing newline to avoid off-by-one from Split's treatment of it
+	content := strings.TrimRight(string(data), "\n")
+	lines := strings.Split(content, "\n")
 	assert.Less(t, len(lines), 50, "CLAUDE.md should be under 50 lines, got %d", len(lines))
 	assert.Contains(t, string(data), "myproject")
 	assert.Contains(t, string(data), "SCHEMA_INJECT_START")
@@ -111,7 +114,39 @@ func TestRunClaudeAdapter_CreatesClaudeHooks(t *testing.T) {
 	err := RunClaudeAdapter(repoRoot)
 	require.NoError(t, err)
 
-	assert.FileExists(t, filepath.Join(repoRoot, ".claude", "settings.json"))
+	settingsPath := filepath.Join(repoRoot, ".claude", "settings.json")
+	assert.FileExists(t, settingsPath)
+
+	data, err := os.ReadFile(settingsPath)
+	require.NoError(t, err)
+
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal(data, &settings))
+
+	hooks, ok := settings["hooks"].(map[string]any)
+	require.True(t, ok, "settings.json should contain a hooks key")
+	postToolUse, ok := hooks["PostToolUse"].([]any)
+	require.True(t, ok, "hooks should contain PostToolUse array")
+
+	found := false
+	for _, entry := range postToolUse {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		matcher, _ := m["matcher"].(string)
+		if strings.Contains(matcher, "Write") || strings.Contains(matcher, "Edit") {
+			found = true
+			hookSlice, ok := m["hooks"].([]any)
+			require.True(t, ok, "hook entry should have hooks array")
+			require.NotEmpty(t, hookSlice, "hooks array should not be empty")
+			hook, ok := hookSlice[0].(map[string]any)
+			require.True(t, ok, "first hook should be a map")
+			assert.Equal(t, "plexium hook post-edit", hook["command"])
+			break
+		}
+	}
+	assert.True(t, found, "PostToolUse should contain a hook for Write|Edit with plexium hook post-edit")
 }
 
 func TestExtractSchemaDigest_SkipsFrontmatterComments(t *testing.T) {
