@@ -42,7 +42,16 @@ detect_stack() {
 DETECTED_STACK="$(detect_stack)"
 PROJECT_NAME="$(basename "$REPO_ROOT")"
 MEMENTO_ENABLED="false"
-if [ -f "$REPO_ROOT/.plexium/config.yml" ] && grep -Eq '^[[:space:]]*memento:[[:space:]]*true[[:space:]]*$' "$REPO_ROOT/.plexium/config.yml"; then
+if [ -f "$REPO_ROOT/.plexium/config.yml" ] && awk '
+  /^[^[:space:]]/ {
+    in_integrations = ($0 ~ /^integrations:/)
+    next
+  }
+  in_integrations && /^[[:space:]]{2}memento:[[:space:]]*true[[:space:]]*$/ {
+    found = 1
+  }
+  END { exit found ? 0 : 1 }
+' "$REPO_ROOT/.plexium/config.yml"; then
   MEMENTO_ENABLED="true"
 fi
 ASSISTIVE_ENABLED="false"
@@ -81,7 +90,7 @@ if [ -f "$REPO_ROOT/.plexium/config.yml" ] && awk '
 fi
 
 project_details_line() {
-  awk '/^## .* Project Details Start Here[[:space:]]*$/ { print NR; exit }' "$1"
+  awk '/^## / && index($0, " Project Details Start Here") { print NR; exit }' "$1"
 }
 
 merge_with_existing() {

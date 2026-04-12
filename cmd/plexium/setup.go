@@ -661,7 +661,7 @@ func maybeConfigureAssistiveProvider(repoRoot, agentName string, opts setupAgent
 			reader := bufio.NewReader(input)
 			if promptYesNo(reader, opts.Stdout, "Review or change assistive provider settings now?", false) {
 				setupResult, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{
-					Stdin:  reader,
+					Stdin:  input,
 					Stdout: opts.Stdout,
 					Stderr: opts.Stderr,
 				})
@@ -718,7 +718,7 @@ func maybeConfigureAssistiveProvider(repoRoot, agentName string, opts setupAgent
 	}
 
 	setupResult, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{
-		Stdin:  reader,
+		Stdin:  input,
 		Stdout: opts.Stdout,
 		Stderr: opts.Stderr,
 	})
@@ -886,6 +886,15 @@ func verifyAgent(repoRoot, agent string) (*verifyResult, error) {
 		Agent:       normalizedAgent,
 		RepoRoot:    repoRoot,
 		ConnectPlan: plan,
+	}
+
+	if isGitWorkTree(repoRoot) && !gitHasCommit(repoRoot) {
+		result.Checks = append(result.Checks, verifyCheck{
+			Name:        "baseline",
+			Status:      "fail",
+			Message:     "git repo has no baseline commit yet",
+			Remediation: "Create an initial commit before running `plexium agent start`.",
+		})
 	}
 
 	doctor := lint.NewDoctor(repoRoot)

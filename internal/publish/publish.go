@@ -2,6 +2,7 @@ package publish
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -351,7 +352,9 @@ func (p *Publisher) getRemoteURL() (string, error) {
 
 func (p *Publisher) resolveRemoteName() (string, error) {
 	if remote, err := p.currentBranchRemote(); err == nil && remote != "" {
-		return remote, nil
+		if p.remoteExists(remote) {
+			return remote, nil
+		}
 	}
 
 	if p.remoteExists("origin") {
@@ -430,20 +433,17 @@ func githubRepoFromRemoteURL(remoteURL string) (string, bool) {
 	remoteURL = strings.TrimSuffix(remoteURL, ".git")
 	remoteURL = strings.TrimSuffix(remoteURL, "/")
 
-	for _, prefix := range []string{"https://github.com/", "http://github.com/"} {
-		if strings.HasPrefix(remoteURL, prefix) {
-			repo := strings.TrimPrefix(remoteURL, prefix)
-			return cleanGitHubRepoName(repo)
+	// URL-style remotes: parse structurally to handle credentials and non-standard ports.
+	if strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") || strings.HasPrefix(remoteURL, "ssh://") {
+		u, err := url.Parse(remoteURL)
+		if err == nil && u.Hostname() == "github.com" {
+			return cleanGitHubRepoName(strings.Trim(u.Path, "/"))
 		}
 	}
 
+	// SCP-style: git@github.com:owner/repo
 	if strings.HasPrefix(remoteURL, "git@github.com:") {
 		repo := strings.TrimPrefix(remoteURL, "git@github.com:")
-		return cleanGitHubRepoName(repo)
-	}
-
-	if strings.HasPrefix(remoteURL, "ssh://git@github.com/") {
-		repo := strings.TrimPrefix(remoteURL, "ssh://git@github.com/")
 		return cleanGitHubRepoName(repo)
 	}
 
@@ -497,22 +497,27 @@ func clearWikiContent(wikiDir string) error {
 	return nil
 }
 
-// toWikiURL converts a git remote URL to its wiki equivalent
+// toWikiURL converts a git remote URL to its wiki equivalent.
+// It rebuilds the wiki URL from the normalized repo name so that
+// authenticated or non-canonical remotes are handled correctly.
 func toWikiURL(remoteURL string) string {
 	repo, ok := githubRepoFromRemoteURL(remoteURL)
 	if !ok {
 		return ""
 	}
 	remoteURL = strings.TrimSpace(remoteURL)
-	switch {
-	case strings.HasPrefix(remoteURL, "http://github.com/"):
-		return "http://github.com/" + repo + ".wiki.git"
-	case strings.HasPrefix(remoteURL, "https://github.com/"):
+
+	// URL-style remotes: detect scheme structurally so credentials/ports don't break matching.
+	if strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") {
 		return "https://github.com/" + repo + ".wiki.git"
-	case strings.HasPrefix(remoteURL, "git@github.com:"):
-		return "git@github.com:" + repo + ".wiki.git"
-	case strings.HasPrefix(remoteURL, "ssh://git@github.com/"):
+	}
+	if strings.HasPrefix(remoteURL, "ssh://") {
 		return "ssh://git@github.com/" + repo + ".wiki.git"
+	}
+
+	// SCP-style
+	if strings.HasPrefix(remoteURL, "git@github.com:") {
+		return "git@github.com:" + repo + ".wiki.git"
 	}
 	return ""
 }

@@ -27,6 +27,10 @@ func readIgnorePatterns(path string) []string {
 			continue
 		}
 		if strings.HasPrefix(pattern, "!") {
+			// Negation rules change meaning for common patterns like
+			// "docs/**" + "!docs/README.md". Since we don't implement
+			// negation semantics, refuse to treat this file as authoritative
+			// when negation rules are present.
 			return nil
 		}
 		patterns = append(patterns, expandIgnorePattern(pattern)...)

@@ -22,11 +22,13 @@ func TestToWikiURL(t *testing.T) {
 	}{
 		{"https", "https://github.com/owner/repo.git", "https://github.com/owner/repo.wiki.git"},
 		{"https no suffix", "https://github.com/owner/repo", "https://github.com/owner/repo.wiki.git"},
-		{"http no suffix", "http://github.com/owner/repo", "http://github.com/owner/repo.wiki.git"},
+		{"http no suffix", "http://github.com/owner/repo", "https://github.com/owner/repo.wiki.git"},
+		{"https with token", "https://ghp_token@github.com/owner/repo.git", "https://github.com/owner/repo.wiki.git"},
 		{"ssh", "git@github.com:owner/repo.git", "git@github.com:owner/repo.wiki.git"},
 		{"ssh no suffix", "git@github.com:owner/repo", "git@github.com:owner/repo.wiki.git"},
 		{"ssh url", "ssh://git@github.com/owner/repo.git", "ssh://git@github.com/owner/repo.wiki.git"},
 		{"ssh url no suffix", "ssh://git@github.com/owner/repo", "ssh://git@github.com/owner/repo.wiki.git"},
+		{"ssh url with port", "ssh://git@github.com:2222/owner/repo.git", "ssh://git@github.com/owner/repo.wiki.git"},
 		{"gitlab", "https://gitlab.com/owner/repo.git", ""},
 	}
 
@@ -193,6 +195,19 @@ func TestGetRemoteURL_PrefersCurrentBranchUpstreamRemote(t *testing.T) {
 	assert.Equal(t, "https://github.com/Clarit-AI/Engram-Langraph-Provider.git", url)
 }
 
+func TestGetRemoteURL_FallsBackWhenBranchRemoteIsStale(t *testing.T) {
+	dir := t.TempDir()
+	initPublishGitRepo(t, dir)
+	runPublishGit(t, dir, "remote", "add", "origin", "https://github.com/Clarit-AI/Engram-Langraph-Provider.git")
+	// Set branch.remote to a name that no longer exists
+	runPublishGit(t, dir, "config", "branch.main.remote", "deleted-remote")
+
+	pub := &Publisher{repoRoot: dir}
+	url, err := pub.getRemoteURL()
+	require.NoError(t, err)
+	assert.Equal(t, "https://github.com/Clarit-AI/Engram-Langraph-Provider.git", url)
+}
+
 func TestGitHubRepoFromRemoteURL(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -202,8 +217,10 @@ func TestGitHubRepoFromRemoteURL(t *testing.T) {
 	}{
 		{name: "https", remote: "https://github.com/Clarit-AI/Engram-Langraph-Provider.git", want: "Clarit-AI/Engram-Langraph-Provider", ok: true},
 		{name: "https no git suffix", remote: "https://github.com/Clarit-AI/Engram-Langraph-Provider", want: "Clarit-AI/Engram-Langraph-Provider", ok: true},
+		{name: "https with token", remote: "https://ghp_token@github.com/Clarit-AI/Engram-Langraph-Provider.git", want: "Clarit-AI/Engram-Langraph-Provider", ok: true},
 		{name: "ssh scp", remote: "git@github.com:Clarit-AI/Engram-Langraph-Provider.git", want: "Clarit-AI/Engram-Langraph-Provider", ok: true},
 		{name: "ssh url", remote: "ssh://git@github.com/Clarit-AI/Engram-Langraph-Provider.git", want: "Clarit-AI/Engram-Langraph-Provider", ok: true},
+		{name: "ssh url with port", remote: "ssh://git@github.com:2222/Clarit-AI/Engram-Langraph-Provider.git", want: "Clarit-AI/Engram-Langraph-Provider", ok: true},
 		{name: "gitlab", remote: "https://gitlab.com/Clarit-AI/Engram-Langraph-Provider.git", want: "", ok: false},
 	}
 
