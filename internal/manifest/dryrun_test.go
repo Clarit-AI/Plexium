@@ -26,7 +26,7 @@ func TestDryRunner_Disabled(t *testing.T) {
 func TestDryRunner_Enabled(t *testing.T) {
 	dir := t.TempDir()
 	outputDir := filepath.Join(dir, "dryrun-output")
-	target := filepath.Join(dir, "real.txt")
+	target := filepath.Join("docs", "real.txt")
 
 	var buf bytes.Buffer
 	dr := NewDryRunner(true, outputDir, &buf)
@@ -45,6 +45,58 @@ func TestDryRunner_Enabled(t *testing.T) {
 	assert.Equal(t, "hello", string(data))
 
 	assert.Contains(t, buf.String(), "[dry-run]")
+}
+
+func TestDryRunner_EnabledNormalizesRepoAbsolutePaths(t *testing.T) {
+	repoRoot := t.TempDir()
+	outputDir := filepath.Join(repoRoot, ".plexium", "output")
+	target := filepath.Join(repoRoot, ".wiki", "guides", "index.md")
+
+	var buf bytes.Buffer
+	dr := NewDryRunner(true, outputDir, &buf)
+
+	require.NoError(t, dr.WriteFile(target, []byte("# Index\n")))
+
+	assert.NoFileExists(t, target, "real path should not exist in dry-run mode")
+	outputPath := filepath.Join(outputDir, ".wiki", "guides", "index.md")
+	data, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+	assert.Equal(t, "# Index\n", string(data))
+	assert.Contains(t, buf.String(), filepath.Join(".wiki", "guides", "index.md"))
+	assert.NoDirExists(t, filepath.Join(outputDir, "Users"))
+}
+
+func TestDryRunner_EnabledNormalizesOutputAbsolutePaths(t *testing.T) {
+	repoRoot := t.TempDir()
+	outputDir := filepath.Join(repoRoot, ".plexium", "output")
+	target := filepath.Join(outputDir, "guides", "index.md")
+
+	var buf bytes.Buffer
+	dr := NewDryRunner(true, outputDir, &buf)
+
+	require.NoError(t, dr.WriteFile(target, []byte("# Index\n")))
+
+	data, err := os.ReadFile(filepath.Join(outputDir, "guides", "index.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "# Index\n", string(data))
+	assert.Contains(t, buf.String(), filepath.Join("guides", "index.md"))
+	assert.NoDirExists(t, filepath.Join(outputDir, ".plexium", "output"))
+}
+
+func TestDryRunner_EnabledSanitizesExternalAbsolutePaths(t *testing.T) {
+	dir := t.TempDir()
+	outputDir := filepath.Join(dir, ".plexium", "output")
+	target := filepath.Join(string(filepath.Separator), "outside", "repo", "file.md")
+
+	var buf bytes.Buffer
+	dr := NewDryRunner(true, outputDir, &buf)
+
+	require.NoError(t, dr.WriteFile(target, []byte("# External\n")))
+
+	data, err := os.ReadFile(filepath.Join(outputDir, "outside", "repo", "file.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "# External\n", string(data))
+	assert.Contains(t, buf.String(), filepath.Join("outside", "repo", "file.md"))
 }
 
 func TestDryRunner_MkdirAll_Disabled(t *testing.T) {

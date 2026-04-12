@@ -13,6 +13,8 @@ fi
 
 SCHEMA_PATH="$REPO_ROOT/.wiki/_schema.md"
 OUTPUT_PATH="$REPO_ROOT/AGENTS.md"
+GENERATED_PATH="$(mktemp "${TMPDIR:-/tmp}/plexium-codex-agents.XXXXXX")"
+trap 'rm -f "$GENERATED_PATH"' EXIT
 
 if [ ! -f "$SCHEMA_PATH" ]; then
   echo "Error: Schema file not found at $SCHEMA_PATH" >&2
@@ -38,9 +40,82 @@ detect_stack() {
 }
 
 DETECTED_STACK="$(detect_stack)"
+PROJECT_NAME="$(basename "$REPO_ROOT")"
+MEMENTO_ENABLED="false"
+if [ -f "$REPO_ROOT/.plexium/config.yml" ] && grep -Eq '^[[:space:]]*memento:[[:space:]]*true[[:space:]]*$' "$REPO_ROOT/.plexium/config.yml"; then
+  MEMENTO_ENABLED="true"
+fi
+ASSISTIVE_ENABLED="false"
+if [ -f "$REPO_ROOT/.plexium/config.yml" ] && awk '
+  /^[^[:space:]]/ {
+    if ($0 ~ /^assistiveAgent:/) {
+      in_assistive = 1
+      in_providers = 0
+      assistive_enabled = 0
+      provider_enabled = 0
+      next
+    }
+    if (in_assistive) {
+      in_assistive = 0
+      in_providers = 0
+    }
+  }
+  in_assistive && /^[[:space:]]{2}enabled:[[:space:]]*true[[:space:]]*$/ {
+    assistive_enabled = 1
+  }
+  in_assistive && /^[[:space:]]{2}providers:[[:space:]]*$/ {
+    in_providers = 1
+    next
+  }
+  in_assistive && in_providers && /^[[:space:]]{2}[A-Za-z0-9_-]+:/ {
+    in_providers = 0
+  }
+  in_assistive && in_providers && /^[[:space:]]{6}enabled:[[:space:]]*true[[:space:]]*$/ {
+    provider_enabled = 1
+  }
+  END {
+    exit (assistive_enabled && provider_enabled) ? 0 : 1
+  }
+' "$REPO_ROOT/.plexium/config.yml"; then
+  ASSISTIVE_ENABLED="true"
+fi
 
-cat > "$OUTPUT_PATH" <<'HEADER'
+project_details_line() {
+  awk '/^## .* Project Details Start Here[[:space:]]*$/ { print NR; exit }' "$1"
+}
+
+merge_with_existing() {
+  generated="$1"
+  output="$2"
+
+  if [ ! -f "$output" ]; then
+    cp -f "$generated" "$output"
+    return
+  fi
+
+  generated_details_line="$(project_details_line "$generated")"
+  existing_details_line="$(project_details_line "$output")"
+  if [ -z "$generated_details_line" ] || [ -z "$existing_details_line" ]; then
+    cp -f "$generated" "$output"
+    return
+  fi
+
+  merged_path="$(mktemp "${TMPDIR:-/tmp}/plexium-codex-agents-merged.XXXXXX")"
+  {
+    head -n "$((generated_details_line - 1))" "$generated"
+    printf '\n'
+    tail -n +"$existing_details_line" "$output"
+  } > "$merged_path"
+  mv -f "$merged_path" "$output"
+}
+
+cat > "$GENERATED_PATH" <<'HEADER'
 # OpenAI Codex — Plexium Wiki Maintenance
+
+## Important: Plexium Wiki Maintenance Layer
+
+> This section describes Plexium's repository knowledge layer. It is not the main project brief.
+> Project-specific context starts at the project details heading below.
 
 You are working on a **Plexium** project. This repository uses an LLM-maintained
 wiki (`.wiki/`) that you are responsible for keeping current.
@@ -52,6 +127,37 @@ wiki (`.wiki/`) that you are responsible for keeping current.
 3. **Never modify** pages with `ownership: human-authored`
 4. **Treat the starter scaffold as incomplete** until `plexium convert` and a real first-pass population run have happened
 
+HEADER
+
+cat >> "$GENERATED_PATH" <<'RETRIEVAL'
+## Retrieval Protocol
+
+- If the `pageindex_search` MCP tool is available, use it to retrieve wiki context before shelling out.
+- Otherwise run `plexium retrieve "<topic>"` to gather wiki context from the CLI.
+
+RETRIEVAL
+
+if [ "$MEMENTO_ENABLED" = "true" ]; then
+  cat >> "$GENERATED_PATH" <<'MEMENTO'
+## Commit Protocol
+
+- Use `git memento commit` instead of `git commit` so session provenance is recorded with commits.
+
+MEMENTO
+fi
+
+if [ "$ASSISTIVE_ENABLED" = "true" ]; then
+  cat >> "$GENERATED_PATH" <<'ASSISTIVE'
+## Assistive Agent
+
+- An assistive provider is configured for semantic review and optional provider-primary daemon work.
+- Use `plexium lint --full` when semantic wiki review is needed.
+- Keep the normal wiki workflow unless a daemon/provider-primary run is explicitly handling it.
+
+ASSISTIVE
+fi
+
+cat >> "$GENERATED_PATH" <<'HEADER'
 ## First Population Pass
 
 When the wiki is mostly starter scaffold:
@@ -68,11 +174,7 @@ When the wiki is mostly starter scaffold:
 ## Plexium Schema
 
 <!-- SCHEMA_INJECT_START -->
-HEADER
-
-cat "$SCHEMA_PATH" >> "$OUTPUT_PATH"
-
-cat >> "$OUTPUT_PATH" <<'FOOTER'
+Read `.wiki/_schema.md` for the full wiki constitution and ownership rules.
 <!-- SCHEMA_INJECT_END -->
 
 ## Quick Reference
@@ -82,11 +184,11 @@ cat >> "$OUTPUT_PATH" <<'FOOTER'
 - Report issues: `plexium lint --ci`
 
 ## Detected Stack
-FOOTER
+HEADER
 
-printf '[%s]\n\n' "$DETECTED_STACK" >> "$OUTPUT_PATH"
+printf '[%s]\n\n' "$DETECTED_STACK" >> "$GENERATED_PATH"
 
-cat >> "$OUTPUT_PATH" <<'COMMANDS'
+cat >> "$GENERATED_PATH" <<'COMMANDS'
 ## Commands
 
 ```bash
@@ -96,5 +198,9 @@ plexium lint      # Check wiki health
 plexium retrieve  # Query the wiki
 ```
 COMMANDS
+
+printf '\n## %s Project Details Start Here\n\nAdd project-specific context below this heading.\n' "$PROJECT_NAME" >> "$GENERATED_PATH"
+
+merge_with_existing "$GENERATED_PATH" "$OUTPUT_PATH"
 
 echo "Generated $OUTPUT_PATH"

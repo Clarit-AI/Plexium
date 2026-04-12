@@ -38,6 +38,33 @@ func TestFilter_IncludeExclude(t *testing.T) {
 	assert.Equal(t, "excluded by pattern", result.SkipReasons["node_modules/foo/index.js"])
 }
 
+func TestFilter_DefaultsExcludeAgentInstallSurfacesAndIncludePython(t *testing.T) {
+	f, err := NewFilter(nil, nil)
+	require.NoError(t, err)
+
+	files := []scanner.File{
+		{Path: "libs/langchain_engram/langchain_engram/chat_models.py", Content: "class ChatEngram: pass"},
+		{Path: "libs/langchain_engram/pyproject.toml", Content: "[project]\nname = \"langchain-engram\""},
+		{Path: ".claude/skills/plexium-user/skill.md", Content: "# Plexium User"},
+		{Path: ".codex/skills/plexium-user/SKILL.md", Content: "# Plexium User"},
+		{Path: ".cursor/rules/project.mdc", Content: "# Rules"},
+		{Path: "libs/langchain_engram/.pytest_cache/README.md", Content: "# Cache"},
+	}
+
+	result := f.Apply(files)
+
+	eligiblePaths := make(map[string]bool)
+	for _, e := range result.Eligible {
+		eligiblePaths[e.Path] = true
+	}
+	assert.True(t, eligiblePaths["libs/langchain_engram/langchain_engram/chat_models.py"])
+	assert.True(t, eligiblePaths["libs/langchain_engram/pyproject.toml"])
+	assert.Equal(t, "excluded by pattern", result.SkipReasons[".claude/skills/plexium-user/skill.md"])
+	assert.Equal(t, "excluded by pattern", result.SkipReasons[".codex/skills/plexium-user/SKILL.md"])
+	assert.Equal(t, "excluded by pattern", result.SkipReasons[".cursor/rules/project.mdc"])
+	assert.Equal(t, "excluded by pattern", result.SkipReasons["libs/langchain_engram/.pytest_cache/README.md"])
+}
+
 func TestFilter_BinaryFiles(t *testing.T) {
 	f, err := NewFilter([]string{"**/*"}, nil)
 	require.NoError(t, err)

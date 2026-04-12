@@ -458,14 +458,33 @@ repo:
 
 sources:
   include:
+    - "README.md"
+    - "**/README.md"
     - "**/*.go"
+    - "**/*.py"
+    - "**/*.ts"
+    - "**/*.js"
     - "**/*.md"
+    - "**/*.toml"
     - "**/*.yml"
     - "**/*.yaml"
+    - "go.mod"
+    - "package.json"
+    - "pyproject.toml"
   exclude:
     - "vendor/**"
+    - "node_modules/**"
+    - ".git/**"
     - ".wiki/**"
     - ".plexium/**"
+    - ".claude/**"
+    - ".codex/**"
+    - ".cursor/**"
+    - ".pytest_cache/**"
+    - "__pycache__/**"
+    - ".venv/**"
+    - "dist/**"
+    - "build/**"
 
 agents:
   adapters: []

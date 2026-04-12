@@ -195,7 +195,7 @@ func TestGolden_CompiledSidebarStructure(t *testing.T) {
 	assert.Contains(t, sidebar, "**Modules**")
 
 	// Must contain wiki-links
-	assert.Contains(t, sidebar, "[[auth-module]]")
+	assert.Contains(t, sidebar, "[[modules/auth-module]]")
 }
 
 // =============================================================================

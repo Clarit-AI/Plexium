@@ -1,5 +1,10 @@
 # Claude Code — {{.ProjectName}}
 
+## Important: Plexium Wiki Maintenance Layer
+
+> This section describes Plexium's repository knowledge layer. It is not the main project brief.
+> Project-specific context starts at the project details heading below.
+
 You are working on a Plexium-managed repository{{if .DetectedStack}} [{{.DetectedStack}}]{{end}}.
 
 Plexium maintains a persistent wiki in `.wiki/` that agents keep up to date.
@@ -9,10 +14,26 @@ Plexium maintains a persistent wiki in `.wiki/` that agents keep up to date.
 - Read `.wiki/_index.md` for orientation
 - Read relevant `.wiki/modules/*.md` pages for your work area
 
+## Retrieval Protocol
+- If the `pageindex_search` MCP tool is available, use it to retrieve wiki context before shelling out.
+- Otherwise run `plexium retrieve "<topic>"` to gather wiki context from the CLI.
+
 ## After code changes
 - Update affected wiki pages in `.wiki/`
 - Never modify pages with `ownership: human-authored`
 - Add an entry to `.wiki/_log.md`
+{{if .MementoEnabled}}
+
+## Commit Protocol
+- Use `git memento commit` instead of `git commit` so session provenance is recorded with commits.
+{{end}}
+{{if .AssistiveEnabled}}
+
+## Assistive Agent
+- An assistive provider is configured for semantic review and optional provider-primary daemon work.
+- Use `plexium lint --full` when semantic wiki review is needed.
+- Keep the normal wiki workflow unless a daemon/provider-primary run is explicitly handling it.
+{{end}}
 
 ## Wiki Schema
 <!-- SCHEMA_INJECT_START -->
@@ -30,3 +51,7 @@ plexium retrieve   # Query the wiki
 ## Full Protocol
 Use the `/plexium-user` skill for the complete wiki maintenance workflow.
 Use the `/plexium-dev` skill when contributing to Plexium itself.
+
+## {{.ProjectName}} Project Details Start Here
+
+Add project-specific context below this heading.

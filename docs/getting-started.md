@@ -69,6 +69,7 @@ If you already know which agent you want to use, this is the canonical onboardin
 
 ```bash
 cd /path/to/your/repo
+git init  # if this is a new project
 plexium setup claude
 # or
 plexium setup codex
@@ -124,6 +125,22 @@ plexium agent setup --model google/gemma-4-31b-it
 ```
 
 Plexium recommends `google/gemma-4-31b-it` by default and also offers `qwen/qwen3.5-35b-a3b`, `openai/gpt-5.4-nano`, `nvidia/nemotron-3-super-120b-a12b`, or a custom OpenRouter model id.
+
+### Publish to GitHub Wiki
+
+After the local wiki is populated, preview what Plexium would publish:
+
+```bash
+plexium publish --dry-run
+```
+
+To push to GitHub Wiki, enable GitHub Wiki in the repository settings and set `githubWiki.enabled: true` in `.plexium/config.yml`. GitHub creates the backing `.wiki.git` repository only after the first wiki page exists, so brand-new wikis may need one starter page created in the GitHub web UI before CLI publishing works.
+
+```bash
+plexium publish
+```
+
+If publish reports that the wiki repository was not found, check `gh auth status`, confirm the active account can access the repository, enable the Wiki feature, create the first wiki page in GitHub if needed, then rerun `plexium publish`.
 
 ---
 
@@ -274,6 +291,15 @@ plexium convert --depth deep
 ```
 
 Convert generates pages by analyzing source file structure, names, and patterns. Results vary by codebase. Review generated pages and edit as needed.
+
+If tracked planning files, generated docs, or upstream reference specs are useful to keep in git but should not shape the Plexium wiki, add them to `.plexiumignore`. Plexium also respects simple `.gitignore` entries during source intake, but `.plexiumignore` is the repo-local place for files you want tracked by git and ignored by Plexium:
+
+```gitignore
+# .plexiumignore
+docs/specs/**
+docs/upstream-api.md
+scratch-notes/
+```
 
 After conversion, compile navigation:
 

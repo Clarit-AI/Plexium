@@ -297,7 +297,7 @@ func formatAgentStatus(status *agentStatusPayload) string {
 	}
 	if status.Daemon.LastCompletedJob != nil {
 		b.WriteString("  Last write:\n")
-		fmt.Fprintf(&b, "    %s ago — %s on %s\n", humanizeTimeAgo(status.Daemon.LastCompletedJob.CompletedAt), status.Daemon.LastCompletedJob.Type, emptyIfUnset(status.Daemon.LastCompletedJob.Target))
+		fmt.Fprintf(&b, "    %s — %s on %s\n", humanizeTimeAgo(status.Daemon.LastCompletedJob.CompletedAt), status.Daemon.LastCompletedJob.Type, emptyIfUnset(status.Daemon.LastCompletedJob.Target))
 		if outcome := strings.TrimSpace(status.Daemon.LastCompletedJob.ApplyOutcome); outcome != "" {
 			fmt.Fprintf(&b, "    apply: %s\n", outcome)
 		}
@@ -307,7 +307,7 @@ func formatAgentStatus(status *agentStatusPayload) string {
 	}
 	if status.Daemon.LastFailure != nil {
 		b.WriteString("  Last failure:\n")
-		fmt.Fprintf(&b, "    %s ago — %s on %s\n", humanizeTimeAgo(status.Daemon.LastFailure.CompletedAt), status.Daemon.LastFailure.Type, emptyIfUnset(status.Daemon.LastFailure.Target))
+		fmt.Fprintf(&b, "    %s — %s on %s\n", humanizeTimeAgo(status.Daemon.LastFailure.CompletedAt), status.Daemon.LastFailure.Type, emptyIfUnset(status.Daemon.LastFailure.Target))
 		if errText := strings.TrimSpace(status.Daemon.LastFailure.Error); errText != "" {
 			fmt.Fprintf(&b, "    error: %s\n", errText)
 		}

@@ -26,6 +26,8 @@ func TestIngest_ReadmeToHome(t *testing.T) {
 	assert.Equal(t, "My Project", result.Pages[0].Title)
 	assert.Equal(t, "Root", result.Pages[0].Section)
 	assert.Equal(t, "high", result.Pages[0].Confidence)
+	assert.Contains(t, result.Pages[0].Content, "[[onboarding|Onboarding Guide]]")
+	assert.Contains(t, result.Pages[0].Content, "[[_log|Activity Log]]")
 }
 
 func TestIngest_NestedReadmeToModule(t *testing.T) {
@@ -88,6 +90,29 @@ func TestIngest_SourceDirsToModules(t *testing.T) {
 	}
 	assert.True(t, wikiPaths["modules/auth.md"], "should create auth module page")
 	assert.True(t, wikiPaths["modules/api.md"], "should create api module page")
+}
+
+func TestIngest_LibsDirToModule(t *testing.T) {
+	ingestor := NewIngestor()
+
+	findings := &ScourFindings{}
+	filter := &FilterResult{
+		Eligible: []scanner.File{
+			{Path: "libs/langchain_engram/langchain_engram/chat_models.py", Content: "class ChatEngram: pass"},
+			{Path: "libs/langchain_engram/pyproject.toml", Content: "[project]\nname = \"langchain-engram\""},
+		},
+	}
+
+	result, err := ingestor.Ingest(findings, filter)
+	require.NoError(t, err)
+
+	require.Len(t, result.Pages, 1)
+	assert.Equal(t, "modules/langchain-engram.md", result.Pages[0].WikiPath)
+	assert.Equal(t, "Modules", result.Pages[0].Section)
+	assert.ElementsMatch(t, []string{
+		"libs/langchain_engram/langchain_engram/chat_models.py",
+		"libs/langchain_engram/pyproject.toml",
+	}, result.Pages[0].SourceFiles)
 }
 
 func TestIngest_ModuleStubsMarked(t *testing.T) {

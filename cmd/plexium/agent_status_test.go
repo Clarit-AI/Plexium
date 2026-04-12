@@ -44,6 +44,22 @@ func TestFormatAgentStatus_ShowsDaemonActivityAndUnlimitedBudget(t *testing.T) {
 			RecentActions: []daemon.RecordedTickAction{
 				{At: time.Now().Add(-15 * time.Second), Watch: "staleness", Action: "auto-sync", Target: "page.md", Success: true},
 			},
+			LastCompletedJob: &daemon.DaemonJobSnapshot{
+				Type:           "repo-drift",
+				Target:         "page.md",
+				ApplyOutcome:   "applied 1 file(s) back to repo",
+				CompletedAt:    time.Now().Add(-15 * time.Second),
+				AppliedFiles:   []string{".wiki/page.md"},
+				WorkspacePath:  "/tmp/workspace",
+				PrimaryActor:   "claude",
+				DelegatedActor: "openrouter",
+			},
+			LastFailure: &daemon.DaemonJobSnapshot{
+				Type:        "repo-drift",
+				Target:      "broken.md",
+				Error:       "failed",
+				CompletedAt: time.Now().Add(-30 * time.Second),
+			},
 			Worktrees: daemonWorktreeSummary{Active: 0, Completed: 1, Failed: 0},
 		},
 	}
@@ -66,6 +82,12 @@ func TestFormatAgentStatus_ShowsDaemonActivityAndUnlimitedBudget(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "usage today: 2 requests, 512 tokens, $0.0000") {
 		t.Fatalf("expected provider usage line, got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "ago ago") {
+		t.Fatalf("status output should not contain doubled ago wording, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Last write:") || !strings.Contains(rendered, "Last failure:") {
+		t.Fatalf("expected last write and failure sections, got:\n%s", rendered)
 	}
 }
 

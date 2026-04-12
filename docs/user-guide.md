@@ -197,6 +197,13 @@ Publish clones the GitHub Wiki repository, replaces its content with filtered `.
 - `sensitivity.excludeExtensions`: blocked file types (`.env`, `.key`, `.pem`, `.secret`)
 - `publish.preserveUnmanagedPages`: whether to include human-authored pages
 
+GitHub Wiki publishing requires two GitHub-side prerequisites:
+
+- Wiki must be enabled in the repository settings
+- the first wiki page must already exist, because GitHub creates the backing `.wiki.git` repository only after that first page is created
+
+If `plexium publish` reports that the wiki repository was not found, verify `gh auth status`, confirm the active account can access the repository, enable Wiki in repository settings, create one starter page in the GitHub web UI if needed, and rerun `plexium publish`.
+
 ### Selective sync
 
 ```bash
@@ -457,6 +464,19 @@ Migration scripts live in `.plexium/migrations/` and apply in order.
 | `retry` | Max attempts, backoff multiplier, delay bounds |
 
 Environment variables override config values. See [CLI Reference: Environment Variables](cli-reference.md#environment-variables) for the full list.
+
+### Source Ignore Rules
+
+Plexium respects simple `.gitignore` entries during source intake. Use `.gitignore` for generated files, local caches, and secrets that should not be tracked by git or used by Plexium.
+
+Use `.plexiumignore` when a file should remain tracked in git but should not shape the Plexium wiki. This is useful for temporary planning docs, upstream reference specs, migration scratchpads, benchmark notes, or implementation prompts that helped build the project but are not part of the project knowledge layer.
+
+```gitignore
+# .plexiumignore
+docs/specs/**
+docs/upstream-api.md
+scratch-notes/
+```
 
 ---
 

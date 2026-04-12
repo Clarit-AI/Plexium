@@ -36,9 +36,64 @@ func TestRunClaudeAdapter_LeanOutput(t *testing.T) {
 	// Trim trailing newline to avoid off-by-one from Split's treatment of it
 	content := strings.TrimRight(string(data), "\n")
 	lines := strings.Split(content, "\n")
-	assert.Less(t, len(lines), 50, "CLAUDE.md should be under 50 lines, got %d", len(lines))
+	assert.Less(t, len(lines), 70, "CLAUDE.md should stay concise, got %d lines", len(lines))
 	assert.Contains(t, string(data), "myproject")
 	assert.Contains(t, string(data), "SCHEMA_INJECT_START")
+	assert.Contains(t, string(data), "Retrieval Protocol")
+	assert.Contains(t, string(data), "pageindex_search")
+	assert.Contains(t, string(data), "myproject Project Details Start Here")
+}
+
+func TestRunClaudeAdapter_AddsMementoCommitProtocolWhenEnabled(t *testing.T) {
+	repoRoot := setupTestRepo(t)
+	writeMementoConfig(t, repoRoot)
+
+	err := RunClaudeAdapter(repoRoot)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(repoRoot, "CLAUDE.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "Use `git memento commit` instead of `git commit`")
+}
+
+func TestRunClaudeAdapter_AddsAssistiveAgentProtocolWhenEnabled(t *testing.T) {
+	repoRoot := setupTestRepo(t)
+	writeAssistiveConfig(t, repoRoot)
+
+	err := RunClaudeAdapter(repoRoot)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(repoRoot, "CLAUDE.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "Assistive Agent")
+	assert.Contains(t, string(data), "plexium lint --full")
+	assert.Contains(t, string(data), "Keep the normal wiki workflow")
+}
+
+func TestRunClaudeAdapter_RefreshesManagedHeaderAndPreservesProjectDetails(t *testing.T) {
+	repoRoot := setupTestRepo(t)
+	writeMementoConfig(t, repoRoot)
+
+	existing := `# Claude Code — oldproject
+
+## Before code changes
+- Old generated setup instructions.
+
+## oldproject Project Details Start Here
+
+Keep this project-specific context.
+`
+	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, "CLAUDE.md"), []byte(existing), 0o644))
+
+	err := RunClaudeAdapter(repoRoot)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(repoRoot, "CLAUDE.md"))
+	require.NoError(t, err)
+	content := string(data)
+	assert.Contains(t, content, "Use `git memento commit` instead of `git commit`")
+	assert.Contains(t, content, "## oldproject Project Details Start Here\n\nKeep this project-specific context.")
+	assert.NotContains(t, content, "Old generated setup instructions.")
 }
 
 func TestRunClaudeAdapter_PreservesUserContent(t *testing.T) {
@@ -223,4 +278,42 @@ func TestMergeWithExisting_WithMarkers(t *testing.T) {
 	assert.Contains(t, result, "new schema")
 	assert.Contains(t, result, "# Footer")
 	assert.NotContains(t, result, "old")
+}
+
+func writeMementoConfig(t *testing.T, repoRoot string) {
+	t.Helper()
+	configYAML := `version: 1
+sources:
+  include:
+    - "**/*.go"
+wiki:
+  root: .wiki
+integrations:
+  memento: true
+`
+	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, ".plexium", "config.yml"), []byte(configYAML), 0o644))
+}
+
+func writeAssistiveConfig(t *testing.T, repoRoot string) {
+	t.Helper()
+	configYAML := `version: 1
+sources:
+  include:
+    - "**/*.go"
+wiki:
+  root: .wiki
+assistiveAgent:
+  enabled: true
+  providers:
+    - name: openrouter
+      enabled: true
+      type: openai-compatible
+      endpoint: https://openrouter.ai/api
+      model: google/gemma-4-31b-it
+      apiKeyEnv: OPENROUTER_API_KEY
+      capabilityProfile: balanced
+  budget:
+    dailyUSD: 0
+`
+	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, ".plexium", "config.yml"), []byte(configYAML), 0o644))
 }

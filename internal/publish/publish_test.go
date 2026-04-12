@@ -2,9 +2,12 @@ package publish
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/manifest"
 	"github.com/Clarit-AI/Plexium/internal/wiki"
 	"github.com/stretchr/testify/assert"
@@ -18,9 +21,13 @@ func TestToWikiURL(t *testing.T) {
 		expect string
 	}{
 		{"https", "https://github.com/owner/repo.git", "https://github.com/owner/repo.wiki.git"},
+		{"https no suffix", "https://github.com/owner/repo", "https://github.com/owner/repo.wiki.git"},
+		{"http no suffix", "http://github.com/owner/repo", "http://github.com/owner/repo.wiki.git"},
 		{"ssh", "git@github.com:owner/repo.git", "git@github.com:owner/repo.wiki.git"},
-		{"ssh no suffix", "git@github.com:owner/repo", "git@github.com:owner/repo"},
-		{"gitlab", "https://gitlab.com/owner/repo.git", "https://gitlab.com/owner/repo.wiki.git"},
+		{"ssh no suffix", "git@github.com:owner/repo", "git@github.com:owner/repo.wiki.git"},
+		{"ssh url", "ssh://git@github.com/owner/repo.git", "ssh://git@github.com/owner/repo.wiki.git"},
+		{"ssh url no suffix", "ssh://git@github.com/owner/repo", "ssh://git@github.com/owner/repo.wiki.git"},
+		{"gitlab", "https://gitlab.com/owner/repo.git", ""},
 	}
 
 	for _, tt := range tests {
@@ -32,7 +39,7 @@ func TestToWikiURL(t *testing.T) {
 
 func TestToWikiURL_HTTPS_NoGitSuffix(t *testing.T) {
 	result := toWikiURL("https://github.com/owner/repo")
-	assert.Equal(t, "https://github.com/owner/repo", result)
+	assert.Equal(t, "https://github.com/owner/repo.wiki.git", result)
 }
 
 func TestClearWikiContent(t *testing.T) {
@@ -162,6 +169,166 @@ func TestCollectFiles_PreserveUnmanagedPages(t *testing.T) {
 	assert.Contains(t, skipped, "my-notes.md")
 }
 
+func TestGetRemoteURL_UsesOnlyConfiguredRemoteWhenOriginMissing(t *testing.T) {
+	dir := t.TempDir()
+	initPublishGitRepo(t, dir)
+	runPublishGit(t, dir, "remote", "add", "Engram-Langraph-Provider", "https://github.com/Clarit-AI/Engram-Langraph-Provider.git")
+
+	pub := &Publisher{repoRoot: dir}
+	url, err := pub.getRemoteURL()
+	require.NoError(t, err)
+	assert.Equal(t, "https://github.com/Clarit-AI/Engram-Langraph-Provider.git", url)
+}
+
+func TestGetRemoteURL_PrefersCurrentBranchUpstreamRemote(t *testing.T) {
+	dir := t.TempDir()
+	initPublishGitRepo(t, dir)
+	runPublishGit(t, dir, "remote", "add", "origin", "https://github.com/example/wrong.git")
+	runPublishGit(t, dir, "remote", "add", "Engram-Langraph-Provider", "https://github.com/Clarit-AI/Engram-Langraph-Provider.git")
+	runPublishGit(t, dir, "config", "branch.main.remote", "Engram-Langraph-Provider")
+
+	pub := &Publisher{repoRoot: dir}
+	url, err := pub.getRemoteURL()
+	require.NoError(t, err)
+	assert.Equal(t, "https://github.com/Clarit-AI/Engram-Langraph-Provider.git", url)
+}
+
+func TestGitHubRepoFromRemoteURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		remote string
+		want   string
+		ok     bool
+	}{
+		{name: "https", remote: "https://github.com/Clarit-AI/Engram-Langraph-Provider.git", want: "Clarit-AI/Engram-Langraph-Provider", ok: true},
+		{name: "https no git suffix", remote: "https://github.com/Clarit-AI/Engram-Langraph-Provider", want: "Clarit-AI/Engram-Langraph-Provider", ok: true},
+		{name: "ssh scp", remote: "git@github.com:Clarit-AI/Engram-Langraph-Provider.git", want: "Clarit-AI/Engram-Langraph-Provider", ok: true},
+		{name: "ssh url", remote: "ssh://git@github.com/Clarit-AI/Engram-Langraph-Provider.git", want: "Clarit-AI/Engram-Langraph-Provider", ok: true},
+		{name: "gitlab", remote: "https://gitlab.com/Clarit-AI/Engram-Langraph-Provider.git", want: "", ok: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := githubRepoFromRemoteURL(tt.remote)
+			assert.Equal(t, tt.ok, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGitHubWikiPublishingEnabled_DetectsEnabledWikiWithGH(t *testing.T) {
+	dir := t.TempDir()
+	binDir := t.TempDir()
+	initPublishGitRepo(t, dir)
+	runPublishGit(t, dir, "remote", "add", "Engram-Langraph-Provider", "https://github.com/Clarit-AI/Engram-Langraph-Provider.git")
+
+	ghStub := "#!/bin/sh\nprintf 'true\\n'\n"
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "gh"), []byte(ghStub), 0755))
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	pub := &Publisher{
+		repoRoot: dir,
+		config:   &config.Config{},
+	}
+	enabled, err := pub.githubWikiPublishingEnabled()
+	require.NoError(t, err)
+	assert.True(t, enabled)
+}
+
+func TestGitHubWikiPublishingEnabled_ReportsDisabledWiki(t *testing.T) {
+	dir := t.TempDir()
+	binDir := t.TempDir()
+	initPublishGitRepo(t, dir)
+	runPublishGit(t, dir, "remote", "add", "Engram-Langraph-Provider", "https://github.com/Clarit-AI/Engram-Langraph-Provider.git")
+
+	ghStub := "#!/bin/sh\nprintf 'false\\n'\n"
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "gh"), []byte(ghStub), 0755))
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	pub := &Publisher{
+		repoRoot: dir,
+		config:   &config.Config{},
+	}
+	enabled, err := pub.githubWikiPublishingEnabled()
+	require.Error(t, err)
+	assert.False(t, enabled)
+	assert.Contains(t, err.Error(), "GitHub Wiki is disabled")
+}
+
+func TestFormatWikiCloneError_RepositoryNotFoundAddsRemediation(t *testing.T) {
+	err := formatWikiCloneError(
+		"https://github.com/Clarit-AI/Engram-Langraph-Provider.wiki.git",
+		[]byte("remote: Repository not found.\nfatal: repository 'https://github.com/Clarit-AI/Engram-Langraph-Provider.wiki.git/' not found\n"),
+		assert.AnError,
+	)
+	require.Error(t, err)
+	message := err.Error()
+	assert.Contains(t, message, "the first wiki page exists")
+	assert.Contains(t, message, "create a first page in the GitHub web UI")
+	assert.Contains(t, message, "active git credentials")
+	assert.Contains(t, message, "gh auth status")
+}
+
+func TestWikiSyncerGetWikiPages_PreservesNestedPaths(t *testing.T) {
+	dir := t.TempDir()
+	_, err := wiki.Init(wiki.InitOptions{RepoRoot: dir})
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".wiki", "architecture"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".wiki", "guides"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".wiki", "architecture", "overview.md"), []byte("# Overview"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".wiki", "guides", "api_guide.md"), []byte("# API"), 0644))
+
+	syncer, err := NewWikiSyncer(dir, nil)
+	require.NoError(t, err)
+
+	pages, err := syncer.getWikiPages(filepath.Join(dir, ".wiki"))
+	require.NoError(t, err)
+	assert.Contains(t, pages, "architecture/overview.md")
+	assert.Contains(t, pages, "guides/api_guide.md")
+	assert.NotContains(t, pages, "overview.md")
+	assert.NotContains(t, pages, "api_guide.md")
+}
+
+func TestWikiSyncerSync_IncludesNestedDefaultPublishPaths(t *testing.T) {
+	dir := t.TempDir()
+	_, err := wiki.Init(wiki.InitOptions{RepoRoot: dir})
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".wiki", "architecture"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".wiki", "guides"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".wiki", "architecture", "overview.md"), []byte("# Overview"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".wiki", "guides", "api_guide.md"), []byte("# API"), 0644))
+
+	syncer, err := NewWikiSyncer(dir, &config.Config{Wiki: config.Wiki{Root: ".wiki"}})
+	require.NoError(t, err)
+
+	result, err := syncer.Sync(true, false)
+	require.NoError(t, err)
+	assert.Contains(t, result.PagesIncluded, "architecture/overview.md")
+	assert.NotContains(t, result.PagesIncluded, "guides/api_guide.md")
+
+	foundGuideExclusion := false
+	for _, excluded := range result.PagesExcluded {
+		if excluded.Path == "guides/api_guide.md" && excluded.Reason == "not_matching_publish" {
+			foundGuideExclusion = true
+			break
+		}
+	}
+	assert.True(t, foundGuideExclusion, "expected nested guide path to be excluded by default publish filters")
+}
+
+func TestWikiSyncerSync_PushIsGuarded(t *testing.T) {
+	dir := t.TempDir()
+	_, err := wiki.Init(wiki.InitOptions{RepoRoot: dir})
+	require.NoError(t, err)
+
+	syncer, err := NewWikiSyncer(dir, nil)
+	require.NoError(t, err)
+
+	_, err = syncer.Sync(false, true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not implemented safely")
+}
+
 func TestClearWikiContent_PreservesGitDir(t *testing.T) {
 	dir := t.TempDir()
 	gitFile := filepath.Join(dir, ".git", "HEAD")
@@ -173,4 +340,18 @@ func TestClearWikiContent_PreservesGitDir(t *testing.T) {
 
 	// .git/HEAD must still exist
 	assert.FileExists(t, gitFile)
+}
+
+func initPublishGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	runPublishGit(t, dir, "init", "-b", "main")
+}
+
+func runPublishGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
+	}
 }

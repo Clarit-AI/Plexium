@@ -70,8 +70,8 @@ type SetupResult struct {
 // SetupOptions controls non-interactive setup behavior.
 type SetupOptions struct {
 	// APIKey provides a non-interactive OpenRouter setup path. If empty, the
-	// setup flow also checks OPENROUTER_API_KEY before falling back to
-	// interactive prompts.
+	// setup flow also checks OPENROUTER_API_KEY for fresh setup before falling
+	// back to interactive prompts.
 	APIKey string
 	// HTTPClient allows tests to inject a request transport without mutating the
 	// package-level shared client.
@@ -116,7 +116,7 @@ func RunInteractiveSetup(repoRoot string, opts SetupOptions) (*SetupResult, erro
 	}
 	seedExistingProviders(result, repoRoot, existing)
 	explicitAPIKey := strings.TrimSpace(opts.APIKey)
-	if explicitAPIKey == "" && !interactive {
+	if explicitAPIKey == "" && !interactive && !existing.HasOpenRouter {
 		explicitAPIKey = os.Getenv("OPENROUTER_API_KEY")
 	}
 

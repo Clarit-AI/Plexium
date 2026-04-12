@@ -15,11 +15,11 @@ type LinkCrawler struct {
 
 // WikiLink represents a found wiki link
 type WikiLink struct {
-	PagePath  string // Path to the page containing the link
-	RawLink   string // The raw [[link]] text
-	Target    string // Resolved target (e.g., "modules/auth.md")
-	Resolved  bool   // Whether target exists
-	LineNum   int    // Line number where link appears
+	PagePath string // Path to the page containing the link
+	RawLink  string // The raw [[link]] text
+	Target   string // Resolved target (e.g., "modules/auth.md")
+	Resolved bool   // Whether target exists
+	LineNum  int    // Line number where link appears
 }
 
 // wikiLinkRegex matches [[wiki-links]] with optional [[target|display]] syntax
@@ -131,6 +131,14 @@ func (c *LinkCrawler) ResolveLink(linkText string, sourceDir string) (targetPath
 		// Return path relative to wiki root
 		relPath, _ := filepath.Rel(c.wikiPath, resolved)
 		return relPath + anchor, true
+	}
+
+	if !strings.Contains(target, "/") && sourceDir != "" {
+		rootResolved := filepath.Clean(filepath.Join(c.wikiPath, target))
+		if _, err := os.Stat(rootResolved); err == nil {
+			relPath, _ := filepath.Rel(c.wikiPath, rootResolved)
+			return relPath + anchor, true
+		}
 	}
 
 	return target + anchor, false

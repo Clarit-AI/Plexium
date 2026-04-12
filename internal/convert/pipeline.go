@@ -3,13 +3,14 @@ package convert
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/manifest"
 	"github.com/Clarit-AI/Plexium/internal/plugins"
 	"github.com/Clarit-AI/Plexium/internal/scanner"
-	"path/filepath"
 )
 
 // Pipeline orchestrates the full convert workflow.
@@ -77,6 +78,7 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 	if p.cfg != nil && len(p.cfg.Sources.Exclude) > 0 {
 		exclude = p.cfg.Sources.Exclude
 	}
+	exclude = append(exclude, loadRepoIgnorePatterns(p.repoRoot)...)
 
 	filter, err := NewFilter(include, exclude)
 	if err != nil {
@@ -86,7 +88,7 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 	// Scan all files for filtering
 	s, err := scanner.New(
 		[]string{"**/*"},
-		[]string{"**/.git/**", "**/.wiki/**", "**/.plexium/**"},
+		append([]string{"**/.git/**", "**/.wiki/**", "**/.plexium/**"}, loadRepoIgnorePatterns(p.repoRoot)...),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("filter scanner: %w", err)
@@ -214,7 +216,13 @@ func (p *Pipeline) updateManifest(pages []PageData) error {
 		return err
 	}
 
+	m, err := mgr.Load()
+	if err != nil {
+		return err
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
+	generatedEntries := make(map[string]manifest.PageEntry, len(pages))
 
 	for _, page := range pages {
 		sourceFiles := make([]manifest.SourceFile, len(page.SourceFiles))
@@ -236,10 +244,49 @@ func (p *Pipeline) updateManifest(pages []PageData) error {
 			UpdatedBy:   "plexium-convert",
 		}
 
-		if err := mgr.UpsertPage(entry); err != nil {
-			return fmt.Errorf("upserting page %s: %w", page.WikiPath, err)
-		}
+		generatedEntries[page.WikiPath] = entry
 	}
 
-	return nil
+	existing := make([]manifest.PageEntry, 0, len(m.Pages)+len(generatedEntries))
+	wikiRoot := configuredManifestWikiRoot(p.cfg)
+	for _, page := range m.Pages {
+		if entry, ok := generatedEntries[page.WikiPath]; ok {
+			if page.Ownership == "human-authored" && entry.Ownership == "managed" {
+				return fmt.Errorf("cannot overwrite human-authored page: %s", page.WikiPath)
+			}
+			continue
+		}
+		if page.Ownership == "managed" && manifestPathIncludesWikiRoot(page.WikiPath, wikiRoot) {
+			continue
+		}
+		if page.Ownership == "managed" && page.UpdatedBy == "plexium-convert" {
+			continue
+		}
+		existing = append(existing, page)
+	}
+
+	for _, entry := range generatedEntries {
+		existing = append(existing, entry)
+	}
+
+	m.Pages = existing
+	return mgr.Save(m)
+}
+
+func configuredManifestWikiRoot(cfg *config.Config) string {
+	if cfg != nil {
+		if root := strings.TrimSpace(cfg.Wiki.Root); root != "" {
+			clean := filepath.ToSlash(filepath.Clean(root))
+			if clean != "." {
+				return clean
+			}
+		}
+	}
+	return ".wiki"
+}
+
+func manifestPathIncludesWikiRoot(wikiPath, wikiRoot string) bool {
+	cleanPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(wikiPath)))
+	cleanRoot := filepath.ToSlash(filepath.Clean(strings.TrimSpace(wikiRoot)))
+	return cleanPath == cleanRoot || strings.HasPrefix(cleanPath, cleanRoot+"/")
 }

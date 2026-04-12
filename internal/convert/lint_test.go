@@ -5,6 +5,7 @@ import (
 
 	"github.com/Clarit-AI/Plexium/internal/scanner"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLint_FindsUndocumentedModules(t *testing.T) {
@@ -46,6 +47,28 @@ func TestLint_CreatesStubsForUndocumented(t *testing.T) {
 	assert.Contains(t, result.StubPages[0].Content, "<!-- STATUS: stub -->")
 }
 
+func TestLint_DetectsLibsPackagesAsSourceRoots(t *testing.T) {
+	linker := NewLinker()
+	linter := NewConvertLinter(linker)
+
+	pages := []PageData{
+		{WikiPath: "modules/langchain-engram.md", Title: "LangChain Engram", Section: "Modules"},
+	}
+	eligible := []scanner.File{
+		{Path: "libs/langchain_engram/chat_models.py", Content: "class ChatEngram: pass"},
+		{Path: "packages/client/index.ts", Content: "export {}"},
+	}
+
+	linker.AddPages(pages)
+	result := linter.Analyze(pages, eligible)
+
+	assert.NotContains(t, result.UndocumentedModules, "langchain-engram", "documented libs module should not be flagged")
+	assert.NotContains(t, result.UndocumentedModules, "langchain_engram", "underscore source dirs should match hyphenated module slugs")
+	assert.Contains(t, result.UndocumentedModules, "client", "packages source root should be flagged when undocumented")
+	require.Len(t, result.StubPages, 1)
+	assert.Equal(t, "modules/client.md", result.StubPages[0].WikiPath)
+}
+
 func TestLint_DetectsOrphans(t *testing.T) {
 	linker := NewLinker()
 	linter := NewConvertLinter(linker)
@@ -82,6 +105,24 @@ func TestLint_GapScore(t *testing.T) {
 	result := linter.Analyze(pages, eligible)
 
 	assert.Equal(t, 0.5, result.GapScore, "1/2 documented = 50%")
+}
+
+func TestLint_GapScoreCountsLibsAndPackagesAsSourceRoots(t *testing.T) {
+	linker := NewLinker()
+	linter := NewConvertLinter(linker)
+
+	pages := []PageData{
+		{WikiPath: "modules/langchain-engram.md", Title: "LangChain Engram", Section: "Modules", IsStub: false},
+	}
+	eligible := []scanner.File{
+		{Path: "libs/langchain_engram/chat_models.py", Content: "class ChatEngram: pass"},
+		{Path: "packages/client/index.ts", Content: "export {}"},
+	}
+
+	linker.AddPages(pages)
+	result := linter.Analyze(pages, eligible)
+
+	assert.Equal(t, 0.5, result.GapScore, "1/2 documented = 50% for libs and packages roots")
 }
 
 func TestLint_GapScoreNoSourceDirs(t *testing.T) {

@@ -190,7 +190,7 @@ func (ing *Ingestor) ingestDoc(doc ExistingDoc) PageData {
 func (ing *Ingestor) extractModules(eligible []scanner.File) []PageData {
 	// Group files by top-level source directory
 	moduleDirs := make(map[string][]string) // dir → list of file paths
-	srcPrefixes := []string{"src/", "internal/", "pkg/", "lib/", "cmd/"}
+	srcPrefixes := []string{"src/", "internal/", "pkg/", "lib/", "libs/", "packages/", "cmd/"}
 
 	for _, f := range eligible {
 		for _, prefix := range srcPrefixes {
@@ -238,6 +238,11 @@ func (ing *Ingestor) buildHomePage(readme ReadmeDoc) string {
 	b.WriteString("updated-by: plexium-convert\n")
 	b.WriteString("---\n\n")
 	b.WriteString(readme.Content)
+	b.WriteString("\n\n## Wiki Maintenance\n\n")
+	b.WriteString("- [[onboarding|Onboarding Guide]]\n")
+	b.WriteString("- [[contradictions|Contradictions]]\n")
+	b.WriteString("- [[open-questions|Open Questions]]\n")
+	b.WriteString("- [[_log|Activity Log]]\n")
 
 	return b.String()
 }

@@ -55,16 +55,16 @@ func TestCompile_GeneratesIndexAndSidebar(t *testing.T) {
 	expectedIndex := `# Wiki Index
 
 ## Architecture
-- [[architecture-overview]] — Architecture Overview
-- [[data-model]] — Data Model
+- [[architecture/architecture-overview]] — Architecture Overview
+- [[architecture/data-model]] — Data Model
 
 ## Decisions
-- [[adr-001]] — ADR-001: Language Choice
-- [[adr-002]] — ADR-002: Database Choice
+- [[decisions/adr-001]] — ADR-001: Language Choice
+- [[decisions/adr-002]] — ADR-002: Database Choice
 
 ## Modules
-- [[api-gateway]] — API Gateway
-- [[auth-module]] — Auth Module
+- [[modules/api-gateway]] — API Gateway
+- [[modules/auth-module]] — Auth Module
 `
 	assert.Equal(t, expectedIndex, index)
 
@@ -76,16 +76,16 @@ func TestCompile_GeneratesIndexAndSidebar(t *testing.T) {
 	expectedSidebar := `**[[Home]]**
 
 **Architecture**
-- [[architecture-overview]]
-- [[data-model]]
+- [[architecture/architecture-overview]]
+- [[architecture/data-model]]
 
 **Decisions**
-- [[adr-001]]
-- [[adr-002]]
+- [[decisions/adr-001]]
+- [[decisions/adr-002]]
 
 **Modules**
-- [[api-gateway]]
-- [[auth-module]]
+- [[modules/api-gateway]]
+- [[modules/auth-module]]
 `
 	assert.Equal(t, expectedSidebar, sidebar)
 }
@@ -177,9 +177,9 @@ func TestCompile_AlphabeticalSorting(t *testing.T) {
 	expectedIndex := `# Wiki Index
 
 ## Concepts
-- [[alpha]] — Alpha
-- [[middle]] — Middle
-- [[zebra]] — Zebra
+- [[concepts/alpha]] — Alpha
+- [[concepts/middle]] — Middle
+- [[concepts/zebra]] — Zebra
 `
 	assert.Equal(t, expectedIndex, index)
 }
@@ -213,19 +213,20 @@ func TestCompile_UncategorizedSection(t *testing.T) {
 	assert.Contains(t, string(indexBytes), "[[orphan]] — Orphan Page")
 }
 
-func TestSlugFromPath(t *testing.T) {
+func TestLinkTargetFromPath(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
 	}{
-		{"modules/auth-module.md", "auth-module"},
-		{"architecture/data-model.md", "data-model"},
+		{"modules/auth-module.md", "modules/auth-module"},
+		{"architecture/data-model.md", "architecture/data-model"},
 		{"top-level.md", "top-level"},
-		{"deeply/nested/page.md", "page"},
+		{"deeply/nested/page.md", "deeply/nested/page"},
+		{"./guides/user_guide.md", "guides/user_guide"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			assert.Equal(t, tt.want, slugFromPath(tt.input))
+			assert.Equal(t, tt.want, linkTargetFromPath(tt.input))
 		})
 	}
 }
