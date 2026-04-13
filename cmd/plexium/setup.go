@@ -649,7 +649,7 @@ func maybeConfigureAssistiveProvider(repoRoot, agentName string, opts setupAgent
 	}
 
 	providers := configuredProviderNames(cfg)
-	if len(providers) > 0 {
+	if hasEnabledAssistiveProvider(cfg) && len(providers) > 0 {
 		if opts.PromptForAssistive && isInteractiveReader(opts.Stdin) {
 			fmt.Fprintln(opts.Stdout)
 			fmt.Fprintln(opts.Stdout, "Assistive provider is already configured.")

@@ -41,52 +41,43 @@ detect_stack() {
 
 DETECTED_STACK="$(detect_stack)"
 PROJECT_NAME="$(basename "$REPO_ROOT")"
-MEMENTO_ENABLED="false"
-if [ -f "$REPO_ROOT/.plexium/config.yml" ] && awk '
-  /^[^[:space:]]/ {
-    in_integrations = ($0 ~ /^integrations:/)
-    next
-  }
-  in_integrations && /^[[:space:]]{2}memento:[[:space:]]*true[[:space:]]*$/ {
-    found = 1
-  }
-  END { exit found ? 0 : 1 }
-' "$REPO_ROOT/.plexium/config.yml"; then
-  MEMENTO_ENABLED="true"
+
+# Prefer env vars exported by the Go adapter runner; fall back to awk only
+# when the env var is unset (e.g. running standalone during development).
+if [ -n "${PLEXIUM_MEMENTO_ENABLED+x}" ]; then
+  MEMENTO_ENABLED="$PLEXIUM_MEMENTO_ENABLED"
+elif [ -f "$REPO_ROOT/.plexium/config.yml" ]; then
+  MEMENTO_ENABLED="false"
+  if awk '
+    /^[^[:space:]]/ { in_integrations = ($0 ~ /^integrations:/); next }
+    in_integrations && /memento:[[:space:]]*true/ { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$REPO_ROOT/.plexium/config.yml"; then
+    MEMENTO_ENABLED="true"
+  fi
+else
+  MEMENTO_ENABLED="false"
 fi
-ASSISTIVE_ENABLED="false"
-if [ -f "$REPO_ROOT/.plexium/config.yml" ] && awk '
-  /^[^[:space:]]/ {
-    if ($0 ~ /^assistiveAgent:/) {
-      in_assistive = 1
-      in_providers = 0
-      assistive_enabled = 0
-      provider_enabled = 0
-      next
-    }
-    if (in_assistive) {
+
+if [ -n "${PLEXIUM_ASSISTIVE_ENABLED+x}" ]; then
+  ASSISTIVE_ENABLED="$PLEXIUM_ASSISTIVE_ENABLED"
+elif [ -f "$REPO_ROOT/.plexium/config.yml" ]; then
+  ASSISTIVE_ENABLED="false"
+  if awk '
+    /^[^[:space:]]/ {
+      if ($0 ~ /^assistiveAgent:/) { in_assistive = 1; assistive_enabled = 0; provider_enabled = 0; next }
       in_assistive = 0
-      in_providers = 0
     }
-  }
-  in_assistive && /^[[:space:]]{2}enabled:[[:space:]]*true[[:space:]]*$/ {
-    assistive_enabled = 1
-  }
-  in_assistive && /^[[:space:]]{2}providers:[[:space:]]*$/ {
-    in_providers = 1
-    next
-  }
-  in_assistive && in_providers && /^[[:space:]]{2}[A-Za-z0-9_-]+:/ {
-    in_providers = 0
-  }
-  in_assistive && in_providers && /^[[:space:]]{6}enabled:[[:space:]]*true[[:space:]]*$/ {
-    provider_enabled = 1
-  }
-  END {
-    exit (assistive_enabled && provider_enabled) ? 0 : 1
-  }
-' "$REPO_ROOT/.plexium/config.yml"; then
-  ASSISTIVE_ENABLED="true"
+    in_assistive && /enabled:[[:space:]]*true/ && !provider_enabled { assistive_enabled = 1 }
+    in_assistive && /providers:/ { in_providers = 1; next }
+    in_providers && /^[[:space:]]*-?[[:space:]]*name:/ { next }
+    in_providers && /enabled:[[:space:]]*true/ { provider_enabled = 1 }
+    END { exit (assistive_enabled && provider_enabled) ? 0 : 1 }
+  ' "$REPO_ROOT/.plexium/config.yml"; then
+    ASSISTIVE_ENABLED="true"
+  fi
+else
+  ASSISTIVE_ENABLED="false"
 fi
 
 project_details_line() {

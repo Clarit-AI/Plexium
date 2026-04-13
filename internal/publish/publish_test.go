@@ -23,12 +23,12 @@ func TestToWikiURL(t *testing.T) {
 		{"https", "https://github.com/owner/repo.git", "https://github.com/owner/repo.wiki.git"},
 		{"https no suffix", "https://github.com/owner/repo", "https://github.com/owner/repo.wiki.git"},
 		{"http no suffix", "http://github.com/owner/repo", "https://github.com/owner/repo.wiki.git"},
-		{"https with token", "https://ghp_token@github.com/owner/repo.git", "https://github.com/owner/repo.wiki.git"},
+		{"https with token", "https://ghp_token@github.com/owner/repo.git", "https://ghp_token@github.com/owner/repo.wiki.git"},
 		{"ssh", "git@github.com:owner/repo.git", "git@github.com:owner/repo.wiki.git"},
 		{"ssh no suffix", "git@github.com:owner/repo", "git@github.com:owner/repo.wiki.git"},
 		{"ssh url", "ssh://git@github.com/owner/repo.git", "ssh://git@github.com/owner/repo.wiki.git"},
 		{"ssh url no suffix", "ssh://git@github.com/owner/repo", "ssh://git@github.com/owner/repo.wiki.git"},
-		{"ssh url with port", "ssh://git@github.com:2222/owner/repo.git", "ssh://git@github.com/owner/repo.wiki.git"},
+		{"ssh url with port", "ssh://git@github.com:2222/owner/repo.git", "ssh://git@github.com:2222/owner/repo.wiki.git"},
 		{"gitlab", "https://gitlab.com/owner/repo.git", ""},
 	}
 
@@ -42,6 +42,24 @@ func TestToWikiURL(t *testing.T) {
 func TestToWikiURL_HTTPS_NoGitSuffix(t *testing.T) {
 	result := toWikiURL("https://github.com/owner/repo")
 	assert.Equal(t, "https://github.com/owner/repo.wiki.git", result)
+}
+
+func TestSanitizeRemoteURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{"https plain", "https://github.com/owner/repo.git", "https://github.com/owner/repo.git"},
+		{"https with token", "https://ghp_token@github.com/owner/repo.git", "https://github.com/owner/repo.git"},
+		{"ssh url with port", "ssh://git@github.com:2222/owner/repo.git", "ssh://git@github.com:2222/owner/repo.git"},
+		{"scp style unchanged", "git@github.com:owner/repo.git", "git@github.com:owner/repo.git"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expect, sanitizeRemoteURL(tt.input))
+		})
+	}
 }
 
 func TestClearWikiContent(t *testing.T) {

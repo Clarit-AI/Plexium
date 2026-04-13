@@ -144,7 +144,7 @@ func (p *Publisher) detectGitHubWikiEnabled() (bool, string, error) {
 	}
 	repo, ok := githubRepoFromRemoteURL(remoteURL)
 	if !ok {
-		return false, "", fmt.Errorf("remote is not a GitHub repository: %s", remoteURL)
+		return false, "", fmt.Errorf("remote is not a GitHub repository: %s", sanitizeRemoteURL(remoteURL))
 	}
 
 	cmd := exec.Command("gh", "repo", "view", repo, "--json", "hasWikiEnabled", "--jq", ".hasWikiEnabled")
@@ -260,7 +260,7 @@ func (p *Publisher) pushToGitHubWiki(files []string) error {
 
 	wikiURL := toWikiURL(remoteURL)
 	if wikiURL == "" {
-		return fmt.Errorf("cannot determine wiki URL from remote: %s", remoteURL)
+		return fmt.Errorf("cannot determine wiki URL from remote: %s", sanitizeRemoteURL(remoteURL))
 	}
 
 	// Clone wiki repo to temp dir
@@ -428,6 +428,20 @@ func (p *Publisher) getGitHead() (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
+// sanitizeRemoteURL strips userinfo (credentials) from a remote URL for safe
+// inclusion in error messages. Non-URL forms (SCP-style git@host:path) are
+// returned unchanged since they don't embed tokens in the userinfo field.
+func sanitizeRemoteURL(remoteURL string) string {
+	if strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") {
+		u, err := url.Parse(remoteURL)
+		if err == nil {
+			u.User = nil
+			return u.String()
+		}
+	}
+	return remoteURL
+}
+
 func githubRepoFromRemoteURL(remoteURL string) (string, bool) {
 	remoteURL = strings.TrimSpace(remoteURL)
 	remoteURL = strings.TrimSuffix(remoteURL, ".git")
@@ -498,8 +512,8 @@ func clearWikiContent(wikiDir string) error {
 }
 
 // toWikiURL converts a git remote URL to its wiki equivalent.
-// It rebuilds the wiki URL from the normalized repo name so that
-// authenticated or non-canonical remotes are handled correctly.
+// It preserves credentials and port from the original remote so that
+// token-bearing and ssh-with-port remotes can clone successfully.
 func toWikiURL(remoteURL string) string {
 	repo, ok := githubRepoFromRemoteURL(remoteURL)
 	if !ok {
@@ -507,15 +521,20 @@ func toWikiURL(remoteURL string) string {
 	}
 	remoteURL = strings.TrimSpace(remoteURL)
 
-	// URL-style remotes: detect scheme structurally so credentials/ports don't break matching.
-	if strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") {
-		return "https://github.com/" + repo + ".wiki.git"
-	}
-	if strings.HasPrefix(remoteURL, "ssh://") {
-		return "ssh://git@github.com/" + repo + ".wiki.git"
+	// URL-style remotes: rebuild preserving scheme, userinfo, and host (with port).
+	if strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") || strings.HasPrefix(remoteURL, "ssh://") {
+		u, err := url.Parse(remoteURL)
+		if err == nil && u.Hostname() == "github.com" {
+			u.Path = "/" + repo + ".wiki.git"
+			// Normalize http → https for wiki clone (GitHub redirects anyway).
+			if u.Scheme == "http" {
+				u.Scheme = "https"
+			}
+			return u.String()
+		}
 	}
 
-	// SCP-style
+	// SCP-style: git@github.com:owner/repo
 	if strings.HasPrefix(remoteURL, "git@github.com:") {
 		return "git@github.com:" + repo + ".wiki.git"
 	}
