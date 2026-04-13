@@ -13,8 +13,12 @@ fi
 
 SCHEMA_PATH="$REPO_ROOT/.wiki/_schema.md"
 OUTPUT_PATH="$REPO_ROOT/AGENTS.md"
+_PLEXIUM_TMPFILES=""
+cleanup_tmpfiles() { rm -f $_PLEXIUM_TMPFILES; }
+trap cleanup_tmpfiles EXIT
+
 GENERATED_PATH="$(mktemp "${TMPDIR:-/tmp}/plexium-codex-agents.XXXXXX")"
-trap 'rm -f "$GENERATED_PATH"' EXIT
+_PLEXIUM_TMPFILES="$_PLEXIUM_TMPFILES $GENERATED_PATH"
 
 if [ ! -f "$SCHEMA_PATH" ]; then
   echo "Error: Schema file not found at $SCHEMA_PATH" >&2
@@ -101,6 +105,7 @@ merge_with_existing() {
   fi
 
   merged_path="$(mktemp "${TMPDIR:-/tmp}/plexium-codex-agents-merged.XXXXXX")"
+  _PLEXIUM_TMPFILES="$_PLEXIUM_TMPFILES $merged_path"
   {
     head -n "$((generated_details_line - 1))" "$generated"
     printf '\n'

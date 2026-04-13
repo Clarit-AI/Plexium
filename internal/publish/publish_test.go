@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -252,6 +253,9 @@ func TestGitHubRepoFromRemoteURL(t *testing.T) {
 }
 
 func TestGitHubWikiPublishingEnabled_DetectsEnabledWikiWithGH(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell stub not supported on Windows")
+	}
 	dir := t.TempDir()
 	binDir := t.TempDir()
 	initPublishGitRepo(t, dir)
@@ -271,6 +275,9 @@ func TestGitHubWikiPublishingEnabled_DetectsEnabledWikiWithGH(t *testing.T) {
 }
 
 func TestGitHubWikiPublishingEnabled_ReportsDisabledWiki(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell stub not supported on Windows")
+	}
 	dir := t.TempDir()
 	binDir := t.TempDir()
 	initPublishGitRepo(t, dir)
