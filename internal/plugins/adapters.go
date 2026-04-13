@@ -406,7 +406,21 @@ func copyDir(srcDir, destDir string) error {
 func runAdapterScript(repoRoot, scriptPath string) error {
 	cmd := exec.Command("bash", scriptPath)
 	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "PLEXIUM_DIR="+repoRoot)
+
+	mementoVal := "false"
+	if isMementoEnabled(repoRoot) {
+		mementoVal = "true"
+	}
+	assistiveVal := "false"
+	if isAssistiveEnabled(repoRoot) {
+		assistiveVal = "true"
+	}
+
+	cmd.Env = append(os.Environ(),
+		"PLEXIUM_DIR="+repoRoot,
+		"PLEXIUM_MEMENTO_ENABLED="+mementoVal,
+		"PLEXIUM_ASSISTIVE_ENABLED="+assistiveVal,
+	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		text := strings.TrimSpace(string(output))

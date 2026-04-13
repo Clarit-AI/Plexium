@@ -74,13 +74,17 @@ type ScourOptions struct {
 // NewScourer creates a new Scourer for the given repo root.
 func NewScourer(root string) (*Scourer, error) {
 	// Create a broad scanner that picks up everything we care about
+	exclude := []string{"**/node_modules/**", "**/.next/**", "**/dist/**", "**/vendor/**",
+		"**/.git/**", "**/.wiki/**", "**/.plexium/**", "**/target/**",
+		"**/.claude/**", "**/.codex/**", "**/.cursor/**",
+		"**/__pycache__/**", "**/.pytest_cache/**", "**/.venv/**"}
+	exclude = append(exclude, loadRepoIgnorePatterns(root)...)
+
 	s, err := scanner.New(
 		[]string{"**/*.md", "**/*.go", "**/*.ts", "**/*.js", "**/*.py", "**/*.rs",
 			"**/*.java", "**/*.toml", "**/*.json", "**/*.yml", "**/*.yaml",
 			"go.mod", "Cargo.toml", "pyproject.toml", ".env.example"},
-		[]string{"**/node_modules/**", "**/.next/**", "**/dist/**", "**/vendor/**",
-			"**/.git/**", "**/.wiki/**", "**/.plexium/**", "**/target/**",
-			"**/__pycache__/**", "**/.venv/**"},
+		exclude,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating scourer scanner: %w", err)
@@ -233,10 +237,10 @@ func isSourceFile(path string) bool {
 }
 
 var (
-	goFuncRegex     = regexp.MustCompile(`^func\s+(?:\([^)]+\)\s+)?(\w+)`)
-	goTypeRegex     = regexp.MustCompile(`^type\s+(\w+)`)
-	goPackageRegex  = regexp.MustCompile(`^package\s+(\w+)`)
-	goDocRegex      = regexp.MustCompile(`^//\s*(.+)`)
+	goFuncRegex    = regexp.MustCompile(`^func\s+(?:\([^)]+\)\s+)?(\w+)`)
+	goTypeRegex    = regexp.MustCompile(`^type\s+(\w+)`)
+	goPackageRegex = regexp.MustCompile(`^package\s+(\w+)`)
+	goDocRegex     = regexp.MustCompile(`^//\s*(.+)`)
 )
 
 func (s *Scourer) extractSource(f scanner.File) SourceDoc {

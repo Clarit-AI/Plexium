@@ -200,6 +200,84 @@ func TestScour_ExtractsExistingDocs(t *testing.T) {
 	assert.GreaterOrEqual(t, docCount, 2, "should find docs/*.md files")
 }
 
+func TestScour_ExcludesAgentInstallSurfaces(t *testing.T) {
+	dir := setupTestRepo(t)
+	writeFile(t, dir, ".claude/skills/plexium-user/skill.md", "# Plexium User")
+	writeFile(t, dir, ".claude/agents/kfc/spec-design.md", "# Spec Design")
+	writeFile(t, dir, ".codex/skills/plexium-user/SKILL.md", "# Plexium User")
+	writeFile(t, dir, ".cursor/rules/project.mdc", "# Cursor Rules")
+
+	scourer, err := NewScourer(dir)
+	require.NoError(t, err)
+
+	findings, err := scourer.Scour(ScourOptions{Depth: "shallow"})
+	require.NoError(t, err)
+
+	for _, doc := range findings.ExistingDocs {
+		assert.NotContains(t, doc.Path, ".claude/")
+		assert.NotContains(t, doc.Path, ".codex/")
+		assert.NotContains(t, doc.Path, ".cursor/")
+	}
+}
+
+func TestScour_RespectsPlexiumIgnore(t *testing.T) {
+	dir := setupTestRepo(t)
+	writeFile(t, dir, ".plexiumignore", "docs/specs/**\n")
+	writeFile(t, dir, "docs/specs/build-plan.md", "# Build Plan\n\nThis is planning material.")
+
+	scourer, err := NewScourer(dir)
+	require.NoError(t, err)
+
+	findings, err := scourer.Scour(ScourOptions{Depth: "shallow"})
+	require.NoError(t, err)
+
+	for _, doc := range findings.ExistingDocs {
+		assert.NotEqual(t, "docs/specs/build-plan.md", doc.Path)
+	}
+}
+
+func TestScour_RespectsGitignore(t *testing.T) {
+	dir := setupTestRepo(t)
+	writeFile(t, dir, ".gitignore", "scratch-docs/\n")
+	writeFile(t, dir, "scratch-docs/generated.md", "# Generated\n\nThis should not become wiki source.")
+
+	scourer, err := NewScourer(dir)
+	require.NoError(t, err)
+
+	findings, err := scourer.Scour(ScourOptions{Depth: "shallow"})
+	require.NoError(t, err)
+
+	for _, doc := range findings.ExistingDocs {
+		assert.NotEqual(t, "scratch-docs/generated.md", doc.Path)
+	}
+}
+
+func TestScour_GitignoreWithNegationFallsBackToDefaultBehavior(t *testing.T) {
+	dir := setupTestRepo(t)
+	writeFile(t, dir, ".gitignore", "scratch-docs/\n!scratch-docs/keep.md\n")
+	writeFile(t, dir, "scratch-docs/generated.md", "# Generated\n\nVisible under fallback behavior.")
+	writeFile(t, dir, "scratch-docs/keep.md", "# Keep\n\nImportant.")
+
+	scourer, err := NewScourer(dir)
+	require.NoError(t, err)
+
+	findings, err := scourer.Scour(ScourOptions{Depth: "shallow"})
+	require.NoError(t, err)
+
+	foundGenerated := false
+	foundKeep := false
+	for _, doc := range findings.ExistingDocs {
+		if doc.Path == "scratch-docs/generated.md" {
+			foundGenerated = true
+		}
+		if doc.Path == "scratch-docs/keep.md" {
+			foundKeep = true
+		}
+	}
+	assert.True(t, foundGenerated, "gitignore files with negations should not be translated into partial excludes")
+	assert.True(t, foundKeep, "negated docs should remain visible when falling back to default behavior")
+}
+
 func TestIsADRPath(t *testing.T) {
 	tests := []struct {
 		path string

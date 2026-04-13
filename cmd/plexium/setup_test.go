@@ -119,6 +119,110 @@ func TestSetupAgent_SeedsDaemonDefaults(t *testing.T) {
 	}
 }
 
+func TestSetupAgent_EnsuresGitignoreForLocalSecrets(t *testing.T) {
+	repoRoot := t.TempDir()
+
+	result, err := setupAgent(repoRoot, "claude", setupAgentOptions{})
+	if err != nil {
+		t.Fatalf("setupAgent returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(repoRoot, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	gitignore := string(data)
+	for _, want := range []string{
+		plexiumGitignoreStart,
+		".mcp.json",
+		".plexium/.env",
+		".plexium/credentials.json",
+		".plexium/workspaces/",
+		".plexium/output/",
+	} {
+		if !strings.Contains(gitignore, want) {
+			t.Fatalf("expected .gitignore to contain %q, got:\n%s", want, gitignore)
+		}
+	}
+
+	foundGitignoreStep := false
+	for _, step := range result.Steps {
+		if step.Name == "gitignore" && step.Status == "pass" {
+			foundGitignoreStep = true
+			break
+		}
+	}
+	if !foundGitignoreStep {
+		t.Fatalf("expected setup steps to include gitignore pass step")
+	}
+}
+
+func TestEnsurePlexiumGitignore_PreservesExistingRules(t *testing.T) {
+	repoRoot := t.TempDir()
+	existing := "node_modules/\n.env.local\n"
+	if err := os.WriteFile(filepath.Join(repoRoot, ".gitignore"), []byte(existing), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+
+	step, err := ensurePlexiumGitignore(repoRoot)
+	if err != nil {
+		t.Fatalf("ensurePlexiumGitignore returned error: %v", err)
+	}
+	if step.Status != "pass" || !strings.Contains(step.Message, "updated") {
+		t.Fatalf("expected updated pass step, got %#v", step)
+	}
+
+	data, err := os.ReadFile(filepath.Join(repoRoot, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{"node_modules/", ".env.local", ".plexium/credentials.json"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected .gitignore to contain %q, got:\n%s", want, got)
+		}
+	}
+}
+
+func TestEnsurePlexiumGitignore_ReplacesManagedBlock(t *testing.T) {
+	repoRoot := t.TempDir()
+	oldBlock := strings.Join([]string{
+		"node_modules/",
+		"",
+		plexiumGitignoreStart,
+		"# old Plexium rules",
+		".plexium/old-secret.json",
+		plexiumGitignoreEnd,
+		"",
+		"dist/",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(repoRoot, ".gitignore"), []byte(oldBlock), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+
+	if _, err := ensurePlexiumGitignore(repoRoot); err != nil {
+		t.Fatalf("ensurePlexiumGitignore returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(repoRoot, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{"node_modules/", "dist/", ".mcp.json", ".plexium/credentials.json"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected .gitignore to contain %q, got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, ".plexium/old-secret.json") {
+		t.Fatalf("expected old managed block content to be removed, got:\n%s", got)
+	}
+	if strings.Count(got, plexiumGitignoreStart) != 1 {
+		t.Fatalf("expected one Plexium gitignore block, got:\n%s", got)
+	}
+}
+
 func TestConfigureDaemonRunnerInConfig_PreservesExistingWatches(t *testing.T) {
 	repoRoot := t.TempDir()
 	if _, err := setupAgent(repoRoot, "claude", setupAgentOptions{}); err != nil {
@@ -136,7 +240,7 @@ func TestConfigureDaemonRunnerInConfig_PreservesExistingWatches(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	step, err := configureDaemonRunnerInConfig(repoRoot, "codex")
+	step, err := configureDaemonRunnerInConfig(repoRoot, "codex", setupAgentOptions{})
 	if err != nil {
 		t.Fatalf("configureDaemonRunnerInConfig returned error: %v", err)
 	}
@@ -156,6 +260,90 @@ func TestConfigureDaemonRunnerInConfig_PreservesExistingWatches(t *testing.T) {
 	}
 	if cfg.Daemon.Watches.Debt.Action != "create-issue" {
 		t.Fatalf("expected debt action to be preserved, got %q", cfg.Daemon.Watches.Debt.Action)
+	}
+}
+
+func TestConfigureDaemonRunnerInConfig_SkipsExecutionModePromptWhenNonInteractive(t *testing.T) {
+	repoRoot := t.TempDir()
+	if _, err := setupAgent(repoRoot, "claude", setupAgentOptions{}); err != nil {
+		t.Fatalf("initial setupAgent returned error: %v", err)
+	}
+
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.AssistiveAgent.Enabled = true
+	cfg.AssistiveAgent.Providers = []config.ProviderConfig{{
+		Name:    "openrouter",
+		Enabled: true,
+		Type:    "openai-compatible",
+		Model:   "nvidia/nemotron-3-super-120b-a12b",
+	}}
+	if err := config.SaveToDir(repoRoot, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	step, err := configureDaemonRunnerInConfig(repoRoot, "claude", setupAgentOptions{
+		PromptForExecutionMode: true,
+		Stdin:                  bytes.NewBufferString("2\n"),
+		Stdout:                 &stdout,
+	})
+	if err != nil {
+		t.Fatalf("configureDaemonRunnerInConfig returned error: %v", err)
+	}
+	if strings.Contains(stdout.String(), "Daemon execution mode") {
+		t.Fatalf("did not expect execution mode prompt in non-interactive setup, got:\n%s", stdout.String())
+	}
+	if strings.Contains(step.Message, "execution mode set to provider-primary") {
+		t.Fatalf("did not expect daemon step to report provider-primary, got %+v", step)
+	}
+
+	cfg, err = config.LoadFromDir(repoRoot)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if cfg.Daemon.ExecutionMode != "coding-agent-primary" {
+		t.Fatalf("expected coding-agent-primary execution mode, got %q", cfg.Daemon.ExecutionMode)
+	}
+}
+
+func TestMaybeCreateInitialBaselineCommit_NonInteractiveWarns(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+
+	step := maybeCreateInitialBaselineCommit(repoRoot, setupAgentOptions{
+		Stdin:                   bytes.NewBufferString(""),
+		Stdout:                  &bytes.Buffer{},
+		Stderr:                  &bytes.Buffer{},
+		PromptForBaselineCommit: true,
+	})
+
+	if step == nil {
+		t.Fatalf("expected baseline warning for repo with no commits")
+	}
+	if step.Status != "warning" || !strings.Contains(step.Message, "no commits yet") {
+		t.Fatalf("expected no-commit warning, got %#v", step)
+	}
+	if gitHasCommit(repoRoot) {
+		t.Fatalf("did not expect non-interactive setup to create a commit")
+	}
+}
+
+func TestCreateInitialBaselineCommit(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	configureGitIdentity(t, repoRoot)
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Test\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+
+	if err := createInitialBaselineCommit(repoRoot); err != nil {
+		t.Fatalf("create baseline commit: %v", err)
+	}
+	if !gitHasCommit(repoRoot) {
+		t.Fatalf("expected baseline commit to create HEAD")
 	}
 }
 
@@ -390,6 +578,34 @@ func TestSetupAgent_ExistingAssistiveProvider_IsReported(t *testing.T) {
 	}
 }
 
+func TestPrintConfiguredAssistiveSummary_IncludesModelProfileAndBudget(t *testing.T) {
+	cfg := &config.Config{
+		AssistiveAgent: config.AssistiveAgent{
+			Providers: []config.ProviderConfig{
+				{
+					Name:              "openrouter",
+					Enabled:           true,
+					Type:              "openai-compatible",
+					Model:             "google/gemma-4-31b-it",
+					CapabilityProfile: "balanced",
+				},
+			},
+			Budget: config.BudgetConfig{DailyUSD: 1.25},
+		},
+	}
+
+	var stdout bytes.Buffer
+	printConfiguredAssistiveSummary(&stdout, cfg)
+	got := stdout.String()
+
+	if !strings.Contains(got, "openrouter: model google/gemma-4-31b-it, profile balanced") {
+		t.Fatalf("expected provider model and profile summary, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Daily budget: $1.25") {
+		t.Fatalf("expected daily budget summary, got:\n%s", got)
+	}
+}
+
 func TestFormatSetupSummary_GroupsOutputIntoSections(t *testing.T) {
 	result := &setupResult{
 		Agent:    "claude",
@@ -435,5 +651,28 @@ func TestFormatSetupSummary_GroupsOutputIntoSections(t *testing.T) {
 	}
 	if !strings.Contains(summary, "Run `plexium agent start` when you want background upkeep") {
 		t.Fatalf("expected daemon next step, got:\n%s", summary)
+	}
+}
+
+func initGitRepo(t *testing.T, repoRoot string) {
+	t.Helper()
+	cmd := exec.Command("/usr/bin/git", "init")
+	cmd.Dir = repoRoot
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init temp repo: %v\n%s", err, output)
+	}
+}
+
+func configureGitIdentity(t *testing.T, repoRoot string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"config", "user.email", "plexium-test@example.com"},
+		{"config", "user.name", "Plexium Test"},
+	} {
+		cmd := exec.Command("/usr/bin/git", args...)
+		cmd.Dir = repoRoot
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+		}
 	}
 }

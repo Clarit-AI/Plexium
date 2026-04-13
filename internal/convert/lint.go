@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Clarit-AI/Plexium/internal/generate"
 	"github.com/Clarit-AI/Plexium/internal/scanner"
 )
 
@@ -83,6 +84,8 @@ func (cl *ConvertLinter) Analyze(pages []PageData, eligible []scanner.File) *Lin
 	return result
 }
 
+var sourceRootPrefixes = []string{"src/", "internal/", "pkg/", "lib/", "libs/", "packages/", "cmd/"}
+
 // findUndocumentedModules finds source directories that don't have corresponding wiki pages.
 func (cl *ConvertLinter) findUndocumentedModules(pages []PageData, eligible []scanner.File) []string {
 	// Collect all module slugs from pages
@@ -90,15 +93,14 @@ func (cl *ConvertLinter) findUndocumentedModules(pages []PageData, eligible []sc
 	for _, p := range pages {
 		if p.Section == "Modules" {
 			slug := strings.TrimSuffix(filepath.Base(p.WikiPath), ".md")
-			documented[strings.ToLower(slug)] = true
+			documented[generate.ToSlug(slug)] = true
 		}
 	}
 
 	// Collect all source directories from eligible files
 	srcDirs := make(map[string]bool)
-	srcPrefixes := []string{"src/", "internal/", "pkg/", "lib/", "cmd/"}
 	for _, f := range eligible {
-		for _, prefix := range srcPrefixes {
+		for _, prefix := range sourceRootPrefixes {
 			if strings.HasPrefix(f.Path, prefix) {
 				parts := strings.SplitN(f.Path, "/", 3)
 				if len(parts) >= 2 {
@@ -112,7 +114,7 @@ func (cl *ConvertLinter) findUndocumentedModules(pages []PageData, eligible []sc
 	// Find undocumented
 	var undocumented []string
 	for dir := range srcDirs {
-		slug := strings.ToLower(dir)
+		slug := generate.ToSlug(dir)
 		if !documented[slug] {
 			undocumented = append(undocumented, dir)
 		}
@@ -123,7 +125,7 @@ func (cl *ConvertLinter) findUndocumentedModules(pages []PageData, eligible []sc
 
 func (cl *ConvertLinter) createStub(moduleName string) PageData {
 	title := formatModuleTitle(moduleName)
-	slug := strings.ToLower(moduleName)
+	slug := generate.ToSlug(moduleName)
 
 	var b strings.Builder
 	b.WriteString("---\n")
@@ -149,9 +151,8 @@ func (cl *ConvertLinter) createStub(moduleName string) PageData {
 
 func countSourceDirs(eligible []scanner.File) int {
 	dirs := make(map[string]bool)
-	srcPrefixes := []string{"src/", "internal/", "pkg/", "lib/", "cmd/"}
 	for _, f := range eligible {
-		for _, prefix := range srcPrefixes {
+		for _, prefix := range sourceRootPrefixes {
 			if strings.HasPrefix(f.Path, prefix) {
 				parts := strings.SplitN(f.Path, "/", 3)
 				if len(parts) >= 2 {

@@ -39,8 +39,10 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "plexium",
-	Short: "Self-documenting repositories via LLM Wiki pattern",
+	Use:           "plexium",
+	Short:         "Self-documenting repositories via LLM Wiki pattern",
+	SilenceUsage:  true,
+	SilenceErrors: true,
 	Long: `Plexium transforms repositories into self-documenting systems by applying 
 Karpathy's LLM Wiki pattern to agentic coding workflows. Instead of stateless RAG 
 rediscovery on every session, LLM coding agents incrementally build and maintain 
@@ -206,7 +208,13 @@ var initCmd = &cobra.Command{
 
 		repoRoot, err := currentGitRepoRoot()
 		if err != nil {
-			return fmt.Errorf("plexium init requires a git repository — run 'git init' first, then retry")
+			if !dryRun {
+				return fmt.Errorf("plexium init requires a git repository — run 'git init' first, then retry")
+			}
+			repoRoot, err = os.Getwd()
+			if err != nil {
+				return fmt.Errorf("get working directory: %w", err)
+			}
 		}
 
 		outputJSON, _ := cmd.Flags().GetBool("output-json")

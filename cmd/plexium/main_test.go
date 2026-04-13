@@ -11,6 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRootCommandSilencesDuplicateRuntimeErrors(t *testing.T) {
+	assert.True(t, rootCmd.SilenceUsage)
+	assert.True(t, rootCmd.SilenceErrors)
+}
+
 func TestResolveSetupAPIKey_FromInjectedStdin(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("api-key-file", "", "")

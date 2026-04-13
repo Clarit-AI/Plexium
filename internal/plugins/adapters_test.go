@@ -48,11 +48,139 @@ func TestInstallAdapter_BuiltInGeneratesInstructionFile(t *testing.T) {
 		t.Fatalf("expected built-in install result")
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); err != nil {
+	agentsPath := filepath.Join(dir, "AGENTS.md")
+	if _, err := os.Stat(agentsPath); err != nil {
 		t.Fatalf("expected AGENTS.md to exist: %v", err)
+	}
+	agentsData, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	got := string(agentsData)
+	if !containsAll(got, "Important: Plexium Wiki Maintenance Layer", "Project Details Start Here", "Read `.wiki/_schema.md`", "Retrieval Protocol", "pageindex_search") {
+		t.Fatalf("expected AGENTS.md to separate Plexium note from project details, got:\n%s", got)
+	}
+	if strings.Contains(got, "# schema") {
+		t.Fatalf("expected AGENTS.md to reference the schema without dumping the full schema body, got:\n%s", got)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".plexium", "plugins", "codex", "plugin.sh")); err != nil {
 		t.Fatalf("expected installed plugin script to exist: %v", err)
+	}
+}
+
+func TestInstallAdapter_CodexIncludesMementoCommitProtocolWhenEnabled(t *testing.T) {
+	dir := t.TempDir()
+	writeSchemaFixture(t, dir)
+	writeMementoConfigFixture(t, dir)
+
+	result, err := InstallAdapter(dir, "codex", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.BuiltIn {
+		t.Fatalf("expected built-in install result")
+	}
+
+	agentsData, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	if !strings.Contains(string(agentsData), "Use `git memento commit` instead of `git commit`") {
+		t.Fatalf("expected AGENTS.md to include memento commit protocol, got:\n%s", string(agentsData))
+	}
+}
+
+func TestInstallAdapter_CodexIncludesAssistiveAgentProtocolWhenEnabled(t *testing.T) {
+	dir := t.TempDir()
+	writeSchemaFixture(t, dir)
+	writeAssistiveConfigFixture(t, dir)
+
+	result, err := InstallAdapter(dir, "codex", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.BuiltIn {
+		t.Fatalf("expected built-in install result")
+	}
+
+	agentsData, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	got := string(agentsData)
+	if !containsAll(got, "Assistive Agent", "plexium lint --full", "Keep the normal wiki workflow") {
+		t.Fatalf("expected AGENTS.md to include assistive provider guidance, got:\n%s", got)
+	}
+}
+
+func TestInstallAdapter_CodexRequiresTopLevelAssistiveEnabled(t *testing.T) {
+	dir := t.TempDir()
+	writeSchemaFixture(t, dir)
+	configYAML := `version: 1
+sources:
+  include:
+    - "**/*.go"
+wiki:
+  root: .wiki
+assistiveAgent:
+  enabled: false
+  providers:
+    - name: openrouter
+      enabled: true
+      type: openai-compatible
+      endpoint: https://openrouter.ai/api
+      model: google/gemma-4-31b-it
+      apiKeyEnv: OPENROUTER_API_KEY
+      capabilityProfile: balanced
+`
+	if err := os.WriteFile(filepath.Join(dir, ".plexium", "config.yml"), []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("write config.yml: %v", err)
+	}
+
+	if _, err := InstallAdapter(dir, "codex", ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	agentsData, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	if strings.Contains(string(agentsData), "Assistive Agent") {
+		t.Fatalf("did not expect AGENTS.md to include assistive provider guidance when top-level assistiveAgent.enabled is false, got:\n%s", string(agentsData))
+	}
+}
+
+func TestInstallAdapter_CodexPreservesExistingProjectDetails(t *testing.T) {
+	dir := t.TempDir()
+	writeSchemaFixture(t, dir)
+	existing := `# OpenAI Codex — Existing Project
+
+## Old Generated Section
+
+Replace this setup text.
+
+## Existing Project Details Start Here
+
+Keep this project-specific context.
+`
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(existing), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+
+	if _, err := InstallAdapter(dir, "codex", ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	agentsData, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	got := string(agentsData)
+	if !strings.Contains(got, "## Existing Project Details Start Here\n\nKeep this project-specific context.") {
+		t.Fatalf("expected AGENTS.md to preserve existing project details, got:\n%s", got)
+	}
+	if strings.Contains(got, "Replace this setup text.") {
+		t.Fatalf("expected generated setup text to be refreshed, got:\n%s", got)
 	}
 }
 
@@ -234,5 +362,47 @@ func writeSchemaFixture(t *testing.T, dir string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n"), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
+	}
+}
+
+func writeMementoConfigFixture(t *testing.T, dir string) {
+	t.Helper()
+	configYAML := `version: 1
+sources:
+  include:
+    - "**/*.go"
+wiki:
+  root: .wiki
+integrations:
+  memento: true
+`
+	if err := os.WriteFile(filepath.Join(dir, ".plexium", "config.yml"), []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("write config.yml: %v", err)
+	}
+}
+
+func writeAssistiveConfigFixture(t *testing.T, dir string) {
+	t.Helper()
+	configYAML := `version: 1
+sources:
+  include:
+    - "**/*.go"
+wiki:
+  root: .wiki
+assistiveAgent:
+  enabled: true
+  providers:
+    - name: openrouter
+      enabled: true
+      type: openai-compatible
+      endpoint: https://openrouter.ai/api
+      model: google/gemma-4-31b-it
+      apiKeyEnv: OPENROUTER_API_KEY
+      capabilityProfile: balanced
+  budget:
+    dailyUSD: 0
+`
+	if err := os.WriteFile(filepath.Join(dir, ".plexium", "config.yml"), []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("write config.yml: %v", err)
 	}
 }

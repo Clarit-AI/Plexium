@@ -2,6 +2,7 @@ package publish
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,10 +22,10 @@ type PublishOptions struct {
 
 // PublishResult holds the result of a publish operation
 type PublishResult struct {
-	FilesPushed []string
+	FilesPushed  []string
 	FilesSkipped []string
-	Commit      string
-	Timestamp   string
+	Commit       string
+	Timestamp    string
 }
 
 // Publisher handles pushing wiki content to GitHub Wiki
@@ -96,11 +97,16 @@ func (p *Publisher) Publish(dryRun bool) (*PublishResult, error) {
 		return result, nil
 	}
 
-	// Perform the actual publish
-	if p.config.GitHubWiki.Enabled {
-		if err := p.pushToGitHubWiki(filesToPublish); err != nil {
-			return nil, fmt.Errorf("pushing to GitHub Wiki: %w", err)
-		}
+	enabled, err := p.githubWikiPublishingEnabled()
+	if err != nil {
+		return nil, err
+	}
+	if !enabled {
+		return nil, fmt.Errorf("GitHub Wiki publishing is disabled; enable GitHub Wiki in the repository settings or set githubWiki.enabled: true in .plexium/config.yml")
+	}
+
+	if err := p.pushToGitHubWiki(filesToPublish); err != nil {
+		return nil, fmt.Errorf("pushing to GitHub Wiki: %w", err)
 	}
 
 	// Update manifest timestamp
@@ -114,6 +120,48 @@ func (p *Publisher) Publish(dryRun bool) (*PublishResult, error) {
 	}
 
 	return result, nil
+}
+
+func (p *Publisher) githubWikiPublishingEnabled() (bool, error) {
+	if p.config != nil && p.config.GitHubWiki.Enabled {
+		return true, nil
+	}
+
+	enabled, repo, err := p.detectGitHubWikiEnabled()
+	if err != nil {
+		return false, fmt.Errorf("githubWiki.enabled is false and Plexium could not verify GitHub Wiki settings with gh: %w. Set githubWiki.enabled: true in .plexium/config.yml after confirming the repo wiki is enabled", err)
+	}
+	if enabled {
+		return true, nil
+	}
+	return false, fmt.Errorf("GitHub Wiki is disabled for %s; enable it in GitHub repository settings before publishing", repo)
+}
+
+func (p *Publisher) detectGitHubWikiEnabled() (bool, string, error) {
+	remoteURL, err := p.getRemoteURL()
+	if err != nil {
+		return false, "", err
+	}
+	repo, ok := githubRepoFromRemoteURL(remoteURL)
+	if !ok {
+		return false, "", fmt.Errorf("remote is not a GitHub repository: %s", sanitizeRemoteURL(remoteURL))
+	}
+
+	cmd := exec.Command("gh", "repo", "view", repo, "--json", "hasWikiEnabled", "--jq", ".hasWikiEnabled")
+	cmd.Dir = p.repoRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, repo, fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
+	}
+
+	switch strings.TrimSpace(string(output)) {
+	case "true":
+		return true, repo, nil
+	case "false":
+		return false, repo, nil
+	default:
+		return false, repo, fmt.Errorf("unexpected gh output %q", strings.TrimSpace(string(output)))
+	}
 }
 
 // collectFiles gathers wiki files respecting publish/exclude config
@@ -212,7 +260,7 @@ func (p *Publisher) pushToGitHubWiki(files []string) error {
 
 	wikiURL := toWikiURL(remoteURL)
 	if wikiURL == "" {
-		return fmt.Errorf("cannot determine wiki URL from remote: %s", remoteURL)
+		return fmt.Errorf("cannot determine wiki URL from remote: %s", sanitizeRemoteURL(remoteURL))
 	}
 
 	// Clone wiki repo to temp dir
@@ -224,7 +272,7 @@ func (p *Publisher) pushToGitHubWiki(files []string) error {
 
 	cloneCmd := exec.Command("git", "clone", wikiURL, tmpDir)
 	if output, err := cloneCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("cloning wiki repo: %s: %w", string(output), err)
+		return formatWikiCloneError(wikiURL, output, err)
 	}
 
 	// Step 1: Clear all previously synced wiki content from the clone.
@@ -279,14 +327,95 @@ func (p *Publisher) pushToGitHubWiki(files []string) error {
 	return nil
 }
 
+func formatWikiCloneError(wikiURL string, output []byte, err error) error {
+	cloneOutput := strings.TrimSpace(string(output))
+	if strings.Contains(cloneOutput, "Repository not found") {
+		return fmt.Errorf("cloning wiki repo %s failed: repository not found. GitHub only creates the backing .wiki.git repository after Wiki is enabled and the first wiki page exists. GitHub can also return this when the active git credentials cannot access the repository. Verify `gh auth status`, enable GitHub Wiki in repository settings, create a first page in the GitHub web UI if needed, then rerun `plexium publish`: %s: %w", wikiURL, cloneOutput, err)
+	}
+	return fmt.Errorf("cloning wiki repo %s failed: %s: %w", wikiURL, cloneOutput, err)
+}
+
 func (p *Publisher) getRemoteURL() (string, error) {
-	cmd := exec.Command("git", "remote", "get-url", "origin")
+	remote, err := p.resolveRemoteName()
+	if err != nil {
+		return "", err
+	}
+
+	cmd := exec.Command("git", "remote", "get-url", remote)
+	cmd.Dir = p.repoRoot
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("get URL for remote %q: %w", remote, err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func (p *Publisher) resolveRemoteName() (string, error) {
+	if remote, err := p.currentBranchRemote(); err == nil && remote != "" {
+		if p.remoteExists(remote) {
+			return remote, nil
+		}
+	}
+
+	if p.remoteExists("origin") {
+		return "origin", nil
+	}
+
+	remotes, err := p.listRemotes()
+	if err != nil {
+		return "", err
+	}
+	if len(remotes) == 1 {
+		return remotes[0], nil
+	}
+	if len(remotes) == 0 {
+		return "", fmt.Errorf("no git remotes configured; add a remote or configure an upstream before publishing")
+	}
+	return "", fmt.Errorf("multiple git remotes configured and no upstream remote is set; set an upstream or add an origin remote before publishing")
+}
+
+func (p *Publisher) currentBranchRemote() (string, error) {
+	cmd := exec.Command("git", "symbolic-ref", "--quiet", "--short", "HEAD")
 	cmd.Dir = p.repoRoot
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
+	branch := strings.TrimSpace(string(output))
+	if branch == "" || branch == "HEAD" {
+		return "", fmt.Errorf("current branch is detached")
+	}
+
+	cmd = exec.Command("git", "config", "--get", "branch."+branch+".remote")
+	cmd.Dir = p.repoRoot
+	output, err = cmd.Output()
+	if err != nil {
+		return "", err
+	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+func (p *Publisher) remoteExists(remote string) bool {
+	cmd := exec.Command("git", "remote", "get-url", remote)
+	cmd.Dir = p.repoRoot
+	return cmd.Run() == nil
+}
+
+func (p *Publisher) listRemotes() ([]string, error) {
+	cmd := exec.Command("git", "remote")
+	cmd.Dir = p.repoRoot
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("list git remotes: %w", err)
+	}
+	var remotes []string
+	for _, line := range strings.Split(string(output), "\n") {
+		remote := strings.TrimSpace(line)
+		if remote != "" {
+			remotes = append(remotes, remote)
+		}
+	}
+	return remotes, nil
 }
 
 func (p *Publisher) getGitHead() (string, error) {
@@ -297,6 +426,50 @@ func (p *Publisher) getGitHead() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+// sanitizeRemoteURL strips userinfo (credentials) from a remote URL for safe
+// inclusion in error messages. Non-URL forms (SCP-style git@host:path) are
+// returned unchanged since they don't embed tokens in the userinfo field.
+func sanitizeRemoteURL(remoteURL string) string {
+	if strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") {
+		u, err := url.Parse(remoteURL)
+		if err == nil {
+			u.User = nil
+			return u.String()
+		}
+	}
+	return remoteURL
+}
+
+func githubRepoFromRemoteURL(remoteURL string) (string, bool) {
+	remoteURL = strings.TrimSpace(remoteURL)
+	remoteURL = strings.TrimSuffix(remoteURL, ".git")
+	remoteURL = strings.TrimSuffix(remoteURL, "/")
+
+	// URL-style remotes: parse structurally to handle credentials and non-standard ports.
+	if strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") || strings.HasPrefix(remoteURL, "ssh://") {
+		u, err := url.Parse(remoteURL)
+		if err == nil && u.Hostname() == "github.com" {
+			return cleanGitHubRepoName(strings.Trim(u.Path, "/"))
+		}
+	}
+
+	// SCP-style: git@github.com:owner/repo
+	if strings.HasPrefix(remoteURL, "git@github.com:") {
+		repo := strings.TrimPrefix(remoteURL, "git@github.com:")
+		return cleanGitHubRepoName(repo)
+	}
+
+	return "", false
+}
+
+func cleanGitHubRepoName(repo string) (string, bool) {
+	parts := strings.Split(strings.Trim(repo, "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", false
+	}
+	return parts[0] + "/" + parts[1], true
 }
 
 // clearWikiContent removes all wiki-managed content from the cloned wiki dir,
@@ -338,19 +511,32 @@ func clearWikiContent(wikiDir string) error {
 	return nil
 }
 
-// toWikiURL converts a git remote URL to its wiki equivalent
+// toWikiURL converts a git remote URL to its wiki equivalent.
+// It preserves credentials and port from the original remote so that
+// token-bearing and ssh-with-port remotes can clone successfully.
 func toWikiURL(remoteURL string) string {
-	// HTTPS: https://github.com/owner/repo.git → https://github.com/owner/repo.wiki.git
-	if strings.HasPrefix(remoteURL, "https://") {
-		return strings.Replace(remoteURL, ".git", ".wiki.git", 1)
+	repo, ok := githubRepoFromRemoteURL(remoteURL)
+	if !ok {
+		return ""
 	}
-	// SSH: git@github.com:owner/repo.git → git@github.com:owner/repo.wiki.git
-	if strings.HasPrefix(remoteURL, "git@") {
-		return strings.Replace(remoteURL, ".git", ".wiki.git", 1)
+	remoteURL = strings.TrimSpace(remoteURL)
+
+	// URL-style remotes: rebuild preserving scheme, userinfo, and host (with port).
+	if strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") || strings.HasPrefix(remoteURL, "ssh://") {
+		u, err := url.Parse(remoteURL)
+		if err == nil && u.Hostname() == "github.com" {
+			u.Path = "/" + repo + ".wiki.git"
+			// Normalize http → https for wiki clone (GitHub redirects anyway).
+			if u.Scheme == "http" {
+				u.Scheme = "https"
+			}
+			return u.String()
+		}
 	}
-	// SSH without .git suffix
-	if strings.Contains(remoteURL, "github.com:") {
-		return remoteURL + ".wiki.git"
+
+	// SCP-style: git@github.com:owner/repo
+	if strings.HasPrefix(remoteURL, "git@github.com:") {
+		return "git@github.com:" + repo + ".wiki.git"
 	}
 	return ""
 }

@@ -739,25 +739,77 @@ func collectWorkspaceChanges(workdir string) ([]string, error) {
 		if idx := strings.Index(path, " -> "); idx >= 0 {
 			path = path[idx+4:]
 		}
-		if !seen[path] {
-			seen[path] = true
-			changed = append(changed, path)
+		if shouldIgnoreWorkspaceChange(path) {
+			continue
+		}
+		expanded, err := expandWorkspaceChange(workdir, path)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range expanded {
+			if shouldIgnoreWorkspaceChange(item) || seen[item] {
+				continue
+			}
+			seen[item] = true
+			changed = append(changed, item)
 		}
 	}
 	sort.Strings(changed)
 	return changed, nil
 }
 
+func shouldIgnoreWorkspaceChange(path string) bool {
+	clean := filepath.ToSlash(filepath.Clean(path))
+	return clean == "." || clean == "meta.json"
+}
+
+func expandWorkspaceChange(workdir, path string) ([]string, error) {
+	clean := filepath.Clean(path)
+	fullPath := filepath.Join(workdir, clean)
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{filepath.ToSlash(clean)}, nil
+		}
+		return nil, err
+	}
+	if !info.IsDir() {
+		return []string{filepath.ToSlash(clean)}, nil
+	}
+
+	var files []string
+	if err := filepath.WalkDir(fullPath, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(workdir, path)
+		if err != nil {
+			return err
+		}
+		files = append(files, filepath.ToSlash(rel))
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
 func applyWorkspaceChanges(repoRoot, workdir, wikiRoot string, changedFiles []string) ([]string, string, bool, error) {
 	var applied []string
+	var unsupported []string
 	for _, rel := range changedFiles {
 		if !isAllowedApplyPath(rel, wikiRoot) {
 			fmt.Fprintf(os.Stderr, "daemon: skipped file outside wiki scope: %s\n", rel)
-			return nil, fmt.Sprintf("left in workspace for review (%s outside allowed apply scope)", rel), true, nil
+			unsupported = append(unsupported, rel)
+			continue
 		}
 		src := filepath.Join(workdir, rel)
 		dst := filepath.Join(repoRoot, rel)
-		if _, err := os.Stat(src); err != nil {
+		info, err := os.Stat(src)
+		if err != nil {
 			if os.IsNotExist(err) {
 				if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
 					return nil, "", false, err
@@ -766,6 +818,9 @@ func applyWorkspaceChanges(repoRoot, workdir, wikiRoot string, changedFiles []st
 				continue
 			}
 			return nil, "", false, err
+		}
+		if info.IsDir() {
+			continue
 		}
 		data, err := os.ReadFile(src)
 		if err != nil {
@@ -778,6 +833,12 @@ func applyWorkspaceChanges(repoRoot, workdir, wikiRoot string, changedFiles []st
 			return nil, "", false, err
 		}
 		applied = append(applied, rel)
+	}
+	if len(unsupported) > 0 {
+		if len(applied) == 0 {
+			return nil, fmt.Sprintf("left %d unsupported file(s) in workspace for review: %s", len(unsupported), strings.Join(unsupported, ", ")), true, nil
+		}
+		return applied, fmt.Sprintf("applied %d file(s); left %d unsupported file(s) in workspace for review: %s", len(applied), len(unsupported), strings.Join(unsupported, ", ")), true, nil
 	}
 	if len(applied) == 0 {
 		return nil, "no allowed wiki files to apply", true, nil
@@ -807,12 +868,16 @@ func (d *Daemon) updateManifestForWorkspace(job *upkeepJob, workdir string, chan
 		if strings.HasPrefix(filepath.Base(changed), "_") {
 			continue
 		}
+		wikiPath := trimRootPrefix(changed, wikiRoot)
+		if wikiPath == "" {
+			continue
+		}
 
-		page, _ := mgr.GetPage(changed)
+		page, _ := mgr.GetPage(wikiPath)
 		sourceFiles := []manifest.SourceFile{}
 		if page != nil {
 			sourceFiles = page.SourceFiles
-		} else if suggestion, ok := suggestedSources[changed]; ok {
+		} else if suggestion, ok := suggestedSources[wikiPath]; ok {
 			sourceFiles = suggestion
 		} else if job.Type == jobTypeRawIngest && job.Payload != "" {
 			sourceFiles = []manifest.SourceFile{{Path: filepath.ToSlash(filepath.Join(rawRoot, job.Payload))}}
@@ -832,7 +897,7 @@ func (d *Daemon) updateManifestForWorkspace(job *upkeepJob, workdir string, chan
 		content, err := os.ReadFile(filepath.Join(workdir, changed))
 		if err != nil {
 			if os.IsNotExist(err) {
-				if err := mgr.RemovePage(changed); err != nil {
+				if err := mgr.RemovePage(wikiPath); err != nil {
 					return err
 				}
 				continue
@@ -840,10 +905,10 @@ func (d *Daemon) updateManifestForWorkspace(job *upkeepJob, workdir string, chan
 			return err
 		}
 		entry := manifest.PageEntry{
-			WikiPath:    changed,
-			Title:       extractTitle(string(content), changed),
+			WikiPath:    wikiPath,
+			Title:       extractTitle(string(content), wikiPath),
 			Ownership:   "managed",
-			Section:     inferSection(changed, wikiRoot),
+			Section:     inferSection(wikiPath, wikiRoot),
 			SourceFiles: sourceFiles,
 			LastUpdated: now,
 			UpdatedBy:   "plexium-daemon",

@@ -58,13 +58,20 @@ type verifyResult struct {
 }
 
 type setupAgentOptions struct {
-	WriteConfig        bool
-	WithMemento        bool
-	Stdin              io.Reader
-	Stdout             io.Writer
-	Stderr             io.Writer
-	PromptForAssistive bool
+	WriteConfig             bool
+	WithMemento             bool
+	Stdin                   io.Reader
+	Stdout                  io.Writer
+	Stderr                  io.Writer
+	PromptForAssistive      bool
+	PromptForBaselineCommit bool
+	PromptForExecutionMode  bool
 }
+
+const (
+	plexiumGitignoreStart = "# BEGIN PLEXIUM GITIGNORE"
+	plexiumGitignoreEnd   = "# END PLEXIUM GITIGNORE"
+)
 
 var setupCmd = &cobra.Command{
 	Use:   "setup [agent]",
@@ -117,12 +124,14 @@ func runSetupCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	result, err := setupAgent(repoRoot, agentName, setupAgentOptions{
-		WriteConfig:        writeConfig,
-		WithMemento:        withMemento,
-		Stdin:              cmd.InOrStdin(),
-		Stdout:             setupStdout,
-		Stderr:             setupStderr,
-		PromptForAssistive: !outputJSON,
+		WriteConfig:             writeConfig,
+		WithMemento:             withMemento,
+		Stdin:                   cmd.InOrStdin(),
+		Stdout:                  setupStdout,
+		Stderr:                  setupStderr,
+		PromptForAssistive:      !outputJSON,
+		PromptForBaselineCommit: !outputJSON,
+		PromptForExecutionMode:  !outputJSON,
 	})
 	if err != nil {
 		return err
@@ -300,6 +309,12 @@ func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, e
 		}
 	}
 
+	gitignoreStep, err := ensurePlexiumGitignore(repoRoot)
+	if err != nil {
+		return nil, fmt.Errorf("ensure Plexium gitignore rules: %w", err)
+	}
+	result.Steps = append(result.Steps, gitignoreStep)
+
 	if _, err := compile.NewCompiler(repoRoot, false).Compile(); err != nil {
 		return nil, fmt.Errorf("compile navigation: %w", err)
 	}
@@ -356,15 +371,19 @@ func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, e
 		})
 	}
 
-	daemonStep, err := configureDaemonRunnerInConfig(repoRoot, normalizedAgent)
+	result.Steps = append(result.Steps, maybeConfigureAssistiveProvider(repoRoot, normalizedAgent, opts))
+
+	daemonStep, err := configureDaemonRunnerInConfig(repoRoot, normalizedAgent, opts)
 	if err != nil {
 		return nil, fmt.Errorf("configure daemon runner: %w", err)
 	}
 	result.Steps = append(result.Steps, daemonStep)
 
-	result.Steps = append(result.Steps, maybeConfigureAssistiveProvider(repoRoot, normalizedAgent, opts))
 	if _, err := os.Stat(filepath.Join(repoRoot, "lefthook.yml")); err == nil {
 		result.Steps = append(result.Steps, maybeInstallLefthook(repoRoot))
+	}
+	if baselineStep := maybeCreateInitialBaselineCommit(repoRoot, opts); baselineStep != nil {
+		result.Steps = append(result.Steps, *baselineStep)
 	}
 
 	result.Verify, err = verifyAgent(repoRoot, normalizedAgent)
@@ -374,6 +393,88 @@ func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, e
 	result.NextSteps = buildSetupNextSteps(result)
 
 	return result, nil
+}
+
+func ensurePlexiumGitignore(repoRoot string) (setupStep, error) {
+	path := filepath.Join(repoRoot, ".gitignore")
+	data, err := os.ReadFile(path)
+	existed := true
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return setupStep{}, fmt.Errorf("read .gitignore: %w", err)
+		}
+		existed = false
+		data = nil
+	}
+
+	next, changed := applyPlexiumGitignoreBlock(string(data))
+	if !changed {
+		return setupStep{
+			Name:    "gitignore",
+			Status:  "pass",
+			Message: "Plexium local/secret ignore rules already present",
+		}, nil
+	}
+
+	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
+		return setupStep{}, fmt.Errorf("write .gitignore: %w", err)
+	}
+
+	message := "created .gitignore with Plexium local/secret ignore rules"
+	if existed {
+		message = "updated .gitignore with Plexium local/secret ignore rules"
+	}
+	return setupStep{Name: "gitignore", Status: "pass", Message: message}, nil
+}
+
+func applyPlexiumGitignoreBlock(existing string) (string, bool) {
+	block := plexiumGitignoreBlock()
+	if existing == "" {
+		return block, true
+	}
+	if strings.Contains(existing, block) {
+		return existing, false
+	}
+
+	start := strings.Index(existing, plexiumGitignoreStart)
+	if start >= 0 {
+		end := strings.Index(existing[start:], plexiumGitignoreEnd)
+		if end >= 0 {
+			endAbs := start + end + len(plexiumGitignoreEnd)
+			for endAbs < len(existing) && existing[endAbs] == '\n' {
+				endAbs++
+			}
+			return existing[:start] + block + existing[endAbs:], true
+		}
+	}
+
+	trimmed := strings.TrimRight(existing, "\n")
+	if trimmed == "" {
+		return block, true
+	}
+	return trimmed + "\n\n" + block, true
+}
+
+func plexiumGitignoreBlock() string {
+	return strings.Join([]string{
+		plexiumGitignoreStart,
+		"# Plexium local secrets and runtime artifacts",
+		".mcp.json",
+		".plexium/.env",
+		".plexium/credentials.json",
+		".plexium/daemon-status.json",
+		".plexium/daemon.err.log",
+		".plexium/daemon.out.log",
+		".plexium/daemon.pid",
+		".plexium/output/",
+		".plexium/workspaces/",
+		".plexium/recovery/",
+		".plexium/reports/conversion-*.json",
+		".plexium/reports/conversion-*.md",
+		".DS_Store",
+		plexiumGitignoreEnd,
+		"",
+	}, "\n")
 }
 
 func configureMemento(repoRoot, agent string, opts setupAgentOptions) setupStep {
@@ -471,6 +572,72 @@ func configureMemento(repoRoot, agent string, opts setupAgentOptions) setupStep 
 	return setupStep{Name: "memento", Status: "pass", Message: message}
 }
 
+func maybeCreateInitialBaselineCommit(repoRoot string, opts setupAgentOptions) *setupStep {
+	if !isGitWorkTree(repoRoot) || gitHasCommit(repoRoot) {
+		return nil
+	}
+
+	if !opts.PromptForBaselineCommit || !isInteractiveReader(opts.Stdin) {
+		return &setupStep{
+			Name:    "baseline",
+			Status:  "warning",
+			Message: "git repo has no commits yet — create an initial commit before starting the daemon",
+		}
+	}
+
+	fmt.Fprintln(opts.Stdout)
+	fmt.Fprintln(opts.Stdout, "This git repo has no commits yet.")
+	fmt.Fprintln(opts.Stdout, "Plexium's daemon uses git worktrees, which need a baseline commit to start from.")
+	fmt.Fprintln(opts.Stdout, "Creating one now will stage all current files in this repo.")
+
+	input := opts.Stdin
+	if input == nil {
+		input = os.Stdin
+	}
+	reader := bufio.NewReader(input)
+	if !promptYesNo(reader, opts.Stdout, "Create an initial Plexium baseline commit now?", true) {
+		return &setupStep{
+			Name:    "baseline",
+			Status:  "warning",
+			Message: "initial baseline commit skipped — create one before starting the daemon",
+		}
+	}
+
+	if err := createInitialBaselineCommit(repoRoot); err != nil {
+		return &setupStep{
+			Name:    "baseline",
+			Status:  "warning",
+			Message: fmt.Sprintf("initial baseline commit failed: %v", err),
+		}
+	}
+	return &setupStep{
+		Name:    "baseline",
+		Status:  "pass",
+		Message: "created initial Plexium baseline commit",
+	}
+}
+
+func isGitWorkTree(repoRoot string) bool {
+	cmd := exec.Command("git", "-C", repoRoot, "rev-parse", "--is-inside-work-tree")
+	output, err := cmd.Output()
+	return err == nil && strings.TrimSpace(string(output)) == "true"
+}
+
+func gitHasCommit(repoRoot string) bool {
+	cmd := exec.Command("git", "-C", repoRoot, "rev-parse", "--verify", "HEAD")
+	return cmd.Run() == nil
+}
+
+func createInitialBaselineCommit(repoRoot string) error {
+	if output, err := exec.Command("git", "-C", repoRoot, "add", "--all").CombinedOutput(); err != nil {
+		return fmt.Errorf("git add --all: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	if output, err := exec.Command("git", "-C", repoRoot, "commit", "--no-verify", "-m", "Initial Plexium setup baseline").CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 func maybeConfigureAssistiveProvider(repoRoot, agentName string, opts setupAgentOptions) setupStep {
 	cfg, err := config.LoadFromDir(repoRoot)
 	if err != nil {
@@ -482,7 +649,43 @@ func maybeConfigureAssistiveProvider(repoRoot, agentName string, opts setupAgent
 	}
 
 	providers := configuredProviderNames(cfg)
-	if len(providers) > 0 {
+	if hasEnabledAssistiveProvider(cfg) && len(providers) > 0 {
+		if opts.PromptForAssistive && isInteractiveReader(opts.Stdin) {
+			fmt.Fprintln(opts.Stdout)
+			fmt.Fprintln(opts.Stdout, "Assistive provider is already configured.")
+			printConfiguredAssistiveSummary(opts.Stdout, cfg)
+			input := opts.Stdin
+			if input == nil {
+				input = os.Stdin
+			}
+			reader := bufio.NewReader(input)
+			if promptYesNo(reader, opts.Stdout, "Review or change assistive provider settings now?", false) {
+				setupResult, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{
+					Stdin:  input,
+					Stdout: opts.Stdout,
+					Stderr: opts.Stderr,
+				})
+				if err != nil {
+					return setupStep{
+						Name:    "assistive",
+						Status:  "warning",
+						Message: fmt.Sprintf("assistive provider review did not complete: %v", err),
+					}
+				}
+				if len(setupResult.ProvidersConfigured) == 0 {
+					return setupStep{
+						Name:    "assistive",
+						Status:  "warning",
+						Message: fmt.Sprintf("no assistive provider configured; fallback is `plexium convert` plus %s", initialPopulationMode(agentName)),
+					}
+				}
+				return setupStep{
+					Name:    "assistive",
+					Status:  "pass",
+					Message: fmt.Sprintf("configured assistive provider(s): %s (profile %s)", strings.Join(setupResult.ProvidersConfigured, ", "), prompts.ProfileFromConfig(loadConfigOrNil(repoRoot))),
+				}
+			}
+		}
 		return setupStep{
 			Name:    "assistive",
 			Status:  "pass",
@@ -515,7 +718,7 @@ func maybeConfigureAssistiveProvider(repoRoot, agentName string, opts setupAgent
 	}
 
 	setupResult, err := agent.RunInteractiveSetup(repoRoot, agent.SetupOptions{
-		Stdin:  reader,
+		Stdin:  input,
 		Stdout: opts.Stdout,
 		Stderr: opts.Stderr,
 	})
@@ -550,13 +753,14 @@ func enableMementoInConfig(repoRoot string) error {
 	return config.SaveToDir(repoRoot, cfg)
 }
 
-func configureDaemonRunnerInConfig(repoRoot, agent string) (setupStep, error) {
+func configureDaemonRunnerInConfig(repoRoot, agent string, opts setupAgentOptions) (setupStep, error) {
 	cfg, err := config.LoadFromDir(repoRoot)
 	if err != nil {
 		return setupStep{}, err
 	}
 
 	normalizedAgent := normalizeAgentName(agent)
+	originalMode := cfg.Daemon.ExecutionMode
 	changed := false
 	seededDefaults := false
 
@@ -571,6 +775,13 @@ func configureDaemonRunnerInConfig(repoRoot, agent string) (setupStep, error) {
 	if cfg.Daemon.ExecutionMode == "" {
 		cfg.Daemon.ExecutionMode = "coding-agent-primary"
 		changed = true
+	}
+	if opts.PromptForExecutionMode && isInteractiveReader(opts.Stdin) && hasEnabledAssistiveProvider(cfg) {
+		selectedMode := promptDaemonExecutionMode(opts.Stdin, opts.Stdout, normalizedAgent, cfg.Daemon.ExecutionMode)
+		if selectedMode != "" && selectedMode != cfg.Daemon.ExecutionMode {
+			cfg.Daemon.ExecutionMode = selectedMode
+			changed = true
+		}
 	}
 	if cfg.Daemon.PollInterval <= 0 {
 		cfg.Daemon.PollInterval = 300
@@ -605,8 +816,63 @@ func configureDaemonRunnerInConfig(repoRoot, agent string) (setupStep, error) {
 	} else if !changed {
 		message = fmt.Sprintf("daemon runner already configured for %s", capitalizeFirst(normalizedAgent))
 	}
+	if cfg.Daemon.ExecutionMode != "" {
+		if opts.PromptForExecutionMode && hasEnabledAssistiveProvider(cfg) && cfg.Daemon.ExecutionMode != originalMode {
+			message += fmt.Sprintf("; execution mode set to %s", cfg.Daemon.ExecutionMode)
+		} else {
+			message += fmt.Sprintf("; execution mode %s", cfg.Daemon.ExecutionMode)
+		}
+	}
 
 	return setupStep{Name: "daemon", Status: "pass", Message: message}, nil
+}
+
+func hasEnabledAssistiveProvider(cfg *config.Config) bool {
+	if cfg == nil || !cfg.AssistiveAgent.Enabled {
+		return false
+	}
+	for _, provider := range cfg.AssistiveAgent.Providers {
+		if provider.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
+func promptDaemonExecutionMode(input io.Reader, stdout io.Writer, agent, currentMode string) string {
+	if input == nil {
+		input = os.Stdin
+	}
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	if currentMode == "" {
+		currentMode = "coding-agent-primary"
+	}
+	defaultChoice := "1"
+	if currentMode == "provider-primary" {
+		defaultChoice = "2"
+	}
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "Daemon execution mode")
+	fmt.Fprintf(stdout, "  1. %s primary (recommended): the daemon uses %s as the main worker; the assistive provider supports semantic review.\n", capitalizeFirst(agent), capitalizeFirst(agent))
+	fmt.Fprintln(stdout, "  2. Assistive provider primary: the daemon asks the configured Ollama/OpenRouter provider to write wiki updates.")
+	fmt.Fprintf(stdout, "Select daemon execution mode [%s]: ", defaultChoice)
+	reader := bufio.NewReader(input)
+	answer, err := reader.ReadString('\n')
+	if err != nil {
+		answer = ""
+	}
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		answer = defaultChoice
+	}
+	switch answer {
+	case "2", "provider-primary":
+		return "provider-primary"
+	default:
+		return "coding-agent-primary"
+	}
 }
 
 func verifyAgent(repoRoot, agent string) (*verifyResult, error) {
@@ -620,6 +886,15 @@ func verifyAgent(repoRoot, agent string) (*verifyResult, error) {
 		Agent:       normalizedAgent,
 		RepoRoot:    repoRoot,
 		ConnectPlan: plan,
+	}
+
+	if isGitWorkTree(repoRoot) && !gitHasCommit(repoRoot) {
+		result.Checks = append(result.Checks, verifyCheck{
+			Name:        "baseline",
+			Status:      "fail",
+			Message:     "git repo has no baseline commit yet",
+			Remediation: "Create an initial commit before running `plexium agent start`.",
+		})
 	}
 
 	doctor := lint.NewDoctor(repoRoot)
@@ -856,6 +1131,38 @@ func configuredProviderNames(cfg *config.Config) []string {
 		}
 	}
 	return names
+}
+
+func printConfiguredAssistiveSummary(w io.Writer, cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	for _, provider := range cfg.AssistiveAgent.Providers {
+		if !provider.Enabled {
+			continue
+		}
+		name := provider.Name
+		if name == "" {
+			name = provider.Type
+		}
+		var details []string
+		if provider.Model != "" {
+			details = append(details, "model "+provider.Model)
+		}
+		if provider.CapabilityProfile != "" {
+			details = append(details, "profile "+provider.CapabilityProfile)
+		}
+		if len(details) > 0 {
+			fmt.Fprintf(w, "  - %s: %s\n", name, strings.Join(details, ", "))
+		} else {
+			fmt.Fprintf(w, "  - %s\n", name)
+		}
+	}
+	if cfg.AssistiveAgent.Budget.DailyUSD > 0 {
+		fmt.Fprintf(w, "  Daily budget: $%.2f\n", cfg.AssistiveAgent.Budget.DailyUSD)
+	} else {
+		fmt.Fprintln(w, "  Daily budget: unlimited")
+	}
 }
 
 func initialPopulationMode(agentName string) string {

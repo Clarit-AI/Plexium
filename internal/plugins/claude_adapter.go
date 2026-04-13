@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/skills"
 )
 
@@ -17,9 +18,11 @@ import (
 var claudeTemplate embed.FS
 
 type claudeTemplateData struct {
-	ProjectName  string
-	DetectedStack string
-	SchemaDigest string
+	ProjectName      string
+	DetectedStack    string
+	SchemaDigest     string
+	MementoEnabled   bool
+	AssistiveEnabled bool
 }
 
 // RunClaudeAdapter generates a lean CLAUDE.md, installs skills, and writes
@@ -50,9 +53,11 @@ func RunClaudeAdapter(repoRoot string) error {
 
 	var rendered strings.Builder
 	if err := tmpl.Execute(&rendered, claudeTemplateData{
-		ProjectName:   projectName,
-		DetectedStack: stackLabel,
-		SchemaDigest:  schemaDigest,
+		ProjectName:      projectName,
+		DetectedStack:    stackLabel,
+		SchemaDigest:     schemaDigest,
+		MementoEnabled:   isMementoEnabled(repoRoot),
+		AssistiveEnabled: isAssistiveEnabled(repoRoot),
 	}); err != nil {
 		return fmt.Errorf("executing claude template: %w", err)
 	}
@@ -113,6 +118,24 @@ func detectProjectName(repoRoot string) string {
 	return filepath.Base(repoRoot)
 }
 
+func isMementoEnabled(repoRoot string) bool {
+	cfg, err := config.LoadFromDir(repoRoot)
+	return err == nil && cfg.Integrations.Memento
+}
+
+func isAssistiveEnabled(repoRoot string) bool {
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil || !cfg.AssistiveAgent.Enabled {
+		return false
+	}
+	for _, provider := range cfg.AssistiveAgent.Providers {
+		if provider.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
 func extractSchemaDigest(repoRoot string) string {
 	schemaPath := filepath.Join(repoRoot, ".wiki", "_schema.md")
 	data, err := os.ReadFile(schemaPath)
@@ -154,6 +177,13 @@ func extractSchemaDigest(repoRoot string) string {
 func mergeWithExisting(existing, generated string) string {
 	const startMarker = "<!-- SCHEMA_INJECT_START -->"
 	const endMarker = "<!-- SCHEMA_INJECT_END -->"
+	const projectDetailsMarker = " Project Details Start Here"
+
+	if existingDetailsStart := projectDetailsStartIndex(existing, projectDetailsMarker); existingDetailsStart >= 0 {
+		if generatedDetailsStart := projectDetailsStartIndex(generated, projectDetailsMarker); generatedDetailsStart >= 0 {
+			return strings.TrimRight(generated[:generatedDetailsStart], "\n") + "\n\n" + strings.TrimLeft(existing[existingDetailsStart:], "\n")
+		}
+	}
 
 	startIdx := strings.Index(existing, startMarker)
 	endIdx := strings.Index(existing, endMarker)
@@ -170,6 +200,18 @@ func mergeWithExisting(existing, generated string) string {
 
 	newSection := generated[genStart : genEnd+len(endMarker)]
 	return existing[:startIdx] + newSection + existing[endIdx+len(endMarker):]
+}
+
+func projectDetailsStartIndex(content, marker string) int {
+	offset := 0
+	for _, line := range strings.SplitAfter(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") && strings.Contains(trimmed, marker) {
+			return offset
+		}
+		offset += len(line)
+	}
+	return -1
 }
 
 const starterLefthookYAML = `pre-commit:

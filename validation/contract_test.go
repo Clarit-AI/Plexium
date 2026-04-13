@@ -242,7 +242,7 @@ func TestContract_CompileUsesManifestSectionAndTitle(t *testing.T) {
 	// Compile should use Section for grouping and Title for display
 	assert.Contains(t, index, "## Modules", "compile should group by Section")
 	assert.Contains(t, index, "My Module Title", "compile should use Title field")
-	assert.Contains(t, index, "[[my-module]]", "compile should extract slug from WikiPath")
+	assert.Contains(t, index, "[[modules/my-module]]", "compile should preserve wiki-relative target from WikiPath")
 }
 
 func TestContract_CompileHandlesEmptySection(t *testing.T) {

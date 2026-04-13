@@ -172,8 +172,8 @@ func TestDeterminism_CompileSectionOrdering(t *testing.T) {
 	assert.Contains(t, index, "## Modules")
 
 	// Within sections, pages should be sorted by title
-	assert.Contains(t, index, "[[a-concept]]")
-	assert.Contains(t, index, "[[z-concept]]")
+	assert.Contains(t, index, "[[concepts/a-concept]]")
+	assert.Contains(t, index, "[[concepts/z-concept]]")
 }
 
 // =============================================================================

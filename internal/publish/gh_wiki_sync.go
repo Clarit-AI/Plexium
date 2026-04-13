@@ -24,8 +24,8 @@ type WikiSyncer struct {
 type SyncResult struct {
 	PagesIncluded []string
 	PagesExcluded []Exclusion
-	Commit       string
-	Pushed       bool
+	Commit        string
+	Pushed        bool
 }
 
 // Exclusion represents a page that was excluded from sync.
@@ -52,6 +52,10 @@ func NewWikiSyncer(repoRoot string, cfg *config.Config) (*WikiSyncer, error) {
 
 // Sync performs the wiki sync operation.
 func (s *WikiSyncer) Sync(dryRun bool, push bool) (*SyncResult, error) {
+	if push && !dryRun {
+		return nil, fmt.Errorf("gh-wiki-sync --push is not implemented safely yet; use `plexium publish` for GitHub Wiki pushes")
+	}
+
 	wikiRoot := s.wikiRoot()
 
 	// Get all wiki pages
@@ -95,21 +99,26 @@ func (s *WikiSyncer) Sync(dryRun bool, push bool) (*SyncResult, error) {
 }
 
 func (s *WikiSyncer) getWikiPages(wikiRoot string) ([]string, error) {
+	return s.getWikiPagesFrom(wikiRoot, wikiRoot)
+}
+
+func (s *WikiSyncer) getWikiPagesFrom(wikiRoot, dir string) ([]string, error) {
 	var pages []string
 
-	entries, err := os.ReadDir(wikiRoot)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("reading wiki root: %w", err)
+		return nil, fmt.Errorf("reading wiki directory %s: %w", dir, err)
 	}
 
 	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
 		if entry.IsDir() {
 			// Skip .obsidian and other hidden directories
 			if strings.HasPrefix(entry.Name(), ".") {
 				continue
 			}
 			// Recursively get pages from subdirectories
-			subPages, err := s.getWikiPages(filepath.Join(wikiRoot, entry.Name()))
+			subPages, err := s.getWikiPagesFrom(wikiRoot, path)
 			if err != nil {
 				return nil, err
 			}
@@ -117,11 +126,11 @@ func (s *WikiSyncer) getWikiPages(wikiRoot string) ([]string, error) {
 		} else {
 			// Only include markdown files
 			if strings.HasSuffix(entry.Name(), ".md") {
-				relPath, err := filepath.Rel(wikiRoot, filepath.Join(wikiRoot, entry.Name()))
+				relPath, err := filepath.Rel(wikiRoot, path)
 				if err != nil {
 					continue
 				}
-				pages = append(pages, relPath)
+				pages = append(pages, filepath.ToSlash(relPath))
 			}
 		}
 	}

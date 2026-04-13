@@ -89,6 +89,10 @@ func TestInit_ConfigIsValid(t *testing.T) {
 	assert.Contains(t, content, "strictness: strict")
 	assert.Contains(t, content, "wiki:")
 	assert.Contains(t, content, "sources:")
+	assert.Contains(t, content, `- "**/*.py"`)
+	assert.Contains(t, content, `- "pyproject.toml"`)
+	assert.Contains(t, content, `- ".claude/**"`)
+	assert.Contains(t, content, `- ".codex/**"`)
 }
 
 func TestInit_DryRun(t *testing.T) {

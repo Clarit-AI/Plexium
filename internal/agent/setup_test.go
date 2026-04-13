@@ -633,6 +633,7 @@ func TestRunInteractiveSetup_DetectsExistingOpenRouterAndKeepsCurrentSetup(t *te
 	dir := t.TempDir()
 	writeExistingOpenRouterSetup(t, dir, "nvidia/nemotron-3-super-120b-a12b", "balanced", 1.25)
 	require.NoError(t, SaveCredentials(dir, "sk-or-v1-existing", io.Discard, io.Discard))
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-v1-env-should-not-override-existing")
 
 	client, cleanup := stubOpenRouterValidation(t)
 	defer cleanup()

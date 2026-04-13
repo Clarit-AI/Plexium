@@ -121,6 +121,7 @@ plexium --version
 
 # Run setup inside your repo
 cd /path/to/your/repo
+git init  # if this is a new project
 plexium setup claude
 # or
 plexium setup codex
@@ -140,6 +141,22 @@ plexium setup codex --write-config --with-memento
 After setup, the next default move is `plexium convert`. Setup wires the tooling, retrieval, MCP path, and agent instructions; `convert` turns the starter scaffold into a useful first-pass wiki. If no assistive provider is configured yet, Plexium now offers Ollama/OpenRouter setup during onboarding and otherwise falls back cleanly to `convert` plus your main coding agent.
 
 For Claude Code and Codex, Plexium currently installs a temporary repo-local Memento compatibility shim while upstream `git-memento` catches up with their current session models.
+
+### Publishing to GitHub Wiki
+
+Plexium only pushes `.wiki/` content when the local config allows it. Set `githubWiki.enabled: true` in `.plexium/config.yml` before publishing. GitHub must also have the Wiki feature enabled, and GitHub creates the backing `.wiki.git` repository only after the first wiki page exists, so a brand-new GitHub Wiki may need one starter page created in the GitHub web UI before CLI publishing works.
+
+```yaml
+githubWiki:
+  enabled: true
+```
+
+```bash
+plexium publish --dry-run
+plexium publish
+```
+
+If publish reports that the wiki repository was not found, verify your active GitHub credentials with `gh auth status`, enable Wiki in the repository settings, create the first wiki page in the GitHub web UI if needed, confirm `.plexium/config.yml` has `githubWiki.enabled: true`, then rerun `plexium publish`.
 
 ### Claude Code marketplace
 

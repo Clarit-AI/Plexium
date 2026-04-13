@@ -14,10 +14,10 @@ func TestLinkCrawler_Crawl(t *testing.T) {
 
 	// Create test pages
 	pages := map[string]string{
-		"modules/auth.md":        "# Auth Module\nSee [[modules/database]] and [[decisions/001]].\n",
-		"modules/database.md":    "# Database Module\nRelated to [[modules/auth]].\n",
-		"decisions/001.md":       "# ADR 001\nUse [[modules/auth]] here.\n",
-		"_Sidebar.md":           "# Sidebar\n- [[modules/auth]]\n- [[modules/database]]\n",
+		"modules/auth.md":     "# Auth Module\nSee [[modules/database]] and [[decisions/001]].\n",
+		"modules/database.md": "# Database Module\nRelated to [[modules/auth]].\n",
+		"decisions/001.md":    "# ADR 001\nUse [[modules/auth]] here.\n",
+		"_Sidebar.md":         "# Sidebar\n- [[modules/auth]]\n- [[modules/database]]\n",
 	}
 
 	for path, content := range pages {
@@ -55,10 +55,11 @@ func TestLinkCrawler_ResolveLink(t *testing.T) {
 	wikiDir := filepath.Join(tmpDir, ".wiki")
 	os.MkdirAll(wikiDir, 0755)
 
-	// Create a page
+	// Create pages
 	authPath := filepath.Join(wikiDir, "modules/auth.md")
 	os.MkdirAll(filepath.Dir(authPath), 0755)
 	os.WriteFile(authPath, []byte("# Auth"), 0644)
+	os.WriteFile(filepath.Join(wikiDir, "onboarding.md"), []byte("# Onboarding"), 0644)
 
 	crawler := NewLinkCrawler(wikiDir)
 
@@ -70,6 +71,7 @@ func TestLinkCrawler_ResolveLink(t *testing.T) {
 	}{
 		{"modules/auth", "", "modules/auth.md", true},
 		{"auth", "modules", "modules/auth.md", true},
+		{"onboarding", "architecture", "onboarding.md", true},
 		{"modules/auth#heading", "", "modules/auth.md#heading", true},
 		{"nonexistent", "", "nonexistent.md", false},
 	}

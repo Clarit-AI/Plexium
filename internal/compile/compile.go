@@ -127,8 +127,8 @@ func generateIndex(sections []string, groups map[string][]*manifest.PageEntry) s
 		b.WriteString(sec)
 		b.WriteString("\n")
 		for _, p := range groups[sec] {
-			slug := slugFromPath(p.WikiPath)
-			fmt.Fprintf(&b, "- [[%s]] — %s\n", slug, p.Title)
+			linkTarget := linkTargetFromPath(p.WikiPath)
+			fmt.Fprintf(&b, "- [[%s]] — %s\n", linkTarget, p.Title)
 		}
 	}
 	return b.String()
@@ -144,16 +144,17 @@ func generateSidebar(sections []string, groups map[string][]*manifest.PageEntry)
 		b.WriteString(sec)
 		b.WriteString("**\n")
 		for _, p := range groups[sec] {
-			slug := slugFromPath(p.WikiPath)
-			fmt.Fprintf(&b, "- [[%s]]\n", slug)
+			linkTarget := linkTargetFromPath(p.WikiPath)
+			fmt.Fprintf(&b, "- [[%s]]\n", linkTarget)
 		}
 	}
 	return b.String()
 }
 
-// slugFromPath extracts the wiki-link slug from a WikiPath.
-// "modules/auth-module.md" → "auth-module"
-func slugFromPath(wikiPath string) string {
-	base := filepath.Base(wikiPath)
-	return strings.TrimSuffix(base, filepath.Ext(base))
+// linkTargetFromPath extracts the wiki-relative link target from a WikiPath.
+// "modules/auth-module.md" -> "modules/auth-module"
+func linkTargetFromPath(wikiPath string) string {
+	target := filepath.ToSlash(strings.TrimSpace(wikiPath))
+	target = strings.TrimPrefix(target, "./")
+	return strings.TrimSuffix(target, filepath.Ext(target))
 }
