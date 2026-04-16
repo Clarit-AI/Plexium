@@ -13,22 +13,23 @@ import (
 // Config represents the Plexium configuration.
 // See docs/architecture/core-architecture.md §7 for the full schema.
 type Config struct {
-	Version        int            `yaml:"version"`
-	Repo           Repo           `yaml:"repo"`
-	Sources        Sources        `yaml:"sources"`
-	Agents         Agents         `yaml:"agents"`
-	Wiki           Wiki           `yaml:"wiki"`
-	Taxonomy       Taxonomy       `yaml:"taxonomy"`
-	Publish        Publish        `yaml:"publish"`
-	Sync           Sync           `yaml:"sync"`
-	Enforcement    Enforcement    `yaml:"enforcement"`
-	Integrations   Integrations   `yaml:"integrations"`
-	Reports        Reports        `yaml:"reports"`
-	GitHubWiki     GitHubWiki     `yaml:"githubWiki"`
-	Sensitivity    Sensitivity    `yaml:"sensitivity"`
-	AssistiveAgent AssistiveAgent `yaml:"assistiveAgent"`
-	Daemon         DaemonConfig   `yaml:"daemon"`
-	Retry          RetryConfig    `yaml:"retry"`
+	Version        int                       `yaml:"version"`
+	Repo           Repo                      `yaml:"repo"`
+	Sources        Sources                   `yaml:"sources"`
+	Agents         Agents                    `yaml:"agents"`
+	Wiki           Wiki                      `yaml:"wiki"`
+	Taxonomy       Taxonomy                  `yaml:"taxonomy"`
+	Publish        Publish                   `yaml:"publish"`
+	Sync           Sync                      `yaml:"sync"`
+	Enforcement    Enforcement               `yaml:"enforcement"`
+	Integrations   Integrations              `yaml:"integrations"`
+	Reports        Reports                   `yaml:"reports"`
+	GitHubWiki     GitHubWiki                `yaml:"githubWiki"`
+	Sensitivity    Sensitivity               `yaml:"sensitivity"`
+	AssistiveAgent AssistiveAgent            `yaml:"assistiveAgent"`
+	Daemon         DaemonConfig              `yaml:"daemon"`
+	Retry          RetryConfig               `yaml:"retry"`
+	Plugins        map[string]map[string]any `yaml:"plugins,omitempty"`
 }
 
 // AssistiveAgent configures the LLM provider cascade for wiki maintenance tasks.
@@ -306,6 +307,27 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// PluginEnabled returns true if a named plugin is configured and enabled.
+func (c *Config) PluginEnabled(name string) bool {
+	if c.Plugins == nil {
+		return false
+	}
+	pcfg, ok := c.Plugins[name]
+	if !ok {
+		return false
+	}
+	enabled, _ := pcfg["enabled"].(bool)
+	return enabled
+}
+
+// PluginSettings returns the raw config map for a named plugin, or nil.
+func (c *Config) PluginSettings(name string) map[string]any {
+	if c.Plugins == nil {
+		return nil
+	}
+	return c.Plugins[name]
 }
 
 // Getwd returns the current working directory

@@ -1,6 +1,7 @@
 package convert
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ type Pipeline struct {
 	dryRun   bool
 	depth    string
 	agent    string
+	registry *plugins.Registry
 }
 
 // PipelineResult holds the output of a full conversion run.
@@ -37,8 +39,9 @@ type PipelineOptions struct {
 	RepoRoot string
 	Config   *config.Config
 	DryRun   bool
-	Depth    string // "shallow" or "deep"
-	Agent    string // Optional: run specific adapter after conversion
+	Depth    string            // "shallow" or "deep"
+	Agent    string            // Optional: run specific adapter after conversion
+	Registry *plugins.Registry // Optional: plugin registry for pipeline hooks
 }
 
 // NewPipeline creates a new Pipeline.
@@ -52,6 +55,7 @@ func NewPipeline(opts PipelineOptions) *Pipeline {
 		dryRun:   opts.DryRun,
 		depth:    opts.Depth,
 		agent:    opts.Agent,
+		registry: opts.Registry,
 	}
 }
 
@@ -107,11 +111,21 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 		return nil, fmt.Errorf("ingest: %w", err)
 	}
 
+	// Plugin hook: after-ingest
+	if err := p.runPlugins(plugins.StageAfterIngest, ingestResult.Pages); err != nil {
+		return nil, fmt.Errorf("plugins after-ingest: %w", err)
+	}
+
 	// 4. Link
 	linker := NewLinker()
 	linker.AddPages(ingestResult.Pages)
 	linkedPages := linker.GenerateCrossReferences(ingestResult.Pages)
 	inbound, _ := linker.ComputeLinks(linkedPages)
+
+	// Plugin hook: after-link
+	if err := p.runPlugins(plugins.StageAfterLink, linkedPages); err != nil {
+		return nil, fmt.Errorf("plugins after-link: %w", err)
+	}
 
 	// 5. Lint
 	linter := NewConvertLinter(linker)
@@ -119,6 +133,12 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 
 	// Add stub pages from lint to the page list
 	allPages := append(linkedPages, lintResult.StubPages...)
+
+	// Plugin hook: after-lint (runs after stub pages are merged so plugins
+	// see the complete lint output).
+	if err := p.runPlugins(plugins.StageAfterLint, allPages); err != nil {
+		return nil, fmt.Errorf("plugins after-lint: %w", err)
+	}
 
 	// 6. Report
 	reportGen := NewReportGenerator()
@@ -132,7 +152,14 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 		return nil, fmt.Errorf("write: %w", err)
 	}
 
-	// 8. Run agent adapter if specified
+	// 8. Plugin hook: after-write
+	if !p.dryRun {
+		if err := p.runPlugins(plugins.StageAfterWrite, allPages); err != nil {
+			return nil, fmt.Errorf("plugins after-write: %w", err)
+		}
+	}
+
+	// 9. Run agent adapter if specified
 	if !p.dryRun && p.agent != "" {
 		if err := p.runAdapter(p.agent); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: adapter %q failed: %v\n", p.agent, err)
@@ -146,6 +173,69 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 
 func (p *Pipeline) runAdapter(agent string) error {
 	return plugins.RunAdapter(p.repoRoot, agent)
+}
+
+// runPlugins executes all pipeline plugins registered for the given stage.
+// Mutations made by plugins to data.Pages are copied back into the caller's
+// pages slice so subsequent pipeline stages see them.
+//
+// NOTE: uses context.Background() for now. Threading a caller context through
+// Pipeline.Run() is tracked as a follow-up since it touches many call sites.
+func (p *Pipeline) runPlugins(stage plugins.PipelineStage, pages []PageData) error {
+	if p.registry == nil {
+		return nil
+	}
+	pps := p.registry.PipelinePlugins(stage)
+	if len(pps) == 0 {
+		return nil
+	}
+
+	wikiRoot := filepath.Join(p.repoRoot, ".wiki")
+	if p.cfg != nil && p.cfg.Wiki.Root != "" {
+		wikiRoot = filepath.Join(p.repoRoot, p.cfg.Wiki.Root)
+	}
+
+	pipelinePages := make([]plugins.PipelinePage, len(pages))
+	for i, pg := range pages {
+		// Deep-copy SourceFiles so plugin mutations don't alias the caller.
+		srcCopy := append([]string(nil), pg.SourceFiles...)
+		pipelinePages[i] = plugins.PipelinePage{
+			WikiPath:    pg.WikiPath,
+			Title:       pg.Title,
+			Section:     pg.Section,
+			Content:     pg.Content,
+			SourceFiles: srcCopy,
+		}
+	}
+
+	data := &plugins.PipelineData{
+		RepoRoot: p.repoRoot,
+		WikiRoot: wikiRoot,
+		Pages:    pipelinePages,
+	}
+
+	ctx := context.Background()
+	for _, pp := range pps {
+		if err := pp.Process(ctx, data); err != nil {
+			return fmt.Errorf("plugin %s: %w", pp.Name(), err)
+		}
+	}
+
+	// Copy plugin mutations back into the caller's pages slice. We only
+	// propagate positions that existed before the hook — plugins cannot
+	// currently add or remove pages via the pipeline data.
+	n := len(pages)
+	if len(data.Pages) < n {
+		n = len(data.Pages)
+	}
+	for i := 0; i < n; i++ {
+		pages[i].WikiPath = data.Pages[i].WikiPath
+		pages[i].Title = data.Pages[i].Title
+		pages[i].Section = data.Pages[i].Section
+		pages[i].Content = data.Pages[i].Content
+		pages[i].SourceFiles = append([]string(nil), data.Pages[i].SourceFiles...)
+	}
+	return nil
 }
 
 func (p *Pipeline) writeOutput(result *PipelineResult) error {

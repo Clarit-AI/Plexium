@@ -2,10 +2,13 @@ package pageindex
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/Clarit-AI/Plexium/internal/plugins"
 )
 
 // JSONRPCRequest represents a JSON-RPC 2.0 request.
@@ -57,11 +60,13 @@ type ToolContent struct {
 
 // Server implements an MCP-compatible server for PageIndex.
 // It reads JSON-RPC requests from stdin and writes responses to stdout.
+// Retrieval plugins registered in the Registry add additional MCP tools.
 type Server struct {
-	Index  *PageIndex
-	Port   int // 0 = stdio mode
-	reader io.Reader
-	writer io.Writer
+	Index    *PageIndex
+	Port     int // 0 = stdio mode
+	Registry *plugins.Registry
+	reader   io.Reader
+	writer   io.Writer
 }
 
 // NewServer creates a new MCP server wrapping the given wiki root.
@@ -207,6 +212,9 @@ func (s *Server) handleToolsList(req JSONRPCRequest) JSONRPCResponse {
 		},
 	}
 
+	// Append tools from retrieval plugins
+	tools = append(tools, s.retrievalPluginTools()...)
+
 	return JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
@@ -238,6 +246,10 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) JSONRPCResponse {
 	case "pageindex_list_pages":
 		return s.callListPages(req.ID)
 	default:
+		// Delegate to retrieval plugins
+		if result, handled := s.delegateToPlugin(req.ID, params.Name, params.Arguments); handled {
+			return result
+		}
 		return JSONRPCResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
@@ -336,4 +348,75 @@ func (s *Server) callListPages(id interface{}) JSONRPCResponse {
 			},
 		},
 	}
+}
+
+// retrievalPluginTools collects MCP tool definitions from all registered
+// retrieval plugins.
+func (s *Server) retrievalPluginTools() []ToolDefinition {
+	if s.Registry == nil {
+		return nil
+	}
+	var tools []ToolDefinition
+	for _, rp := range s.Registry.RetrievalPlugins() {
+		for _, td := range rp.MCPTools() {
+			tools = append(tools, ToolDefinition{
+				Name:        td.Name,
+				Description: td.Description,
+				InputSchema: td.InputSchema,
+			})
+		}
+	}
+	return tools
+}
+
+// delegateToPlugin tries to dispatch a tool call to a retrieval plugin.
+// Returns the response and true if handled, or zero and false if no plugin
+// owns the tool name.
+func (s *Server) delegateToPlugin(id interface{}, tool string, args json.RawMessage) (JSONRPCResponse, bool) {
+	if s.Registry == nil {
+		return JSONRPCResponse{}, false
+	}
+	for _, rp := range s.Registry.RetrievalPlugins() {
+		for _, td := range rp.MCPTools() {
+			if td.Name == tool {
+				ctx := context.Background()
+				result, err := rp.HandleMCPCall(ctx, tool, args)
+				if err != nil {
+					return JSONRPCResponse{
+						JSONRPC: "2.0",
+						ID:      id,
+						Result: ToolResult{
+							Content: []ToolContent{
+								{Type: "text", Text: fmt.Sprintf("Plugin error: %v", err)},
+							},
+							IsError: true,
+						},
+					}, true
+				}
+				data, mErr := json.Marshal(result)
+				if mErr != nil {
+					return JSONRPCResponse{
+						JSONRPC: "2.0",
+						ID:      id,
+						Result: ToolResult{
+							Content: []ToolContent{
+								{Type: "text", Text: fmt.Sprintf("Marshal error: %v", mErr)},
+							},
+							IsError: true,
+						},
+					}, true
+				}
+				return JSONRPCResponse{
+					JSONRPC: "2.0",
+					ID:      id,
+					Result: ToolResult{
+						Content: []ToolContent{
+							{Type: "text", Text: string(data)},
+						},
+					},
+				}, true
+			}
+		}
+	}
+	return JSONRPCResponse{}, false
 }
