@@ -68,9 +68,12 @@ type setupAgentOptions struct {
 	PromptForExecutionMode  bool
 }
 
+// gitignore marker constants — kept for backward compatibility with existing
+// .gitignore files that contain these sentinels. New writes go through
+// internal/wiki.EnsureGitignore.
 const (
-	plexiumGitignoreStart = "# BEGIN PLEXIUM GITIGNORE"
-	plexiumGitignoreEnd   = "# END PLEXIUM GITIGNORE"
+	plexiumGitignoreStart = wiki.GitignoreStart
+	plexiumGitignoreEnd   = wiki.GitignoreEnd
 )
 
 var setupCmd = &cobra.Command{
@@ -396,19 +399,16 @@ func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, e
 }
 
 func ensurePlexiumGitignore(repoRoot string) (setupStep, error) {
-	path := filepath.Join(repoRoot, ".gitignore")
-	data, err := os.ReadFile(path)
 	existed := true
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return setupStep{}, fmt.Errorf("read .gitignore: %w", err)
-		}
+	if _, err := os.Stat(filepath.Join(repoRoot, ".gitignore")); os.IsNotExist(err) {
 		existed = false
-		data = nil
 	}
 
-	next, changed := applyPlexiumGitignoreBlock(string(data))
-	if !changed {
+	written, err := wiki.EnsureGitignore(repoRoot)
+	if err != nil {
+		return setupStep{}, fmt.Errorf("write .gitignore: %w", err)
+	}
+	if !written {
 		return setupStep{
 			Name:    "gitignore",
 			Status:  "pass",
@@ -416,65 +416,11 @@ func ensurePlexiumGitignore(repoRoot string) (setupStep, error) {
 		}, nil
 	}
 
-	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
-		return setupStep{}, fmt.Errorf("write .gitignore: %w", err)
-	}
-
 	message := "created .gitignore with Plexium local/secret ignore rules"
 	if existed {
 		message = "updated .gitignore with Plexium local/secret ignore rules"
 	}
 	return setupStep{Name: "gitignore", Status: "pass", Message: message}, nil
-}
-
-func applyPlexiumGitignoreBlock(existing string) (string, bool) {
-	block := plexiumGitignoreBlock()
-	if existing == "" {
-		return block, true
-	}
-	if strings.Contains(existing, block) {
-		return existing, false
-	}
-
-	start := strings.Index(existing, plexiumGitignoreStart)
-	if start >= 0 {
-		end := strings.Index(existing[start:], plexiumGitignoreEnd)
-		if end >= 0 {
-			endAbs := start + end + len(plexiumGitignoreEnd)
-			for endAbs < len(existing) && existing[endAbs] == '\n' {
-				endAbs++
-			}
-			return existing[:start] + block + existing[endAbs:], true
-		}
-	}
-
-	trimmed := strings.TrimRight(existing, "\n")
-	if trimmed == "" {
-		return block, true
-	}
-	return trimmed + "\n\n" + block, true
-}
-
-func plexiumGitignoreBlock() string {
-	return strings.Join([]string{
-		plexiumGitignoreStart,
-		"# Plexium local secrets and runtime artifacts",
-		".mcp.json",
-		".plexium/.env",
-		".plexium/credentials.json",
-		".plexium/daemon-status.json",
-		".plexium/daemon.err.log",
-		".plexium/daemon.out.log",
-		".plexium/daemon.pid",
-		".plexium/output/",
-		".plexium/workspaces/",
-		".plexium/recovery/",
-		".plexium/reports/conversion-*.json",
-		".plexium/reports/conversion-*.md",
-		".DS_Store",
-		plexiumGitignoreEnd,
-		"",
-	}, "\n")
 }
 
 func configureMemento(repoRoot, agent string, opts setupAgentOptions) setupStep {
