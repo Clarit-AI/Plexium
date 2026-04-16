@@ -118,6 +118,10 @@ func BuildRegenPrompt(cfg *config.Config, page manifest.PageEntry, repoRoot, wik
 		b.WriteString("Source files:\n")
 		for _, sf := range page.SourceFiles {
 			srcPath := filepath.Join(repoRoot, sf.Path)
+			if !isPathWithinRoot(filepath.Clean(srcPath), repoRoot) {
+				fmt.Fprintf(&b, "- %s (skipped: path escapes repo root)\n", sf.Path)
+				continue
+			}
 			data, err := os.ReadFile(srcPath)
 			if err != nil {
 				fmt.Fprintf(&b, "- %s (unreadable: %v)\n", sf.Path, err)
@@ -138,9 +142,14 @@ func BuildRegenPrompt(cfg *config.Config, page manifest.PageEntry, repoRoot, wik
 
 	// Include context pages.
 	if len(contextPages) > 0 {
+		wikiAbs := filepath.Join(repoRoot, wikiRoot)
 		b.WriteString("Related wiki pages for context:\n")
 		for _, cp := range contextPages {
 			cpPath := filepath.Join(repoRoot, wikiRoot, cp)
+			if !isPathWithinRoot(filepath.Clean(cpPath), wikiAbs) {
+				fmt.Fprintf(&b, "- %s (skipped: path escapes wiki root)\n", cp)
+				continue
+			}
 			data, err := os.ReadFile(cpPath)
 			if err != nil {
 				fmt.Fprintf(&b, "- %s (unreadable)\n", cp)

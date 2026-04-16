@@ -97,6 +97,8 @@ func Run(opts Options) (*SyncResult, error) {
 	}
 
 	// Regenerate stale pages via LLM provider cascade when requested.
+	// Track which pages succeeded so we only update hashes for those.
+	regenerated := make(map[string]bool)
 	if opts.Regenerate && len(stalePages) > 0 {
 		if opts.Cascade == nil {
 			return nil, fmt.Errorf("no LLM providers configured; --regenerate requires at least one provider in the cascade")
@@ -122,6 +124,7 @@ func Run(opts Options) (*SyncResult, error) {
 			}
 			if regenResult.Written {
 				result.PagesRegenerated++
+				regenerated[page.WikiPath] = true
 			}
 		}
 	}
@@ -134,9 +137,13 @@ func Run(opts Options) (*SyncResult, error) {
 		return result, nil
 	}
 
-	// Update hashes for stale pages
+	// Update hashes for stale pages. When --regenerate was used, skip pages
+	// that failed regeneration so they remain stale in the manifest.
 	updated := 0
 	for _, stalePage := range stalePages {
+		if opts.Regenerate && !regenerated[stalePage.WikiPath] {
+			continue
+		}
 		newSources := make([]manifest.SourceFile, 0, len(stalePage.SourceFiles))
 		for _, sf := range stalePage.SourceFiles {
 			newHash, err := manifest.ComputeHash(filepath.Join(opts.RepoRoot, sf.Path))
