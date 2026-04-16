@@ -54,6 +54,12 @@ func RegeneratePage(ctx context.Context, opts PageRegenOptions) (*PageRegenResul
 		wikiRoot = configuredWikiRoot(opts.Config)
 	}
 
+	// Validate wikiRoot itself is inside repoRoot.
+	wikiAbs := filepath.Join(opts.RepoRoot, wikiRoot)
+	if !isPathWithinRoot(filepath.Clean(wikiAbs), filepath.Clean(opts.RepoRoot)) {
+		return nil, fmt.Errorf("regen: wiki root %q escapes repo root %q", wikiRoot, opts.RepoRoot)
+	}
+
 	// Validate output path safety.
 	outRel := filepath.Join(wikiRoot, opts.Page.WikiPath)
 	if !isPathWithinRoot(outRel, wikiRoot) {
@@ -76,10 +82,17 @@ func RegeneratePage(ctx context.Context, opts PageRegenOptions) (*PageRegenResul
 	// Parse response: try JSON, fall back to raw markdown.
 	var content string
 	var resp regenResponse
-	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(completion.Response)), &resp); jsonErr == nil && resp.Content != "" {
+	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(completion.Response)), &resp); jsonErr == nil && strings.TrimSpace(resp.Content) != "" {
 		content = resp.Content
+	} else if trimmed := strings.TrimSpace(completion.Response); trimmed != "" {
+		content = trimmed
 	} else {
-		content = strings.TrimSpace(completion.Response)
+		return &PageRegenResult{
+			WikiPath:  opts.Page.WikiPath,
+			Provider:  completion.Provider,
+			LatencyMs: latency,
+			Error:     "provider returned empty content",
+		}, fmt.Errorf("regen: provider returned empty content for %s", opts.Page.WikiPath)
 	}
 
 	// Write the regenerated content.
@@ -134,10 +147,12 @@ func BuildRegenPrompt(cfg *config.Config, page manifest.PageEntry, repoRoot, wik
 
 	// Include existing wiki page content if it exists.
 	existingPath := filepath.Join(repoRoot, wikiRoot, page.WikiPath)
-	if data, err := os.ReadFile(existingPath); err == nil {
-		b.WriteString("Existing wiki page content:\n```md\n")
-		b.WriteString(truncateString(string(data), 1800))
-		b.WriteString("\n```\n\n")
+	if isPathWithinRoot(filepath.Clean(existingPath), filepath.Join(repoRoot, wikiRoot)) {
+		if data, err := os.ReadFile(existingPath); err == nil {
+			b.WriteString("Existing wiki page content:\n```md\n")
+			b.WriteString(truncateString(string(data), 1800))
+			b.WriteString("\n```\n\n")
+		}
 	}
 
 	// Include context pages.
