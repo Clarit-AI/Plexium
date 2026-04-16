@@ -75,6 +75,7 @@ func init() {
 	// sync flags
 	syncCmd.Flags().Bool("dry-run", false, "Preview without writing changes")
 	syncCmd.Flags().Bool("ci", false, "CI mode: exit non-zero if stale pages found")
+	syncCmd.Flags().Bool("regenerate", false, "Regenerate stale wiki pages via LLM provider cascade")
 
 	// lint flags
 	lintCmd.Flags().Bool("deterministic", false, "Run deterministic checks only (link/orphan/staleness validation)")
@@ -379,18 +380,34 @@ var syncCmd = &cobra.Command{
 		}
 
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		regenerate, _ := cmd.Flags().GetBool("regenerate")
 		outputJSON, _ := cmd.Flags().GetBool("output-json")
+
+		if dryRun && regenerate {
+			return fmt.Errorf("cannot combine --dry-run with --regenerate")
+		}
 
 		cfg, err := config.LoadFromDir(repoRoot)
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
 		}
 
-		result, err := plexiumsync.Run(plexiumsync.Options{
-			RepoRoot: repoRoot,
-			Config:   cfg,
-			DryRun:   dryRun,
-		})
+		syncOpts := plexiumsync.Options{
+			RepoRoot:   repoRoot,
+			Config:     cfg,
+			DryRun:     dryRun,
+			Regenerate: regenerate,
+		}
+
+		if regenerate {
+			cascade, _ := buildCascadeFromConfig(cfg)
+			if cascade == nil || !cascade.HasProviders() {
+				return fmt.Errorf("--regenerate requires at least one configured LLM provider; run 'plexium agent setup' first")
+			}
+			syncOpts.Cascade = cascade
+		}
+
+		result, err := plexiumsync.Run(syncOpts)
 		if err != nil {
 			return fmt.Errorf("sync failed: %w", err)
 		}
@@ -406,6 +423,15 @@ var syncCmd = &cobra.Command{
 			fmt.Printf("Stale pages found:   %d\n", result.StalePages)
 			fmt.Printf("Hashes updated:      %d\n", result.HashesUpdated)
 			fmt.Printf("Nav recompiled:      %v\n", result.NavRecompiled)
+			if result.PagesRegenerated > 0 {
+				fmt.Printf("Pages regenerated:   %d\n", result.PagesRegenerated)
+			}
+			if len(result.RegenerationErrors) > 0 {
+				fmt.Printf("Regeneration errors: %d\n", len(result.RegenerationErrors))
+				for _, e := range result.RegenerationErrors {
+					fmt.Printf("  - %s\n", e)
+				}
+			}
 			if len(result.PagesAffected) > 0 {
 				fmt.Println("Pages affected:")
 				for _, p := range result.PagesAffected {

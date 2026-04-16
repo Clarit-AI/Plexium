@@ -1,16 +1,45 @@
 package sync
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/Clarit-AI/Plexium/internal/agent"
 	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/manifest"
+	"github.com/Clarit-AI/Plexium/internal/retry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// ---------------------------------------------------------------------------
+// Mock provider for regeneration tests
+// ---------------------------------------------------------------------------
+
+type mockProvider struct {
+	response string
+}
+
+func (m *mockProvider) Name() string       { return "mock" }
+func (m *mockProvider) IsAvailable() bool  { return true }
+func (m *mockProvider) HealthCheck() error { return nil }
+func (m *mockProvider) CostPerToken() float64 { return 0.001 }
+func (m *mockProvider) Complete(_ context.Context, _ string) (*agent.CompletionResult, error) {
+	return &agent.CompletionResult{Provider: "mock", Response: m.response, TokensUsed: 100}, nil
+}
+
+func testCascade(response string) *agent.ProviderCascade {
+	rp := &retry.RetryPolicy{
+		MaxAttempts:       1,
+		InitialDelay:      time.Millisecond,
+		BackoffMultiplier: 1.0,
+		MaxDelay:          time.Millisecond,
+	}
+	return agent.NewCascade([]agent.Provider{&mockProvider{response: response}}, rp)
+}
 
 func setupSyncFixture(t *testing.T) string {
 	t.Helper()
@@ -166,4 +195,113 @@ func TestSyncResult_ExitCode_StalePages(t *testing.T) {
 func TestSyncResult_ExitCode_Clean(t *testing.T) {
 	result := &SyncResult{StalePages: 0}
 	assert.Equal(t, 0, result.ExitCode(), "no stale pages should return exit code 0")
+}
+
+func TestSync_Regenerate_CallsProvider(t *testing.T) {
+	root := setupSyncFixture(t)
+
+	// Modify source file to make it stale
+	require.NoError(t, os.WriteFile(
+		filepath.Join(root, "src", "auth.go"),
+		[]byte("package auth\n\nfunc Login() {}\n"),
+		0644,
+	))
+
+	cfg, err := config.LoadFromDir(root)
+	require.NoError(t, err)
+
+	cascade := testCascade(`{"content": "# Auth Module\nRegenerated content"}`)
+
+	result, err := Run(Options{
+		RepoRoot:   root,
+		Config:     cfg,
+		DryRun:     false,
+		Regenerate: true,
+		Cascade:    cascade,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, result.PagesRegenerated, "should have regenerated 1 page")
+	assert.Empty(t, result.RegenerationErrors, "should have no regeneration errors")
+
+	// Verify wiki file content was updated by the mock
+	data, err := os.ReadFile(filepath.Join(root, ".wiki", "modules", "auth-module.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "# Auth Module\nRegenerated content", string(data))
+}
+
+func TestSync_Regenerate_NoCascade_Errors(t *testing.T) {
+	root := setupSyncFixture(t)
+
+	// Modify source file to make it stale
+	require.NoError(t, os.WriteFile(
+		filepath.Join(root, "src", "auth.go"),
+		[]byte("package auth\n\nfunc Login() {}\n"),
+		0644,
+	))
+
+	cfg, err := config.LoadFromDir(root)
+	require.NoError(t, err)
+
+	_, err = Run(Options{
+		RepoRoot:   root,
+		Config:     cfg,
+		DryRun:     false,
+		Regenerate: true,
+		Cascade:    nil,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no LLM providers configured")
+}
+
+func TestSync_Regenerate_ThenHashesMatch(t *testing.T) {
+	root := setupSyncFixture(t)
+
+	// Modify source file to make it stale
+	require.NoError(t, os.WriteFile(
+		filepath.Join(root, "src", "auth.go"),
+		[]byte("package auth\n\nfunc Login() {}\n"),
+		0644,
+	))
+
+	cfg, err := config.LoadFromDir(root)
+	require.NoError(t, err)
+
+	cascade := testCascade(`{"content": "# Auth Module\nRegenerated content"}`)
+
+	// First run: regenerate
+	result1, err := Run(Options{
+		RepoRoot:   root,
+		Config:     cfg,
+		DryRun:     false,
+		Regenerate: true,
+		Cascade:    cascade,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result1.PagesRegenerated)
+
+	// Second run: should find 0 stale pages since hashes were updated
+	result2, err := Run(Options{
+		RepoRoot: root,
+		Config:   cfg,
+		DryRun:   false,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result2.StalePages, "after regen + hash update, no pages should be stale")
+}
+
+func TestSync_DryRunAndRegenerate_Errors(t *testing.T) {
+	root := setupSyncFixture(t)
+
+	cfg, err := config.LoadFromDir(root)
+	require.NoError(t, err)
+
+	_, err = Run(Options{
+		RepoRoot:   root,
+		Config:     cfg,
+		DryRun:     true,
+		Regenerate: true,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot regenerate in dry-run mode")
 }

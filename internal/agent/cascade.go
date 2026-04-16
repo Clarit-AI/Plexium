@@ -58,6 +58,11 @@ func NewCascade(providers []Provider, retryPolicy *retry.RetryPolicy) *ProviderC
 	}
 }
 
+// HasProviders returns true if the cascade contains at least one provider.
+func (c *ProviderCascade) HasProviders() bool {
+	return len(c.providers) > 0
+}
+
 // Complete tries each available provider in cost order. If a provider fails,
 // the cascade falls through to the next one. Returns ErrNoProvider if all
 // providers are unavailable or exhausted.
