@@ -39,6 +39,14 @@ func Init(opts InitOptions) (*InitResult, error) {
 	wikiDir := filepath.Join(opts.RepoRoot, ".wiki")
 	plexiumDir := filepath.Join(opts.RepoRoot, ".plexium")
 
+	// Protect secrets from accidental commits as early as possible.
+	// Runs before any scaffold step so partial failures still write .gitignore.
+	if !opts.DryRun {
+		if _, err := EnsureGitignore(opts.RepoRoot); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to write .gitignore rules: %v\n", err)
+		}
+	}
+
 	dryRunOutputDir := filepath.Join(plexiumDir, "output")
 	dr := manifest.NewDryRunner(opts.DryRun, dryRunOutputDir, nil)
 	result := &InitResult{
@@ -234,14 +242,6 @@ func Init(opts InitOptions) (*InitResult, error) {
 			fmt.Fprintf(os.Stderr, "warning: failed to write PageIndex MCP config: %v\n", err)
 		} else if created {
 			result.FilesCreated = append(result.FilesCreated, repoRelativePath(opts.RepoRoot, mcpPath))
-		}
-	}
-
-	// Protect secrets from accidental commits. Write gitignore rules as early
-	// as possible so credentials.json and other runtime files are never staged.
-	if !opts.DryRun {
-		if _, err := EnsureGitignore(opts.RepoRoot); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to write .gitignore rules: %v\n", err)
 		}
 	}
 

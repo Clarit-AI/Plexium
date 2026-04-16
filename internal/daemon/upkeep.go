@@ -443,7 +443,9 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 	keepWorktree := false
 	defer func() {
 		if !keepWorktree {
-			_ = d.workspace.Cleanup(wt.ID)
+			if err := d.workspace.Cleanup(wt.ID); err != nil {
+				fmt.Fprintf(os.Stderr, "daemon: cleanup failed for %s: %v\n", wt.ID, err)
+			}
 		}
 	}()
 

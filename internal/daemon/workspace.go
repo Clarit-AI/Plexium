@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,7 @@ type WorkspaceMgr struct {
 	basePath string // .plexium/workspaces/
 	repoRoot string
 	gitExec  func(args ...string) ([]byte, error) // injectable for testing
+	mu       sync.Mutex
 }
 
 // Worktree represents a single worktree workspace and its metadata.
@@ -68,6 +70,9 @@ func (m *WorkspaceMgr) metaPath(id string) string {
 // a new branch and checks it out in a dedicated directory under basePath.
 // Returns an error if the total worktree count would exceed MaxWorktrees.
 func (m *WorkspaceMgr) Create(issueID string) (*Worktree, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	id := worktreeID(issueID)
 	wtPath := filepath.Join(m.basePath, id)
 	branch := worktreeBranch(issueID)
@@ -199,13 +204,24 @@ func (m *WorkspaceMgr) ActiveCount() (int, error) {
 	return count, nil
 }
 
-// TotalCount returns the total number of worktrees on disk regardless of status.
+// TotalCount returns the total number of worktree directories on disk regardless
+// of status or whether meta.json is present. This ensures orphaned directories
+// (e.g. from a failed metadata write) are still counted toward the cap.
 func (m *WorkspaceMgr) TotalCount() (int, error) {
-	worktrees, err := m.List()
+	entries, err := os.ReadDir(m.basePath)
 	if err != nil {
-		return 0, err
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("workspace: totalcount: %w", err)
 	}
-	return len(worktrees), nil
+	total := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			total++
+		}
+	}
+	return total, nil
 }
 
 // ---------------------------------------------------------------------------
