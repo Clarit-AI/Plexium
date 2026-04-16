@@ -6,8 +6,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 )
+
+// MaxWorktrees is the hard ceiling on the total number of worktrees
+// (running + completed + failed) that Plexium will ever hold on disk.
+// This guards against daemon glitches that repeatedly create worktrees
+// without cleaning them up.
+const MaxWorktrees = 10
 
 // WorkspaceMgr manages git worktree-based workspaces for isolated wiki
 // maintenance tasks. Each workspace is a git worktree checked out under
@@ -16,6 +23,7 @@ type WorkspaceMgr struct {
 	basePath string // .plexium/workspaces/
 	repoRoot string
 	gitExec  func(args ...string) ([]byte, error) // injectable for testing
+	mu       sync.Mutex
 }
 
 // Worktree represents a single worktree workspace and its metadata.
@@ -60,7 +68,11 @@ func (m *WorkspaceMgr) metaPath(id string) string {
 
 // Create creates a new git worktree workspace for the given issue. It creates
 // a new branch and checks it out in a dedicated directory under basePath.
+// Returns an error if the total worktree count would exceed MaxWorktrees.
 func (m *WorkspaceMgr) Create(issueID string) (*Worktree, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	id := worktreeID(issueID)
 	wtPath := filepath.Join(m.basePath, id)
 	branch := worktreeBranch(issueID)
@@ -68,6 +80,16 @@ func (m *WorkspaceMgr) Create(issueID string) (*Worktree, error) {
 	// Ensure base directory exists.
 	if err := os.MkdirAll(m.basePath, 0o755); err != nil {
 		return nil, fmt.Errorf("workspace: mkdir %s: %w", m.basePath, err)
+	}
+
+	// Hard cap: refuse to create if total on-disk worktrees would exceed the
+	// ceiling. This prevents runaway accumulation when cleanup is delayed.
+	total, err := m.TotalCount()
+	if err != nil {
+		return nil, fmt.Errorf("workspace: count worktrees: %w", err)
+	}
+	if total >= MaxWorktrees {
+		return nil, fmt.Errorf("workspace: total worktree limit reached (%d/%d); run 'plexium daemon --cleanup' to prune completed worktrees", total, MaxWorktrees)
 	}
 
 	// Create the git worktree with a new branch.
@@ -180,6 +202,26 @@ func (m *WorkspaceMgr) ActiveCount() (int, error) {
 		}
 	}
 	return count, nil
+}
+
+// TotalCount returns the total number of worktree directories on disk regardless
+// of status or whether meta.json is present. This ensures orphaned directories
+// (e.g. from a failed metadata write) are still counted toward the cap.
+func (m *WorkspaceMgr) TotalCount() (int, error) {
+	entries, err := os.ReadDir(m.basePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("workspace: totalcount: %w", err)
+	}
+	total := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			total++
+		}
+	}
+	return total, nil
 }
 
 // ---------------------------------------------------------------------------

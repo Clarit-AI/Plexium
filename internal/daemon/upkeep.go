@@ -437,6 +437,18 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 		return action
 	}
 
+	// Clean up the worktree on all terminal paths (completed, failed, etc.).
+	// The one exception is attention_needed: those worktrees are intentionally
+	// left on disk so the operator can review the files before discarding.
+	keepWorktree := false
+	defer func() {
+		if !keepWorktree {
+			if err := d.workspace.Cleanup(wt.ID); err != nil {
+				fmt.Fprintf(os.Stderr, "daemon: cleanup failed for %s: %v\n", wt.ID, err)
+			}
+		}
+	}()
+
 	jobSnapshot := &DaemonJobSnapshot{
 		ID:            job.ID,
 		Type:          job.Type,
@@ -557,6 +569,7 @@ func (d *Daemon) executeJob(ctx context.Context, job *upkeepJob) TickAction {
 		return action
 	}
 	if attentionNeeded {
+		keepWorktree = true // operator must review before cleanup
 		_ = d.workspace.UpdateStatus(wt.ID, jobStateAttentionNeeded)
 		result.State = jobStateAttentionNeeded
 		d.persistAttentionJob(result)
