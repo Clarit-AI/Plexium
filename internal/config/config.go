@@ -26,9 +26,10 @@ type Config struct {
 	Reports        Reports        `yaml:"reports"`
 	GitHubWiki     GitHubWiki     `yaml:"githubWiki"`
 	Sensitivity    Sensitivity    `yaml:"sensitivity"`
-	AssistiveAgent AssistiveAgent `yaml:"assistiveAgent"`
-	Daemon         DaemonConfig   `yaml:"daemon"`
-	Retry          RetryConfig    `yaml:"retry"`
+	AssistiveAgent AssistiveAgent          `yaml:"assistiveAgent"`
+	Daemon         DaemonConfig            `yaml:"daemon"`
+	Retry          RetryConfig             `yaml:"retry"`
+	Plugins        map[string]map[string]any `yaml:"plugins,omitempty"`
 }
 
 // AssistiveAgent configures the LLM provider cascade for wiki maintenance tasks.
@@ -306,6 +307,27 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// PluginEnabled returns true if a named plugin is configured and enabled.
+func (c *Config) PluginEnabled(name string) bool {
+	if c.Plugins == nil {
+		return false
+	}
+	pcfg, ok := c.Plugins[name]
+	if !ok {
+		return false
+	}
+	enabled, _ := pcfg["enabled"].(bool)
+	return enabled
+}
+
+// PluginConfig returns the raw config map for a named plugin, or nil.
+func (c *Config) PluginSettings(name string) map[string]any {
+	if c.Plugins == nil {
+		return nil
+	}
+	return c.Plugins[name]
 }
 
 // Getwd returns the current working directory

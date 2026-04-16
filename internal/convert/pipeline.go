@@ -1,6 +1,7 @@
 package convert
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ type Pipeline struct {
 	dryRun   bool
 	depth    string
 	agent    string
+	registry *plugins.Registry
 }
 
 // PipelineResult holds the output of a full conversion run.
@@ -39,6 +41,7 @@ type PipelineOptions struct {
 	DryRun   bool
 	Depth    string // "shallow" or "deep"
 	Agent    string // Optional: run specific adapter after conversion
+	Registry *plugins.Registry // Optional: plugin registry for pipeline hooks
 }
 
 // NewPipeline creates a new Pipeline.
@@ -52,6 +55,7 @@ func NewPipeline(opts PipelineOptions) *Pipeline {
 		dryRun:   opts.DryRun,
 		depth:    opts.Depth,
 		agent:    opts.Agent,
+		registry: opts.Registry,
 	}
 }
 
@@ -107,15 +111,30 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 		return nil, fmt.Errorf("ingest: %w", err)
 	}
 
+	// Plugin hook: after-ingest
+	if err := p.runPlugins(plugins.StageAfterIngest, ingestResult.Pages); err != nil {
+		return nil, fmt.Errorf("plugins after-ingest: %w", err)
+	}
+
 	// 4. Link
 	linker := NewLinker()
 	linker.AddPages(ingestResult.Pages)
 	linkedPages := linker.GenerateCrossReferences(ingestResult.Pages)
 	inbound, _ := linker.ComputeLinks(linkedPages)
 
+	// Plugin hook: after-link
+	if err := p.runPlugins(plugins.StageAfterLink, linkedPages); err != nil {
+		return nil, fmt.Errorf("plugins after-link: %w", err)
+	}
+
 	// 5. Lint
 	linter := NewConvertLinter(linker)
 	lintResult := linter.Analyze(linkedPages, filterResult.Eligible)
+
+	// Plugin hook: after-lint
+	if err := p.runPlugins(plugins.StageAfterLint, linkedPages); err != nil {
+		return nil, fmt.Errorf("plugins after-lint: %w", err)
+	}
 
 	// Add stub pages from lint to the page list
 	allPages := append(linkedPages, lintResult.StubPages...)
@@ -132,7 +151,14 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 		return nil, fmt.Errorf("write: %w", err)
 	}
 
-	// 8. Run agent adapter if specified
+	// 8. Plugin hook: after-write
+	if !p.dryRun {
+		if err := p.runPlugins(plugins.StageAfterWrite, allPages); err != nil {
+			return nil, fmt.Errorf("plugins after-write: %w", err)
+		}
+	}
+
+	// 9. Run agent adapter if specified
 	if !p.dryRun && p.agent != "" {
 		if err := p.runAdapter(p.agent); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: adapter %q failed: %v\n", p.agent, err)
@@ -146,6 +172,47 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 
 func (p *Pipeline) runAdapter(agent string) error {
 	return plugins.RunAdapter(p.repoRoot, agent)
+}
+
+// runPlugins executes all pipeline plugins registered for the given stage.
+func (p *Pipeline) runPlugins(stage plugins.PipelineStage, pages []PageData) error {
+	if p.registry == nil {
+		return nil
+	}
+	pps := p.registry.PipelinePlugins(stage)
+	if len(pps) == 0 {
+		return nil
+	}
+
+	wikiRoot := filepath.Join(p.repoRoot, ".wiki")
+	if p.cfg != nil && p.cfg.Wiki.Root != "" {
+		wikiRoot = filepath.Join(p.repoRoot, p.cfg.Wiki.Root)
+	}
+
+	pipelinePages := make([]plugins.PipelinePage, len(pages))
+	for i, pg := range pages {
+		pipelinePages[i] = plugins.PipelinePage{
+			WikiPath:    pg.WikiPath,
+			Title:       pg.Title,
+			Section:     pg.Section,
+			Content:     pg.Content,
+			SourceFiles: pg.SourceFiles,
+		}
+	}
+
+	data := &plugins.PipelineData{
+		RepoRoot: p.repoRoot,
+		WikiRoot: wikiRoot,
+		Pages:    pipelinePages,
+	}
+
+	ctx := context.Background()
+	for _, pp := range pps {
+		if err := pp.Process(ctx, data); err != nil {
+			return fmt.Errorf("plugin %s: %w", pp.Name(), err)
+		}
+	}
+	return nil
 }
 
 func (p *Pipeline) writeOutput(result *PipelineResult) error {
