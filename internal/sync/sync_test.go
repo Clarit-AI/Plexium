@@ -157,3 +157,13 @@ func TestSync_DryRunDoesNotWrite(t *testing.T) {
 	assert.Equal(t, oldHash, after.Pages[0].SourceFiles[0].Hash,
 		"dry-run should not modify manifest hashes")
 }
+
+func TestSyncResult_ExitCode_StalePages(t *testing.T) {
+	result := &SyncResult{StalePages: 3}
+	assert.Equal(t, 1, result.ExitCode(), "stale pages > 0 should return exit code 1")
+}
+
+func TestSyncResult_ExitCode_Clean(t *testing.T) {
+	result := &SyncResult{StalePages: 0}
+	assert.Equal(t, 0, result.ExitCode(), "no stale pages should return exit code 0")
+}

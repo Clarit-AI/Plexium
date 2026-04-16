@@ -74,6 +74,7 @@ func init() {
 
 	// sync flags
 	syncCmd.Flags().Bool("dry-run", false, "Preview without writing changes")
+	syncCmd.Flags().Bool("ci", false, "CI mode: exit non-zero if stale pages found")
 
 	// lint flags
 	lintCmd.Flags().Bool("deterministic", false, "Run deterministic checks only (link/orphan/staleness validation)")
@@ -411,6 +412,11 @@ var syncCmd = &cobra.Command{
 					fmt.Printf("  - %s\n", p)
 				}
 			}
+		}
+
+		ciMode, _ := cmd.Flags().GetBool("ci")
+		if ciMode {
+			os.Exit(result.ExitCode())
 		}
 		return nil
 	},

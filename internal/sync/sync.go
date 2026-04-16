@@ -20,6 +20,15 @@ type SyncResult struct {
 	PagesAffected      []string `json:"pagesAffected"`
 }
 
+// ExitCode returns 1 if stale pages were found, 0 otherwise.
+// Used by --ci mode to signal CI pipeline failures.
+func (r *SyncResult) ExitCode() int {
+	if r.StalePages > 0 {
+		return 1
+	}
+	return 0
+}
+
 // Options configures a sync run.
 type Options struct {
 	RepoRoot string
