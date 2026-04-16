@@ -90,9 +90,9 @@ type PluginSearchResult struct {
 
 // MCPToolDef describes an MCP tool that a retrieval plugin exposes.
 type MCPToolDef struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	InputSchema any `json:"inputSchema"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	InputSchema any    `json:"inputSchema"`
 }
 
 // RetrievalPlugin provides search capabilities beyond the built-in PageIndex.

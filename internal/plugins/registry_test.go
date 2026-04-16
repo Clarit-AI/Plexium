@@ -3,6 +3,8 @@ package plugins
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -180,6 +182,96 @@ func TestRegistry_All(t *testing.T) {
 	all := r.All()
 	if len(all) != 2 {
 		t.Fatalf("expected 2 plugins, got %d", len(all))
+	}
+}
+
+func TestRegistry_TypeMismatchRejected(t *testing.T) {
+	r := NewRegistry()
+	// stubPlugin declares Pipeline type but doesn't implement PipelinePlugin.
+	bogus := &stubPlugin{name: "bogus", ptype: PluginTypePipeline}
+
+	err := r.Register(bogus)
+	if err == nil {
+		t.Fatal("expected error for Type/interface mismatch")
+	}
+}
+
+func TestRegistry_UnknownTypeRejected(t *testing.T) {
+	r := NewRegistry()
+	bogus := &stubPlugin{name: "bogus", ptype: PluginType("mystery")}
+
+	err := r.Register(bogus)
+	if err == nil {
+		t.Fatal("expected error for unknown plugin type")
+	}
+}
+
+func TestRegistry_ConcurrentRegisterAndRead(t *testing.T) {
+	r := NewRegistry()
+	const writers = 10
+	const perWriter = 20
+
+	var writersWG sync.WaitGroup
+	var readersWG sync.WaitGroup
+
+	// Writers: each registers a distinct batch of plugins.
+	for w := 0; w < writers; w++ {
+		writersWG.Add(1)
+		go func(wID int) {
+			defer writersWG.Done()
+			for i := 0; i < perWriter; i++ {
+				p := &stubPipelinePlugin{
+					stubPlugin: stubPlugin{
+						name:  fmt.Sprintf("p-%d-%d", wID, i),
+						ptype: PluginTypePipeline,
+					},
+					stage: StageAfterWrite,
+				}
+				if err := r.Register(p); err != nil {
+					t.Errorf("register failed: %v", err)
+					return
+				}
+			}
+		}(w)
+	}
+
+	// Readers: concurrently read registry state until writers finish.
+	readerStop := make(chan struct{})
+	for i := 0; i < 4; i++ {
+		readersWG.Add(1)
+		go func() {
+			defer readersWG.Done()
+			for {
+				select {
+				case <-readerStop:
+					return
+				default:
+					_ = r.PluginCount()
+					_, _ = r.Get("p-0-0")
+					_ = r.PipelinePlugins(StageAfterWrite)
+					_ = r.All()
+				}
+			}
+		}()
+	}
+
+	writersWG.Wait()
+	close(readerStop)
+	readersWG.Wait()
+
+	expected := writers * perWriter
+	if got := r.PluginCount(); got != expected {
+		t.Fatalf("expected %d plugins, got %d", expected, got)
+	}
+
+	// Spot-check retrievability across the full set.
+	for w := 0; w < writers; w++ {
+		for i := 0; i < perWriter; i++ {
+			name := fmt.Sprintf("p-%d-%d", w, i)
+			if _, ok := r.Get(name); !ok {
+				t.Fatalf("plugin %q not retrievable after concurrent register", name)
+			}
+		}
 	}
 }
 

@@ -24,7 +24,13 @@ func NewRegistry() *Registry {
 }
 
 // Register adds a plugin to the registry. Returns an error if a plugin
-// with the same name is already registered.
+// with the same name is already registered, or if the plugin's declared
+// Type() does not match the interface it actually implements.
+//
+// Plugin.Type() is authoritative: it determines which bucket the plugin
+// lands in. This prevents silently dropping plugins that implement
+// multiple interfaces (e.g. both PipelinePlugin and RetrievalPlugin) by
+// requiring the author to declare the primary category explicitly.
 func (r *Registry) Register(p Plugin) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -34,17 +40,32 @@ func (r *Registry) Register(p Plugin) error {
 		return fmt.Errorf("plugin %q already registered", name)
 	}
 
-	r.plugins[name] = p
-
-	switch tp := p.(type) {
-	case PipelinePlugin:
-		r.pipeline = append(r.pipeline, tp)
-	case RetrievalPlugin:
-		r.retrieval[name] = tp
-	case WatchPlugin:
-		r.watches[name] = tp
+	switch p.Type() {
+	case PluginTypeAdapter:
+		// Adapters have no interface beyond Plugin; just register.
+	case PluginTypePipeline:
+		pp, ok := p.(PipelinePlugin)
+		if !ok {
+			return fmt.Errorf("plugin %q declares Type=%q but does not implement PipelinePlugin", name, PluginTypePipeline)
+		}
+		r.pipeline = append(r.pipeline, pp)
+	case PluginTypeRetrieval:
+		rp, ok := p.(RetrievalPlugin)
+		if !ok {
+			return fmt.Errorf("plugin %q declares Type=%q but does not implement RetrievalPlugin", name, PluginTypeRetrieval)
+		}
+		r.retrieval[name] = rp
+	case PluginTypeWatch:
+		wp, ok := p.(WatchPlugin)
+		if !ok {
+			return fmt.Errorf("plugin %q declares Type=%q but does not implement WatchPlugin", name, PluginTypeWatch)
+		}
+		r.watches[name] = wp
+	default:
+		return fmt.Errorf("plugin %q has unknown Type=%q", name, p.Type())
 	}
 
+	r.plugins[name] = p
 	return nil
 }
 

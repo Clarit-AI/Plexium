@@ -213,9 +213,7 @@ func (s *Server) handleToolsList(req JSONRPCRequest) JSONRPCResponse {
 	}
 
 	// Append tools from retrieval plugins
-	for _, td := range s.retrievalPluginTools() {
-		tools = append(tools, td)
-	}
+	tools = append(tools, s.retrievalPluginTools()...)
 
 	return JSONRPCResponse{
 		JSONRPC: "2.0",
@@ -395,7 +393,19 @@ func (s *Server) delegateToPlugin(id interface{}, tool string, args json.RawMess
 						},
 					}, true
 				}
-				data, _ := json.Marshal(result)
+				data, mErr := json.Marshal(result)
+				if mErr != nil {
+					return JSONRPCResponse{
+						JSONRPC: "2.0",
+						ID:      id,
+						Result: ToolResult{
+							Content: []ToolContent{
+								{Type: "text", Text: fmt.Sprintf("Marshal error: %v", mErr)},
+							},
+							IsError: true,
+						},
+					}, true
+				}
 				return JSONRPCResponse{
 					JSONRPC: "2.0",
 					ID:      id,
