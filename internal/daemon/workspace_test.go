@@ -199,6 +199,67 @@ func TestWorkspaceMgr_UpdateStatus_NotFound(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TotalCount
+// ---------------------------------------------------------------------------
+
+func TestWorkspaceMgr_TotalCount(t *testing.T) {
+	mgr := newTestMgr(t)
+
+	total, err := mgr.TotalCount()
+	require.NoError(t, err)
+	assert.Equal(t, 0, total)
+
+	_, err = mgr.Create("TC-1")
+	require.NoError(t, err)
+	_, err = mgr.Create("TC-2")
+	require.NoError(t, err)
+
+	total, err = mgr.TotalCount()
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+
+	// Marking completed still counts toward total.
+	require.NoError(t, mgr.UpdateStatus("wt-TC-1", "completed"))
+	total, err = mgr.TotalCount()
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+}
+
+func TestWorkspaceMgr_Create_EnforcesTotalCap(t *testing.T) {
+	mgr := newTestMgr(t)
+
+	// Fill to the cap.
+	for i := range MaxWorktrees {
+		_, err := mgr.Create(fmt.Sprintf("CAP-%d", i))
+		require.NoError(t, err, "expected create to succeed for worktree %d", i)
+	}
+
+	// One more must be rejected.
+	_, err := mgr.Create("CAP-overflow")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "total worktree limit reached")
+}
+
+func TestWorkspaceMgr_Create_CapReleasedAfterCleanup(t *testing.T) {
+	mgr := newTestMgr(t)
+
+	// Fill to the cap.
+	var firstID string
+	for i := range MaxWorktrees {
+		wt, err := mgr.Create(fmt.Sprintf("REL-%d", i))
+		require.NoError(t, err)
+		if i == 0 {
+			firstID = wt.ID
+		}
+	}
+
+	// Clean one up — next create must succeed.
+	require.NoError(t, mgr.Cleanup(firstID))
+	_, err := mgr.Create("REL-new")
+	require.NoError(t, err)
+}
+
+// ---------------------------------------------------------------------------
 // ActiveCount
 // ---------------------------------------------------------------------------
 

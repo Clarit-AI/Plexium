@@ -237,6 +237,14 @@ func Init(opts InitOptions) (*InitResult, error) {
 		}
 	}
 
+	// Protect secrets from accidental commits. Write gitignore rules as early
+	// as possible so credentials.json and other runtime files are never staged.
+	if !opts.DryRun {
+		if _, err := EnsureGitignore(opts.RepoRoot); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to write .gitignore rules: %v\n", err)
+		}
+	}
+
 	return result, nil
 }
 

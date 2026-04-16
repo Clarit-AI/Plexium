@@ -282,3 +282,70 @@ func TestInit_DryRunManifestIsolation(t *testing.T) {
 	_, err = os.Stat(manifestPath)
 	assert.True(t, os.IsNotExist(err), "manifest.json should not exist after dry-run init")
 }
+
+// ---------------------------------------------------------------------------
+// Gitignore protection
+// ---------------------------------------------------------------------------
+
+func TestInit_WritesGitignoreRules(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := Init(InitOptions{RepoRoot: dir})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	require.NoError(t, err, ".gitignore must be created by plexium init")
+
+	content := string(data)
+	assert.Contains(t, content, ".plexium/credentials.json")
+	assert.Contains(t, content, ".plexium/.env")
+	assert.Contains(t, content, GitignoreStart)
+	assert.Contains(t, content, GitignoreEnd)
+}
+
+func TestInit_GitignoreIdempotent(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := Init(InitOptions{RepoRoot: dir})
+	require.NoError(t, err)
+
+	first, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	require.NoError(t, err)
+
+	// Second init must not duplicate the block.
+	_, err = Init(InitOptions{RepoRoot: dir})
+	require.NoError(t, err)
+
+	second, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	require.NoError(t, err)
+
+	assert.Equal(t, string(first), string(second), "second init must not modify .gitignore")
+}
+
+func TestInit_GitignorePreservesExistingContent(t *testing.T) {
+	dir := t.TempDir()
+
+	existing := "# My project ignores\n*.log\nbuild/\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(existing), 0o644))
+
+	_, err := Init(InitOptions{RepoRoot: dir})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	require.NoError(t, err)
+
+	content := string(data)
+	assert.Contains(t, content, "# My project ignores")
+	assert.Contains(t, content, "*.log")
+	assert.Contains(t, content, ".plexium/credentials.json")
+}
+
+func TestInit_DryRun_DoesNotWriteGitignore(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := Init(InitOptions{RepoRoot: dir, DryRun: true})
+	require.NoError(t, err)
+
+	_, err = os.Stat(filepath.Join(dir, ".gitignore"))
+	assert.True(t, os.IsNotExist(err), ".gitignore must not be written in dry-run mode")
+}
