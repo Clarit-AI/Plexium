@@ -58,6 +58,18 @@ func NewCascade(providers []Provider, retryPolicy *retry.RetryPolicy) *ProviderC
 	}
 }
 
+// HasProviders returns true if the cascade contains at least one provider
+// capable of performing completions internally. Stub providers like
+// InheritProvider (which always returns ErrNoInheritProvider) are excluded.
+func (c *ProviderCascade) HasProviders() bool {
+	for _, p := range c.providers {
+		if _, ok := p.(*InheritProvider); !ok {
+			return true
+		}
+	}
+	return false
+}
+
 // Complete tries each available provider in cost order. If a provider fails,
 // the cascade falls through to the next one. Returns ErrNoProvider if all
 // providers are unavailable or exhausted.

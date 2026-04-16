@@ -1,12 +1,15 @@
 package sync
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
+	"github.com/Clarit-AI/Plexium/internal/agent"
 	"github.com/Clarit-AI/Plexium/internal/compile"
 	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/manifest"
+	"github.com/Clarit-AI/Plexium/internal/regen"
 	"github.com/Clarit-AI/Plexium/internal/scanner"
 )
 
@@ -18,18 +21,35 @@ type SyncResult struct {
 	NavRecompiled      bool     `json:"navRecompiled"`
 	DryRun             bool     `json:"dryRun"`
 	PagesAffected      []string `json:"pagesAffected"`
+	PagesRegenerated   int      `json:"pagesRegenerated"`
+	RegenerationErrors []string `json:"regenerationErrors,omitempty"`
+}
+
+// ExitCode returns 1 if stale pages were found, 0 otherwise.
+// Used by --ci mode to signal CI pipeline failures.
+func (r *SyncResult) ExitCode() int {
+	if r.StalePages > 0 {
+		return 1
+	}
+	return 0
 }
 
 // Options configures a sync run.
 type Options struct {
-	RepoRoot string
-	Config   *config.Config
-	DryRun   bool
+	RepoRoot   string
+	Config     *config.Config
+	DryRun     bool
+	Regenerate bool
+	Cascade    *agent.ProviderCascade // required when Regenerate=true
 }
 
 // Run performs an incremental sync: detects changed source files, updates
 // manifest hashes for stale pages, and recompiles navigation files.
 func Run(opts Options) (*SyncResult, error) {
+	if opts.DryRun && opts.Regenerate {
+		return nil, fmt.Errorf("cannot regenerate in dry-run mode")
+	}
+
 	result := &SyncResult{DryRun: opts.DryRun}
 
 	mgr, err := manifest.NewManager(manifest.DefaultPath(opts.RepoRoot))
@@ -76,6 +96,39 @@ func Run(opts Options) (*SyncResult, error) {
 		}
 	}
 
+	// Regenerate stale pages via LLM provider cascade when requested.
+	// Track which pages succeeded so we only update hashes for those.
+	regenerated := make(map[string]bool)
+	if opts.Regenerate && len(stalePages) > 0 {
+		if opts.Cascade == nil {
+			return nil, fmt.Errorf("no LLM providers configured; --regenerate requires at least one provider in the cascade")
+		}
+
+		wikiRoot := ".wiki"
+		if opts.Config != nil && opts.Config.Wiki.Root != "" {
+			wikiRoot = opts.Config.Wiki.Root
+		}
+
+		for _, page := range stalePages {
+			regenResult, regenErr := regen.RegeneratePage(context.Background(), regen.PageRegenOptions{
+				RepoRoot: opts.RepoRoot,
+				WikiRoot: wikiRoot,
+				Page:     page,
+				Config:   opts.Config,
+				Cascade:  opts.Cascade,
+			})
+			if regenErr != nil {
+				errMsg := fmt.Sprintf("%s: %v", page.WikiPath, regenErr)
+				result.RegenerationErrors = append(result.RegenerationErrors, errMsg)
+				continue
+			}
+			if regenResult.Written {
+				result.PagesRegenerated++
+				regenerated[page.WikiPath] = true
+			}
+		}
+	}
+
 	if len(stalePages) == 0 {
 		return result, nil
 	}
@@ -84,9 +137,13 @@ func Run(opts Options) (*SyncResult, error) {
 		return result, nil
 	}
 
-	// Update hashes for stale pages
+	// Update hashes for stale pages. When --regenerate was used, skip pages
+	// that failed regeneration so they remain stale in the manifest.
 	updated := 0
 	for _, stalePage := range stalePages {
+		if opts.Regenerate && !regenerated[stalePage.WikiPath] {
+			continue
+		}
 		newSources := make([]manifest.SourceFile, 0, len(stalePage.SourceFiles))
 		for _, sf := range stalePage.SourceFiles {
 			newHash, err := manifest.ComputeHash(filepath.Join(opts.RepoRoot, sf.Path))
