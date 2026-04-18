@@ -177,6 +177,29 @@ func TestRetrievalPlugin_HandleMCPCall_Graph(t *testing.T) {
 	}
 }
 
+// Regression: markedup_graph has no required fields, so an LLM that
+// calls it with an empty payload must get a default summary rather
+// than an "unexpected end of JSON input" error. Addresses CodeRabbit
+// review finding on retrieval.go:199.
+func TestRetrievalPlugin_HandleMCPCall_GraphEmptyArgs(t *testing.T) {
+	wikiRoot := seedEnrichedWiki(t)
+	p := NewRetrieval(Config{Enabled: true})
+	if err := p.Initialize(context.Background(), wikiRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	// Three shapes of "no args" that real MCP servers produce:
+	for _, args := range []json.RawMessage{nil, {}, json.RawMessage("{}")} {
+		result, err := p.HandleMCPCall(context.Background(), "markedup_graph", args)
+		if err != nil {
+			t.Fatalf("empty args should succeed for markedup_graph; got %v", err)
+		}
+		if result == nil {
+			t.Errorf("expected non-nil graph summary for args %q", string(args))
+		}
+	}
+}
+
 func TestRetrievalPlugin_HandleMCPCall_UnknownTool(t *testing.T) {
 	wikiRoot := seedEnrichedWiki(t)
 	p := NewRetrieval(Config{Enabled: true})

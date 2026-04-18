@@ -108,6 +108,58 @@ func TestParseConfig_ValidationCatchesRerankingWithoutModel(t *testing.T) {
 	}
 }
 
+// Regression: YAML decoders can emit numeric values as int, int64, or
+// float64 depending on the library in the pipeline. toInt should accept
+// all whole-number forms without silently dropping the override.
+// Addresses CodeRabbit review finding on config.go:148.
+func TestParseConfig_AcceptsNumericDimsAcrossTypes(t *testing.T) {
+	cases := map[string]any{
+		"int":            int(1536),
+		"int64":          int64(1536),
+		"float64(whole)": float64(1536),
+	}
+	for name, dims := range cases {
+		t.Run(name, func(t *testing.T) {
+			raw := map[string]any{
+				"enabled": true,
+				"embeddings": map[string]any{
+					"enabled":  true,
+					"provider": "inherit",
+					"dims":     dims,
+				},
+			}
+			cfg, err := ParseConfig(raw)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if cfg.Embeddings.Dims != 1536 {
+				t.Errorf("expected Dims=1536 for %s, got %d", name, cfg.Embeddings.Dims)
+			}
+		})
+	}
+}
+
+func TestParseConfig_RejectsFractionalDims(t *testing.T) {
+	// A fractional float isn't a legitimate dim count — toInt should
+	// refuse it and leave the default in place rather than silently
+	// truncating.
+	raw := map[string]any{
+		"enabled": true,
+		"embeddings": map[string]any{
+			"enabled":  true,
+			"provider": "inherit",
+			"dims":     3.14,
+		},
+	}
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if cfg.Embeddings.Dims != 768 {
+		t.Errorf("fractional dims should not override default; got %d", cfg.Embeddings.Dims)
+	}
+}
+
 func TestParseConfig_InheritEmbeddingsAllowedWithoutEndpoint(t *testing.T) {
 	// provider="inherit" means reuse assistiveAgent config, so endpoint
 	// and model may legitimately be empty in the plugin block.

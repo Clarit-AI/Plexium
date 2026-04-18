@@ -105,8 +105,14 @@ func DefaultConfig() Config {
 // by config.Config.PluginSettings. It applies defaults for missing fields
 // and validates internal consistency.
 //
-// A nil/empty map yields DefaultConfig() with Enabled=false (the plugin
-// does nothing unless explicitly enabled in the user's config).
+// Enablement rules:
+//   - A nil/empty map yields DefaultConfig() with Enabled=false — the
+//     plugin does nothing unless its config block exists.
+//   - A non-empty map inherits DefaultConfig().Enabled=true implicitly.
+//     Writing `plugins.markedup: { autoEnrich: false }` (without an
+//     explicit `enabled` key) turns the plugin ON with autoEnrich OFF.
+//   - Setting `enabled: false` explicitly disables the plugin regardless
+//     of other keys.
 func ParseConfig(raw map[string]any) (Config, error) {
 	cfg := DefaultConfig()
 	if len(raw) == 0 {
@@ -143,8 +149,8 @@ func ParseConfig(raw map[string]any) (Config, error) {
 		if v, ok := emb["apiKeyEnv"].(string); ok {
 			cfg.Embeddings.APIKeyEnv = v
 		}
-		if v, ok := emb["dims"].(int); ok && v > 0 {
-			cfg.Embeddings.Dims = v
+		if n, ok := toInt(emb["dims"]); ok && n > 0 {
+			cfg.Embeddings.Dims = n
 		}
 	}
 
@@ -170,6 +176,29 @@ func ParseConfig(raw map[string]any) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// toInt normalizes any YAML/JSON numeric shape (int, int64, float64,
+// json.Number, or decimal string) to a plain int. Returns (0, false) on
+// any other type or parse failure. This keeps config parsing robust
+// against the fact that Viper, mapstructure, and a hand-built map[any]
+// decoder can each emit numbers as different Go types.
+func toInt(v any) (int, bool) {
+	switch x := v.(type) {
+	case int:
+		return x, true
+	case int32:
+		return int(x), true
+	case int64:
+		return int(x), true
+	case float64:
+		// Only treat whole-number floats as integers to avoid silently
+		// truncating a user-provided fractional dim count.
+		if x == float64(int(x)) {
+			return int(x), true
+		}
+	}
+	return 0, false
 }
 
 // Validate checks for internally-inconsistent settings.

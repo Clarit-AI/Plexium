@@ -175,6 +175,72 @@ func TestEnricherPlugin_SkipsMissingWikiFiles(t *testing.T) {
 	}
 }
 
+// Regression: if the pipeline delivers a page that isn't tracked in the
+// manifest, the enricher must not save a spurious v1→v2 bump or invent
+// a manifest entry. Addresses CodeRabbit review finding on enricher.go:131.
+func TestEnricherPlugin_UntrackedPageDoesNotBumpManifest(t *testing.T) {
+	// Set up a wiki with a real page, but seed the manifest so that
+	// the page is NOT listed — simulating pipeline/manifest drift.
+	repoRoot, wikiRoot := setupWikiFixture(t, map[string]string{})
+
+	// Now create a .wiki file without a corresponding manifest entry.
+	body := "# Untracked\n\n[[other]]"
+	if err := os.WriteFile(filepath.Join(wikiRoot, "untracked.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewEnricher(Config{Enabled: true, AutoEnrich: true})
+	err := p.Process(context.Background(), &plugins.PipelineData{
+		RepoRoot: repoRoot,
+		WikiRoot: wikiRoot,
+		Pages:    []plugins.PipelinePage{{WikiPath: "untracked.md", Title: "Untracked"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+
+	// Manifest should remain at v1 with no pages — the enricher must
+	// not have triggered a save.
+	mgr, _ := manifest.NewManager(manifest.DefaultPath(repoRoot))
+	m, _ := mgr.Load()
+	if m.Version != 1 {
+		t.Errorf("expected Version=1 when no tracked pages matched, got %d", m.Version)
+	}
+}
+
+// Regression: with AutoEnrich=false and ModelEnrich=true, the enricher
+// has nothing to apply (Tier 2 is not yet wired). It must not write to
+// the manifest on every pipeline pass. Addresses CodeRabbit review
+// finding on enricher.go:113.
+func TestEnricherPlugin_ModelEnrichOnlyIsNoOp(t *testing.T) {
+	repoRoot, wikiRoot := setupWikiFixture(t, map[string]string{
+		"a.md": "# A\n\n[[b]]",
+	})
+
+	p := NewEnricher(Config{
+		Enabled:     true,
+		AutoEnrich:  false,
+		ModelEnrich: true,
+	})
+	err := p.Process(context.Background(), &plugins.PipelineData{
+		RepoRoot: repoRoot,
+		WikiRoot: wikiRoot,
+		Pages:    []plugins.PipelinePage{{WikiPath: "a.md", Title: "A"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+
+	mgr, _ := manifest.NewManager(manifest.DefaultPath(repoRoot))
+	m, _ := mgr.Load()
+	if m.Version != 1 {
+		t.Errorf("ModelEnrich-only run should not bump manifest; got Version=%d", m.Version)
+	}
+	if m.Pages[0].EntityType != "" {
+		t.Error("ModelEnrich-only run should not populate graph metadata")
+	}
+}
+
 func TestEnricherPlugin_IdempotentOnNoChange(t *testing.T) {
 	repoRoot, wikiRoot := setupWikiFixture(t, map[string]string{
 		"a.md": "# A\n\nText with [[b]].",

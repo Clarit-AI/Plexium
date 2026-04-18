@@ -127,6 +127,26 @@ func TestApplyGraphMetadata_UpdatesPageAndBumpsVersion(t *testing.T) {
 	}
 }
 
+// Regression for CodeRabbit review: calling ApplyGraphMetadata with an
+// empty GraphMetadata on an existing v1 page should NOT bump the manifest
+// to v2 (the empty write carries no new information).
+func TestApplyGraphMetadata_EmptyMetadataDoesNotBumpVersion(t *testing.T) {
+	m := &Manifest{
+		Version: 1,
+		Pages: []PageEntry{
+			{WikiPath: "existing.md", Title: "Existing", Ownership: "managed"},
+		},
+	}
+
+	ok := m.ApplyGraphMetadata("existing.md", GraphMetadata{})
+	if !ok {
+		t.Fatal("expected true for existing page (page matched)")
+	}
+	if m.Version != 1 {
+		t.Errorf("empty GraphMetadata should not bump Version; got %d", m.Version)
+	}
+}
+
 func TestApplyGraphMetadata_UnknownPageReturnsFalse(t *testing.T) {
 	m := &Manifest{
 		Version: 1,

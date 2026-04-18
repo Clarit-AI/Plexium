@@ -137,10 +137,13 @@ Cryptographic primitives.
 	if authEntry.EnrichedBy != markedup.EnricherVersion {
 		t.Errorf("auth.md EnrichedBy=%q, want %q", authEntry.EnrichedBy, markedup.EnricherVersion)
 	}
-	// [[crypto]] wikilink should produce a relationship.
+	// [[crypto]] wikilink should produce a relationship. Match by
+	// Contains so the assertion survives MarkedUp normalizing the
+	// target to a resolved path (e.g. "crypto.md" or "modules/crypto.md")
+	// in a future release.
 	foundRel := false
 	for _, r := range authEntry.Relationships {
-		if r.Target == "crypto" {
+		if strings.Contains(r.Target, "crypto") {
 			foundRel = true
 			break
 		}

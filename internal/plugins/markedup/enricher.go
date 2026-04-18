@@ -93,26 +93,35 @@ func (p *EnricherPlugin) Process(ctx context.Context, data *plugins.PipelineData
 
 		var enriched *schema.Page
 		var delta enrich.EnrichmentDelta
+		hasEnrichment := false
 
 		if p.cfg.AutoEnrich {
 			enriched, delta = enrich.EnrichPage(parsed, filePath, data.WikiRoot, enrich.MergeOptions{})
+			hasEnrichment = delta.Changed
 		} else {
 			enriched = parsed
 		}
 
-		// Tier 2 enrichment is a follow-up (requires assistive-agent
-		// wiring). When ModelEnrich is true without a configured model
-		// path, we fall back to Tier 1 rather than failing the pipeline.
-		_ = p.cfg.ModelEnrich
-
-		// Skip writing the manifest if Tier 1 reports no changes and
-		// Tier 2 didn't run. This keeps the manifest stable across
-		// idempotent re-runs.
-		if p.cfg.AutoEnrich && !delta.Changed {
+		// Tier 2 (ModelEnrich) requires assistive-agent wiring that has
+		// not landed yet. Until it does, a run with AutoEnrich=false and
+		// ModelEnrich=true has nothing real to write — skip silently
+		// rather than stamping LastEnriched with identical frontmatter
+		// every pipeline pass. A follow-up PR will add the actual Tier 2
+		// pathway and flip this to write when the model produces new
+		// entities/summary/hints.
+		if !hasEnrichment {
 			continue
 		}
 
-		m.ApplyGraphMetadata(page.WikiPath, toGraphMetadata(enriched.Frontmatter, now))
+		if !m.ApplyGraphMetadata(page.WikiPath, toGraphMetadata(enriched.Frontmatter, now)) {
+			// Page flowed through the pipeline but isn't tracked in the
+			// manifest (stale PipelineData entry, path-normalization
+			// mismatch, or an unmanaged page). Skip — we must not
+			// invent a manifest entry here, and we must not count this
+			// as an applied change so we avoid a spurious manifest save
+			// and Version bump when nothing actually changed.
+			continue
+		}
 		applied++
 
 		if p.cfg.WriteEnrichedFrontmatter {

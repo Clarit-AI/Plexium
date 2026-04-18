@@ -148,7 +148,7 @@ func (p *RetrievalPlugin) HandleMCPCall(ctx context.Context, tool string, args j
 			Query string `json:"query"`
 			Limit int    `json:"limit"`
 		}
-		if err := json.Unmarshal(args, &input); err != nil {
+		if err := decodeArgs(args, &input); err != nil {
 			return nil, fmt.Errorf("markedup_search: invalid args: %w", err)
 		}
 		if strings.TrimSpace(input.Query) == "" {
@@ -165,7 +165,7 @@ func (p *RetrievalPlugin) HandleMCPCall(ctx context.Context, tool string, args j
 			ID    string `json:"id"`
 			Depth int    `json:"depth"`
 		}
-		if err := json.Unmarshal(args, &input); err != nil {
+		if err := decodeArgs(args, &input); err != nil {
 			return nil, fmt.Errorf("markedup_traverse: invalid args: %w", err)
 		}
 		if strings.TrimSpace(input.ID) == "" {
@@ -183,7 +183,11 @@ func (p *RetrievalPlugin) HandleMCPCall(ctx context.Context, tool string, args j
 			Tag        string `json:"tag"`
 			MaxPages   int    `json:"maxPages"`
 		}
-		if err := json.Unmarshal(args, &input); err != nil {
+		// All fields are optional — calling with an empty payload is
+		// legitimate ("give me the default graph summary"). Guard the
+		// unmarshal so that nil/empty args don't fail with
+		// "unexpected end of JSON input".
+		if err := decodeArgs(args, &input); err != nil {
 			return nil, fmt.Errorf("markedup_graph: invalid args: %w", err)
 		}
 		opts := []index.SummaryOption{}
@@ -201,6 +205,16 @@ func (p *RetrievalPlugin) HandleMCPCall(ctx context.Context, tool string, args j
 	default:
 		return nil, fmt.Errorf("markedup-retrieval: unknown tool %q", tool)
 	}
+}
+
+// decodeArgs unmarshals the raw JSON args into v, treating nil/empty
+// input as "no args provided" rather than an error. For required-field
+// tools the caller still validates the populated struct explicitly.
+func decodeArgs(args json.RawMessage, v any) error {
+	if len(args) == 0 {
+		return nil
+	}
+	return json.Unmarshal(args, v)
 }
 
 // firstNonEmptyLine returns the first non-blank line of body for snippet

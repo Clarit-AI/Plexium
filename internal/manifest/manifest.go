@@ -36,6 +36,13 @@ type PageEntry struct {
 	OutboundLinks []string     `json:"outboundLinks"`
 
 	// Knowledge-graph fields (v2, populated by the MarkedUp plugin).
+	//
+	// Confidence uses the zero value (0.0) as "unset"; omitempty drops
+	// zero values from the JSON output so v1 manifests round-trip
+	// without stray confidence: 0 lines. A literal enricher-produced
+	// "I have zero confidence" signal is semantically equivalent to
+	// "unset" for current consumers — if we ever need to distinguish
+	// the two cases we should switch this to *float64 at that point.
 	EntityType    string            `json:"entityType,omitempty"`
 	Entities      []EntityRef       `json:"entities,omitempty"`
 	Relationships []RelationshipRef `json:"relationships,omitempty"`
@@ -186,7 +193,9 @@ type GraphMetadata struct {
 
 // ApplyGraphMetadata overwrites the v2 graph fields on the page entry with
 // matching WikiPath. If no such page exists, returns false with no error.
-// The manifest's Version is bumped to 2 when any graph fields are set.
+// The manifest's Version is bumped to 2 only when g actually contains graph
+// data — a no-op call with an empty GraphMetadata{} matches the page but
+// does not silently upgrade a v1 manifest.
 func (m *Manifest) ApplyGraphMetadata(wikiPath string, g GraphMetadata) bool {
 	for i := range m.Pages {
 		if m.Pages[i].WikiPath != wikiPath {
@@ -199,10 +208,22 @@ func (m *Manifest) ApplyGraphMetadata(wikiPath string, g GraphMetadata) bool {
 		m.Pages[i].SemanticHints = g.SemanticHints
 		m.Pages[i].LastEnriched = g.LastEnriched
 		m.Pages[i].EnrichedBy = g.EnrichedBy
-		if m.Version < 2 {
+		if m.Version < 2 && hasGraphFields(g) {
 			m.Version = 2
 		}
 		return true
 	}
 	return false
+}
+
+// hasGraphFields reports whether g carries any non-zero graph data. Used
+// by ApplyGraphMetadata to avoid upgrading v1 manifests on no-op calls.
+func hasGraphFields(g GraphMetadata) bool {
+	return g.EntityType != "" ||
+		len(g.Entities) > 0 ||
+		len(g.Relationships) > 0 ||
+		g.Confidence != 0 ||
+		len(g.SemanticHints) > 0 ||
+		g.LastEnriched != "" ||
+		g.EnrichedBy != ""
 }
