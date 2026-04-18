@@ -82,7 +82,9 @@ type RerankingConfig struct {
 }
 
 // DefaultConfig returns a Config with the recommended defaults applied.
-// This is the Config that results from an empty plugins.markedup block.
+// ParseConfig starts from these defaults when plugins.markedup contains
+// at least one recognized key AND explicitly sets enabled: true; an
+// omitted, empty, or enabled-unset block leaves the plugin disabled.
 func DefaultConfig() Config {
 	return Config{
 		Enabled:                  true,
@@ -101,41 +103,93 @@ func DefaultConfig() Config {
 	}
 }
 
+// allowedTopLevelKeys names every key ParseConfig will accept at the
+// root of the plugins.markedup block. Anything else is a config error.
+var allowedTopLevelKeys = map[string]struct{}{
+	"enabled":                  {},
+	"autoEnrich":               {},
+	"modelEnrich":              {},
+	"writeEnrichedFrontmatter": {},
+	"embeddings":               {},
+	"reranking":                {},
+}
+
+// allowedEmbeddingsKeys and allowedRerankingKeys constrain the nested
+// blocks. Typos like `enabeld: true` should fail parsing, not be silently
+// accepted and fall back to defaults.
+var allowedEmbeddingsKeys = map[string]struct{}{
+	"enabled":   {},
+	"provider":  {},
+	"model":     {},
+	"endpoint":  {},
+	"apiKeyEnv": {},
+	"dims":      {},
+}
+
+var allowedRerankingKeys = map[string]struct{}{
+	"enabled":   {},
+	"provider":  {},
+	"model":     {},
+	"endpoint":  {},
+	"apiKeyEnv": {},
+}
+
 // ParseConfig reads the plugins.markedup block from the raw map form used
-// by config.Config.PluginSettings. It applies defaults for missing fields
-// and validates internal consistency.
+// by config.Config.PluginSettings. It applies defaults on top of the
+// provided values, rejects unknown keys and malformed types, and runs
+// Validate() on the result.
 //
-// Enablement rules:
-//   - A nil/empty map yields DefaultConfig() with Enabled=false — the
-//     plugin does nothing unless its config block exists.
-//   - A non-empty map inherits DefaultConfig().Enabled=true implicitly.
-//     Writing `plugins.markedup: { autoEnrich: false }` (without an
-//     explicit `enabled` key) turns the plugin ON with autoEnrich OFF.
-//   - Setting `enabled: false` explicitly disables the plugin regardless
-//     of other keys.
+// Enablement rule:
+//   - The plugin is OFF unless raw["enabled"] is explicitly true. A nil,
+//     empty, or enabled-unset block all produce a disabled plugin. This
+//     prevents typos like `enabeld: true` from silently producing an
+//     enabled plugin with default settings.
+//   - An unknown key, a malformed nested block, or an invalid value
+//     (e.g. non-positive embeddings.dims) returns an error.
 func ParseConfig(raw map[string]any) (Config, error) {
 	cfg := DefaultConfig()
+	cfg.Enabled = false // strict: only an explicit `enabled: true` turns it on
 	if len(raw) == 0 {
-		cfg.Enabled = false
 		return cfg, nil
+	}
+
+	if err := rejectUnknownKeys("markedup", raw, allowedTopLevelKeys); err != nil {
+		return Config{}, err
 	}
 
 	if v, ok := raw["enabled"].(bool); ok {
 		cfg.Enabled = v
+	} else if _, present := raw["enabled"]; present {
+		return Config{}, fmt.Errorf("markedup.enabled must be a boolean")
 	}
 	if v, ok := raw["autoEnrich"].(bool); ok {
 		cfg.AutoEnrich = v
+	} else if _, present := raw["autoEnrich"]; present {
+		return Config{}, fmt.Errorf("markedup.autoEnrich must be a boolean")
 	}
 	if v, ok := raw["modelEnrich"].(bool); ok {
 		cfg.ModelEnrich = v
+	} else if _, present := raw["modelEnrich"]; present {
+		return Config{}, fmt.Errorf("markedup.modelEnrich must be a boolean")
 	}
 	if v, ok := raw["writeEnrichedFrontmatter"].(bool); ok {
 		cfg.WriteEnrichedFrontmatter = v
+	} else if _, present := raw["writeEnrichedFrontmatter"]; present {
+		return Config{}, fmt.Errorf("markedup.writeEnrichedFrontmatter must be a boolean")
 	}
 
-	if emb, ok := raw["embeddings"].(map[string]any); ok {
+	if embRaw, present := raw["embeddings"]; present {
+		emb, ok := embRaw.(map[string]any)
+		if !ok {
+			return Config{}, fmt.Errorf("markedup.embeddings must be a map")
+		}
+		if err := rejectUnknownKeys("markedup.embeddings", emb, allowedEmbeddingsKeys); err != nil {
+			return Config{}, err
+		}
 		if v, ok := emb["enabled"].(bool); ok {
 			cfg.Embeddings.Enabled = v
+		} else if _, p := emb["enabled"]; p {
+			return Config{}, fmt.Errorf("markedup.embeddings.enabled must be a boolean")
 		}
 		if v, ok := emb["provider"].(string); ok && v != "" {
 			cfg.Embeddings.Provider = v
@@ -149,14 +203,27 @@ func ParseConfig(raw map[string]any) (Config, error) {
 		if v, ok := emb["apiKeyEnv"].(string); ok {
 			cfg.Embeddings.APIKeyEnv = v
 		}
-		if n, ok := toInt(emb["dims"]); ok && n > 0 {
+		if dimsRaw, p := emb["dims"]; p {
+			n, ok := toInt(dimsRaw)
+			if !ok || n <= 0 {
+				return Config{}, fmt.Errorf("markedup.embeddings.dims must be a positive integer")
+			}
 			cfg.Embeddings.Dims = n
 		}
 	}
 
-	if rr, ok := raw["reranking"].(map[string]any); ok {
+	if rrRaw, present := raw["reranking"]; present {
+		rr, ok := rrRaw.(map[string]any)
+		if !ok {
+			return Config{}, fmt.Errorf("markedup.reranking must be a map")
+		}
+		if err := rejectUnknownKeys("markedup.reranking", rr, allowedRerankingKeys); err != nil {
+			return Config{}, err
+		}
 		if v, ok := rr["enabled"].(bool); ok {
 			cfg.Reranking.Enabled = v
+		} else if _, p := rr["enabled"]; p {
+			return Config{}, fmt.Errorf("markedup.reranking.enabled must be a boolean")
 		}
 		if v, ok := rr["provider"].(string); ok && v != "" {
 			cfg.Reranking.Provider = v
@@ -176,6 +243,17 @@ func ParseConfig(raw map[string]any) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// rejectUnknownKeys returns a config error if got contains any key that
+// isn't in allowed. scope is prepended to the error message for context.
+func rejectUnknownKeys(scope string, got map[string]any, allowed map[string]struct{}) error {
+	for k := range got {
+		if _, ok := allowed[k]; !ok {
+			return fmt.Errorf("%s: unknown key %q", scope, k)
+		}
+	}
+	return nil
 }
 
 // toInt normalizes the numeric shapes that Viper / YAML emit for

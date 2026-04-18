@@ -3,7 +3,6 @@ package markedup
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -292,14 +291,16 @@ func TestEnricherPlugin_IdempotentAcrossRunsAtManifestLevel(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifestPath := manifest.DefaultPath(repoRoot)
-	firstStat, err := os.Stat(manifestPath)
-	if err != nil {
-		t.Fatal(err)
-	}
 	firstBytes, _ := os.ReadFile(manifestPath)
 
-	// Sleep just long enough that any mtime update would be visible.
-	time.Sleep(15 * time.Millisecond)
+	// Pin the manifest mtime to a known old timestamp. If the second
+	// Process call rewrites the file, os.Stat will report a fresher
+	// mtime. Using os.Chtimes is deterministic — no race with wall
+	// clock resolution or filesystem mtime granularity.
+	pinned := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(manifestPath, pinned, pinned); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
 
 	// Second pass on unchanged inputs.
 	if err := p.Process(context.Background(), data); err != nil {
@@ -315,9 +316,54 @@ func TestEnricherPlugin_IdempotentAcrossRunsAtManifestLevel(t *testing.T) {
 		t.Errorf("manifest content drifted on idempotent re-run:\nfirst:\n%s\n\nsecond:\n%s",
 			firstBytes, secondBytes)
 	}
-	if !secondStat.ModTime().Equal(firstStat.ModTime()) {
-		t.Errorf("manifest was rewritten despite unchanged input; first mod=%v second mod=%v",
-			firstStat.ModTime(), secondStat.ModTime())
+	if !secondStat.ModTime().Equal(pinned) {
+		t.Errorf("manifest was rewritten despite unchanged input; expected mtime %v, got %v",
+			pinned, secondStat.ModTime())
+	}
+}
+
+// Regression for CodeRabbit pass 4: the deferred-write test must prove
+// ordering, not just success. Force a manifest save failure (by making
+// the manifest file read-only) and assert the .wiki/ files are still
+// untouched — if writes happened before Save, this test would fail.
+func TestEnricherPlugin_WriteFrontmatterDeferredUntilManifestSave_FailSave(t *testing.T) {
+	repoRoot, wikiRoot := setupWikiFixture(t, map[string]string{
+		"a.md": "# A\n\n[[b]]\n",
+	})
+
+	// Snapshot the page bytes before Process runs.
+	beforeA, _ := os.ReadFile(filepath.Join(wikiRoot, "a.md"))
+
+	// Make the manifest file read-only so mgr.Save() fails with
+	// "permission denied". mgr.Load() still succeeds (read access).
+	manifestPath := manifest.DefaultPath(repoRoot)
+	if err := os.Chmod(manifestPath, 0o400); err != nil {
+		t.Fatalf("chmod manifest: %v", err)
+	}
+	// Restore perms after the test so t.TempDir() cleanup works cleanly.
+	t.Cleanup(func() { _ = os.Chmod(manifestPath, 0o600) })
+
+	p := NewEnricher(Config{
+		Enabled:                  true,
+		AutoEnrich:               true,
+		WriteEnrichedFrontmatter: true,
+	})
+	err := p.Process(context.Background(), &plugins.PipelineData{
+		RepoRoot: repoRoot,
+		WikiRoot: wikiRoot,
+		Pages:    []plugins.PipelinePage{{WikiPath: "a.md", Title: "A"}},
+	})
+	if err == nil {
+		t.Fatal("expected Process to fail when manifest save is blocked")
+	}
+
+	// Critical assertion: the wiki file must be IDENTICAL to its
+	// pre-Process state. If ReplaceFrontmatter had been flushed
+	// before the failed Save, a.md would carry new YAML frontmatter.
+	afterA, _ := os.ReadFile(filepath.Join(wikiRoot, "a.md"))
+	if !bytes.Equal(beforeA, afterA) {
+		t.Errorf("wiki file was rewritten despite manifest save failure:\nbefore:\n%s\nafter:\n%s",
+			beforeA, afterA)
 	}
 }
 
@@ -354,62 +400,9 @@ func TestEnricherPlugin_ModelEnrichOnlyIsNoOp(t *testing.T) {
 	}
 }
 
-func TestEnricherPlugin_IdempotentOnNoChange(t *testing.T) {
-	repoRoot, wikiRoot := setupWikiFixture(t, map[string]string{
-		"a.md": "# A\n\nText with [[b]].",
-	})
-
-	p := NewEnricher(Config{Enabled: true, AutoEnrich: true})
-	data := &plugins.PipelineData{
-		RepoRoot: repoRoot,
-		WikiRoot: wikiRoot,
-		Pages:    []plugins.PipelinePage{{WikiPath: "a.md", Title: "A"}},
-	}
-
-	// First run writes graph metadata.
-	if err := p.Process(context.Background(), data); err != nil {
-		t.Fatal(err)
-	}
-	mgr, _ := manifest.NewManager(manifest.DefaultPath(repoRoot))
-	first, _ := mgr.Load()
-	firstJSON, _ := json.Marshal(first)
-
-	// Second run: .wiki/ content is unchanged, so EnrichPage's delta
-	// reports no additions (the frontmatter in the parsed file is already
-	// populated via... wait — no, the file on disk has no frontmatter
-	// because WriteEnrichedFrontmatter=false. So the second run will see
-	// the same empty frontmatter and apply the same metadata. That's
-	// still idempotent because the manifest fields get overwritten with
-	// identical values (except LastEnriched which is a timestamp — so
-	// that will differ; a caller using the manifest semantically can
-	// compare all other fields).
-	if err := p.Process(context.Background(), data); err != nil {
-		t.Fatal(err)
-	}
-	second, _ := mgr.Load()
-
-	// Entities/Relationships/EntityType must match between runs.
-	if !entitiesEqual(first.Pages[0].Entities, second.Pages[0].Entities) {
-		t.Errorf("entities drifted between runs: %+v vs %+v",
-			first.Pages[0].Entities, second.Pages[0].Entities)
-	}
-	if first.Pages[0].EntityType != second.Pages[0].EntityType {
-		t.Errorf("entity type drifted: %q vs %q",
-			first.Pages[0].EntityType, second.Pages[0].EntityType)
-	}
-	// Sanity: firstJSON was captured before the second run so we don't
-	// accidentally compare the same pointer.
-	_ = firstJSON
-}
-
-func entitiesEqual(a, b []manifest.EntityRef) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
+// NOTE: An earlier version of this file had a second idempotency test
+// (TestEnricherPlugin_IdempotentOnNoChange) that only compared
+// Entities and EntityType and would miss Relationships/Confidence/
+// EnrichedBy/LastEnriched drift. It's superseded by
+// TestEnricherPlugin_IdempotentAcrossRunsAtManifestLevel above, which
+// asserts byte-for-byte manifest stability and mtime stability.

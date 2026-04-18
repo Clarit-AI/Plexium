@@ -163,10 +163,9 @@ func TestParseConfig_DisabledSkipsNestedValidation(t *testing.T) {
 	}
 }
 
+// Strict parsing: a fractional float isn't a legitimate dim count. Under
+// the pass-4 tightening this is now an error, not a silent fallback.
 func TestParseConfig_RejectsFractionalDims(t *testing.T) {
-	// A fractional float isn't a legitimate dim count — toInt should
-	// refuse it and leave the default in place rather than silently
-	// truncating.
 	raw := map[string]any{
 		"enabled": true,
 		"embeddings": map[string]any{
@@ -175,12 +174,84 @@ func TestParseConfig_RejectsFractionalDims(t *testing.T) {
 			"dims":     3.14,
 		},
 	}
+	_, err := ParseConfig(raw)
+	if err == nil {
+		t.Fatal("expected error for fractional dims")
+	}
+}
+
+// Strict parsing regressions covering CodeRabbit pass-4 feedback:
+// typos, unknown keys, wrong types, non-positive dims must all surface
+// as errors rather than silently producing a half-configured plugin.
+
+func TestParseConfig_RejectsUnknownTopLevelKey(t *testing.T) {
+	// "enabeld" is a typo for "enabled". Under silent-acceptance this
+	// would leave Enabled=false (from the default) and the user would
+	// never know their config had no effect. Under strict parsing it
+	// must be rejected.
+	raw := map[string]any{
+		"enabeld": true,
+	}
+	_, err := ParseConfig(raw)
+	if err == nil {
+		t.Fatal("expected error for unknown top-level key")
+	}
+}
+
+func TestParseConfig_RejectsUnknownEmbeddingsKey(t *testing.T) {
+	raw := map[string]any{
+		"enabled": true,
+		"embeddings": map[string]any{
+			"enabled":    true,
+			"provider":   "inherit",
+			"dimensions": 768, // typo — correct key is "dims"
+		},
+	}
+	_, err := ParseConfig(raw)
+	if err == nil {
+		t.Fatal("expected error for unknown embeddings key")
+	}
+}
+
+func TestParseConfig_RejectsNonBooleanEnabled(t *testing.T) {
+	raw := map[string]any{
+		"enabled": "yes", // string where bool expected
+	}
+	_, err := ParseConfig(raw)
+	if err == nil {
+		t.Fatal("expected error for non-boolean enabled")
+	}
+}
+
+func TestParseConfig_RejectsNonPositiveDims(t *testing.T) {
+	raw := map[string]any{
+		"enabled": true,
+		"embeddings": map[string]any{
+			"enabled":  true,
+			"provider": "inherit",
+			"dims":     0,
+		},
+	}
+	_, err := ParseConfig(raw)
+	if err == nil {
+		t.Fatal("expected error for dims=0")
+	}
+}
+
+// Without explicit enabled: true, a block with other keys must leave the
+// plugin disabled (strict enablement). This is the critical behavior
+// change from pass 3 — previously a non-empty block implied Enabled=true.
+func TestParseConfig_NonEmptyBlockWithoutEnabledStaysDisabled(t *testing.T) {
+	raw := map[string]any{
+		"autoEnrich":  false,
+		"modelEnrich": true,
+	}
 	cfg, err := ParseConfig(raw)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if cfg.Embeddings.Dims != 768 {
-		t.Errorf("fractional dims should not override default; got %d", cfg.Embeddings.Dims)
+	if cfg.Enabled {
+		t.Error("non-empty block without enabled:true must leave plugin disabled")
 	}
 }
 
