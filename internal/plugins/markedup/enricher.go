@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/KHAEntertainment/markedup/enrich"
-	"github.com/KHAEntertainment/markedup/markdown"
-	"github.com/KHAEntertainment/markedup/schema"
+	"github.com/Clarit-AI/markedup/enrich"
+	"github.com/Clarit-AI/markedup/markdown"
+	"github.com/Clarit-AI/markedup/schema"
 
 	"github.com/Clarit-AI/Plexium/internal/manifest"
 	"github.com/Clarit-AI/Plexium/internal/plugins"

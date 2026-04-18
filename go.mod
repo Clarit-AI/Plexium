@@ -3,7 +3,7 @@ module github.com/Clarit-AI/Plexium
 go 1.25.1
 
 require (
-	github.com/KHAEntertainment/markedup v0.0.0-20260418034724-e123663acc42
+	github.com/Clarit-AI/markedup v0.0.0-20260418185353-12e3cc5f0d89
 	github.com/bmatcuk/doublestar/v2 v2.0.4
 	github.com/gobwas/glob v0.2.3
 	github.com/pelletier/go-toml/v2 v2.1.0
