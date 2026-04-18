@@ -1,5 +1,5 @@
-github.com/KHAEntertainment/markedup v0.0.0-20260418034724-e123663acc42 h1:5Fn3uCidT0JiIzQfkF+CFS4BjaZCsp277fe6DErgv3I=
-github.com/KHAEntertainment/markedup v0.0.0-20260418034724-e123663acc42/go.mod h1:0ZPGcBOxy3RowSUjsHZoHtPlaHoKhLnqEULtOOZh8Mk=
+github.com/Clarit-AI/markedup v0.0.0-20260418185353-12e3cc5f0d89 h1:7DxgiIXe17JLwfjaE+YnAmMzzTqneVvjMCn7baLY4G4=
+github.com/Clarit-AI/markedup v0.0.0-20260418185353-12e3cc5f0d89/go.mod h1:IMDGULtUy68kQ1dKlDgT7gD9lD7KJZ0dDRDPqf79x9s=
 github.com/bmatcuk/doublestar/v2 v2.0.4 h1:6I6oUiT/sU27eE2OFcWqBhL1SwjyvQuOssxT4a1yidI=
 github.com/bmatcuk/doublestar/v2 v2.0.4/go.mod h1:QMmcs3H2AUQICWhfzLXz+IYln8lRQmTZRptLie8RgRw=
 github.com/cpuguy83/go-md2man/v2 v2.0.4/go.mod h1:tgQtvFlXSQOSOSIRvRPT7W67SCa46tRHOmNcaadrF8o=

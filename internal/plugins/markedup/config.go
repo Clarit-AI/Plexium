@@ -1,5 +1,5 @@
 // Package markedup wires the MarkedUp knowledge-graph library
-// (github.com/KHAEntertainment/markedup) into Plexium's plugin system as
+// (github.com/Clarit-AI/markedup) into Plexium's plugin system as
 // two plugins:
 //
 //   - EnricherPlugin (PipelinePlugin, StageAfterWrite): loads the wiki as

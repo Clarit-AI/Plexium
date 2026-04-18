@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/KHAEntertainment/markedup/index"
+	"github.com/Clarit-AI/markedup/index"
 
 	"github.com/Clarit-AI/Plexium/internal/plugins"
 )
