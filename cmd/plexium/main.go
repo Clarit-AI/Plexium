@@ -26,6 +26,7 @@ import (
 	"github.com/Clarit-AI/Plexium/internal/integrations/pageindex"
 	"github.com/Clarit-AI/Plexium/internal/lint"
 	"github.com/Clarit-AI/Plexium/internal/migrate"
+	"github.com/Clarit-AI/Plexium/internal/plugins/bootstrap"
 	"github.com/Clarit-AI/Plexium/internal/publish"
 	"github.com/Clarit-AI/Plexium/internal/retry"
 	plexiumsync "github.com/Clarit-AI/Plexium/internal/sync"
@@ -331,12 +332,22 @@ var convertCmd = &cobra.Command{
 		var cfg *config.Config
 		cfg, _ = config.LoadFromDir(repoRoot)
 
+		// Build the plugin registry. When cfg is nil or no plugins are
+		// enabled, this returns an empty registry — the pipeline will
+		// simply skip its plugin hooks. A bootstrap error is fatal: the
+		// user explicitly enabled a plugin and it failed to construct.
+		reg, err := bootstrap.BuildRegistry(cmd.Context(), repoRoot, cfg)
+		if err != nil {
+			return fmt.Errorf("plugin registry: %w", err)
+		}
+
 		pipeline := convert.NewPipeline(convert.PipelineOptions{
 			RepoRoot: repoRoot,
 			Config:   cfg,
 			DryRun:   dryRun,
 			Depth:    depth,
 			Agent:    agent,
+			Registry: reg,
 		})
 
 		result, err := pipeline.Run()
