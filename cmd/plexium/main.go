@@ -336,7 +336,17 @@ var convertCmd = &cobra.Command{
 		// enabled, this returns an empty registry — the pipeline will
 		// simply skip its plugin hooks. A bootstrap error is fatal: the
 		// user explicitly enabled a plugin and it failed to construct.
-		reg, err := bootstrap.BuildRegistry(cmd.Context(), repoRoot, cfg)
+		//
+		// Pass the assistive cascade so markedup's Tier 2 enrichment
+		// (modelEnrich: true) and embeddings (embeddings.enabled: true)
+		// can inherit the same provider configuration the rest of the
+		// CLI uses. A nil cascade silently disables those tiers.
+		var bootstrapOpts bootstrap.Options
+		if cfg != nil {
+			cascade, _ := buildCascadeFromConfig(cfg)
+			bootstrapOpts.Cascade = cascade
+		}
+		reg, err := bootstrap.BuildRegistry(cmd.Context(), repoRoot, cfg, bootstrapOpts)
 		if err != nil {
 			return fmt.Errorf("plugin registry: %w", err)
 		}

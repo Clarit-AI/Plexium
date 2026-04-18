@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/Clarit-AI/markedup/embed"
 	"github.com/Clarit-AI/markedup/index"
 
 	"github.com/Clarit-AI/Plexium/internal/plugins"
@@ -24,13 +25,33 @@ const RetrievalVersion = "markedup-v1"
 // be refreshed with Reload) and stored behind an atomic.Pointer so that
 // concurrent MCP calls never observe a half-rebuilt index.
 type RetrievalPlugin struct {
-	cfg Config
-	idx atomic.Pointer[index.KnowledgeIndex]
+	cfg         Config
+	idx         atomic.Pointer[index.KnowledgeIndex]
+	embedder    embed.Embedder
+	vectorCache index.VectorCacheLookup
 }
 
-// NewRetrieval constructs a RetrievalPlugin from a parsed Config.
+// NewRetrieval constructs a RetrievalPlugin from a parsed Config. The
+// returned plugin runs in keyword-only mode; for semantic search use
+// NewRetrievalWithEmbedder.
 func NewRetrieval(cfg Config) *RetrievalPlugin {
 	return &RetrievalPlugin{cfg: cfg}
+}
+
+// NewRetrievalWithEmbedder constructs a RetrievalPlugin wired for
+// semantic search. When embedder or cache is nil, Search degrades
+// silently to keyword scoring (markedup's index.Search requires both
+// to activate the embedding signal).
+func NewRetrievalWithEmbedder(cfg Config, embedder embed.Embedder, cache index.VectorCacheLookup) *RetrievalPlugin {
+	return &RetrievalPlugin{cfg: cfg, embedder: embedder, vectorCache: cache}
+}
+
+// HasEmbedder reports whether the plugin was configured with both an
+// embedder and a vector cache (the pair that markedup's index.Search
+// requires to blend semantic similarity into the result ranking).
+// Exposed primarily for tests and diagnostics.
+func (p *RetrievalPlugin) HasEmbedder() bool {
+	return p.embedder != nil && p.vectorCache != nil
 }
 
 // Plugin interface
@@ -43,8 +64,9 @@ func (p *RetrievalPlugin) Type() plugins.PluginType { return plugins.PluginTypeR
 // Initialize loads the knowledge graph at wikiRoot. Safe to call multiple
 // times; each call swaps in a new *KnowledgeIndex atomically.
 //
-// Semantic-search bindings (embedder / reranker / vector cache) are a
-// follow-up; for now Initialize builds the index without them and
+// Semantic-search bindings (embedder + vector cache) are wired at
+// construction time via NewRetrievalWithEmbedder; Initialize itself
+// only builds the keyword/graph index. When neither was supplied,
 // Search degrades to keyword-only scoring.
 func (p *RetrievalPlugin) Initialize(ctx context.Context, wikiRoot string) error {
 	if !p.cfg.Enabled {
@@ -76,8 +98,16 @@ func (p *RetrievalPlugin) Search(ctx context.Context, query string, opts plugins
 	if opts.MinScore > 0 {
 		searchOpts = append(searchOpts, index.WithMinScore(opts.MinScore))
 	}
-	// NOTE: semantic/rerank configuration is a follow-up; opts.Semantic is
-	// honored as a signal but has no effect until the embedder is wired.
+	// Semantic similarity activates only when both an embedder and a
+	// vector cache were supplied at construction time. Either nil falls
+	// through to pure keyword scoring (markedup's index.Search requires
+	// the pair — see WithEmbedder docs).
+	if p.embedder != nil && p.vectorCache != nil {
+		searchOpts = append(searchOpts,
+			index.WithEmbedder(p.embedder),
+			index.WithVectorCache(p.vectorCache),
+		)
+	}
 
 	results := index.Search(idx, query, searchOpts...)
 	out := make([]plugins.PluginSearchResult, 0, len(results))

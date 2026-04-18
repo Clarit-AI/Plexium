@@ -11,8 +11,35 @@ import (
 	"github.com/Clarit-AI/Plexium/internal/config"
 	"github.com/Clarit-AI/Plexium/internal/plugins"
 	"github.com/Clarit-AI/Plexium/internal/plugins/bootstrap"
+	"github.com/Clarit-AI/Plexium/internal/plugins/markedup"
 	"github.com/Clarit-AI/Plexium/internal/retry"
 )
+
+// stubEmbedder is the minimum embed.Embedder implementation needed to
+// prove the wiring path: we never invoke Embed in these tests, only
+// observe whether the resulting retrieval plugin reports a live
+// embedder via HasEmbedder.
+type stubEmbedder struct{}
+
+func (stubEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	return make([][]float32, len(texts)), nil
+}
+func (stubEmbedder) Dimensions() int { return 4 }
+func (stubEmbedder) Model() string   { return "stub" }
+
+// findRetrieval returns the markedup-retrieval plugin from a registry,
+// or fails the test. Centralizing the type assertion keeps the
+// individual test bodies focused on the assertion that matters.
+func findRetrieval(t *testing.T, reg *plugins.Registry) *markedup.RetrievalPlugin {
+	t.Helper()
+	for _, p := range reg.RetrievalPlugins() {
+		if rp, ok := p.(*markedup.RetrievalPlugin); ok {
+			return rp
+		}
+	}
+	t.Fatal("no markedup-retrieval plugin registered")
+	return nil
+}
 
 func TestBuildRegistry_NilConfig(t *testing.T) {
 	t.Parallel()
@@ -168,5 +195,129 @@ func TestBuildRegistry_MarkedupInvalidConfig(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "markedup") {
 		t.Fatalf("BuildRegistry(invalid): error should mention markedup, got: %v", err)
+	}
+}
+
+// TestBuildRegistry_EmbeddingsDisabled_NoEmbedder verifies that with
+// embeddings.enabled left at the default (false), the retrieval plugin
+// is built in keyword-only mode regardless of whether a cascade and an
+// explicit embedder were supplied. This is the backward-compat guard:
+// existing configs do not silently flip to semantic mode.
+func TestBuildRegistry_EmbeddingsDisabled_NoEmbedder(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{
+		Plugins: map[string]map[string]any{
+			"markedup": {"enabled": true},
+		},
+	}
+	reg, err := bootstrap.BuildRegistry(context.Background(), "/tmp/repo", cfg,
+		bootstrap.Options{EmbeddingProvider: stubEmbedder{}},
+	)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if findRetrieval(t, reg).HasEmbedder() {
+		t.Errorf("retrieval should not have embedder when embeddings.enabled=false")
+	}
+}
+
+// TestBuildRegistry_EmbeddingsEnabled_ExplicitEmbedder verifies the
+// happy path: embeddings.enabled is true, a caller supplies a fully
+// constructed embedder via Options, and the resulting retrieval
+// plugin reports a live embedder. This is the wiring contract D4
+// will rely on when listing semantic-search MCP tools.
+func TestBuildRegistry_EmbeddingsEnabled_ExplicitEmbedder(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{
+		Plugins: map[string]map[string]any{
+			"markedup": {
+				"enabled":    true,
+				"embeddings": map[string]any{"enabled": true},
+			},
+		},
+	}
+	reg, err := bootstrap.BuildRegistry(context.Background(), t.TempDir(), cfg,
+		bootstrap.Options{EmbeddingProvider: stubEmbedder{}},
+	)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !findRetrieval(t, reg).HasEmbedder() {
+		t.Errorf("retrieval should have embedder when embeddings.enabled=true and EmbeddingProvider supplied")
+	}
+}
+
+// TestBuildRegistry_EmbeddingsEnabled_InheritFromCascade verifies the
+// "inherit" path that real users will hit: embeddings.enabled is true,
+// no explicit embedder is supplied, but the assistive cascade has at
+// least one openai-compatible provider that the bootstrap can pull
+// endpoint/model out of. We don't actually fire the embedder, only
+// confirm that one was constructed and wired.
+func TestBuildRegistry_EmbeddingsEnabled_InheritFromCascade(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{
+		AssistiveAgent: config.AssistiveAgent{
+			Providers: []config.ProviderConfig{
+				{
+					Name:     "test",
+					Enabled:  true,
+					Type:     "openai-compatible",
+					Endpoint: "http://localhost:8080",
+					Model:    "test-model",
+				},
+			},
+		},
+		Plugins: map[string]map[string]any{
+			"markedup": {
+				"enabled":    true,
+				"embeddings": map[string]any{"enabled": true},
+			},
+		},
+	}
+	provider := agent.NewOllamaProvider("http://localhost:11434", "test",
+		func(ctx context.Context, url, body string) (string, int, error) {
+			return "{}", 0, nil
+		},
+	)
+	cascade := agent.NewCascade([]agent.Provider{provider}, retry.DefaultPolicy())
+
+	reg, err := bootstrap.BuildRegistry(context.Background(), t.TempDir(), cfg,
+		bootstrap.Options{Cascade: cascade},
+	)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !findRetrieval(t, reg).HasEmbedder() {
+		t.Errorf("retrieval should have embedder when embeddings.enabled=true and cascade is supplied")
+	}
+}
+
+// TestBuildRegistry_EmbeddingsEnabled_NoCascadeWarns confirms graceful
+// degradation: embeddings requested but neither an explicit embedder
+// nor a cascade provided. The plugin must still build (keyword-only)
+// and a single warning must surface so the operator can debug.
+func TestBuildRegistry_EmbeddingsEnabled_NoCascadeWarns(t *testing.T) {
+	var buf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	cfg := &config.Config{
+		Plugins: map[string]map[string]any{
+			"markedup": {
+				"enabled":    true,
+				"embeddings": map[string]any{"enabled": true},
+			},
+		},
+	}
+	reg, err := bootstrap.BuildRegistry(context.Background(), t.TempDir(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if findRetrieval(t, reg).HasEmbedder() {
+		t.Errorf("retrieval must fall back to keyword-only when no embedder source is available")
+	}
+	if !strings.Contains(buf.String(), "semantic search disabled") {
+		t.Errorf("expected degradation warning; got: %s", buf.String())
 	}
 }
