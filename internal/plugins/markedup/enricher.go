@@ -130,15 +130,25 @@ func (p *EnricherPlugin) Process(ctx context.Context, data *plugins.PipelineData
 			continue
 		}
 
-		if !m.ApplyGraphMetadata(page.WikiPath, toGraphMetadata(enriched.Frontmatter, now)) {
+		newMeta := toGraphMetadata(enriched.Frontmatter, now)
+
+		existingMeta, tracked := m.GraphMetadataForPage(page.WikiPath)
+		if !tracked {
 			// Page flowed through the pipeline but isn't tracked in the
 			// manifest (stale PipelineData entry, path-normalization
 			// mismatch, or an unmanaged page). Skip — we must not
-			// invent a manifest entry here, and we must not count this
-			// as an applied change so we avoid a spurious manifest save
-			// and Version bump when nothing actually changed.
+			// invent a manifest entry here.
 			continue
 		}
+		if manifest.GraphMetadataSemanticEqual(existingMeta, newMeta) {
+			// Idempotent run: the enrichment produced the same graph
+			// content the manifest already has. Skip the apply so we
+			// don't re-stamp LastEnriched or trigger a manifest save.
+			continue
+		}
+		// Safe to assume ApplyGraphMetadata returns true here — we
+		// already confirmed the page is tracked via GraphMetadataForPage.
+		m.ApplyGraphMetadata(page.WikiPath, newMeta)
 		applied++
 
 		if p.cfg.WriteEnrichedFrontmatter {

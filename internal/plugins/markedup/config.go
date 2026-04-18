@@ -203,8 +203,14 @@ func toInt(v any) (int, bool) {
 	return 0, false
 }
 
-// Validate checks for internally-inconsistent settings.
+// Validate checks for internally-inconsistent settings. When the plugin
+// is disabled at the top level, nested embeddings/reranking settings are
+// not enforced — a user may scaffold them in config.yml while the plugin
+// is turned off, and that shouldn't produce a validation error.
 func (c Config) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
 	if c.Embeddings.Enabled && c.Embeddings.Provider != "inherit" {
 		if c.Embeddings.Endpoint == "" {
 			return fmt.Errorf("markedup.embeddings: non-inherit provider requires endpoint")

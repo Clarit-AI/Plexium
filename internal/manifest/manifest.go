@@ -227,3 +227,76 @@ func hasGraphFields(g GraphMetadata) bool {
 		g.LastEnriched != "" ||
 		g.EnrichedBy != ""
 }
+
+// GraphMetadataForPage returns the graph metadata currently stored for
+// the page with the given WikiPath. The bool is true when the page is
+// tracked in the manifest (regardless of whether it has any graph
+// fields set); false means the page is not tracked at all.
+//
+// Callers use this to check semantic equality before invoking
+// ApplyGraphMetadata, so an unchanged enrichment result doesn't
+// needlessly bump LastEnriched or rewrite the manifest on disk.
+func (m *Manifest) GraphMetadataForPage(wikiPath string) (GraphMetadata, bool) {
+	for i := range m.Pages {
+		if m.Pages[i].WikiPath != wikiPath {
+			continue
+		}
+		p := m.Pages[i]
+		return GraphMetadata{
+			EntityType:    p.EntityType,
+			Entities:      p.Entities,
+			Relationships: p.Relationships,
+			Confidence:    p.Confidence,
+			SemanticHints: p.SemanticHints,
+			LastEnriched:  p.LastEnriched,
+			EnrichedBy:    p.EnrichedBy,
+		}, true
+	}
+	return GraphMetadata{}, false
+}
+
+// GraphMetadataSemanticEqual reports whether two GraphMetadata values
+// are equivalent on their semantic fields (EntityType, Entities,
+// Relationships, Confidence, SemanticHints, EnrichedBy). LastEnriched is
+// deliberately excluded — it's a run-timestamp, not a content field, and
+// equality on the rest means the enrichment produced no new information.
+//
+// Slice comparisons are order-sensitive. Callers relying on this for
+// idempotency should ensure the enrichment source produces deterministic
+// ordering; MarkedUp does.
+func GraphMetadataSemanticEqual(a, b GraphMetadata) bool {
+	if a.EntityType != b.EntityType {
+		return false
+	}
+	if a.Confidence != b.Confidence {
+		return false
+	}
+	if a.EnrichedBy != b.EnrichedBy {
+		return false
+	}
+	if len(a.Entities) != len(b.Entities) {
+		return false
+	}
+	for i := range a.Entities {
+		if a.Entities[i] != b.Entities[i] {
+			return false
+		}
+	}
+	if len(a.Relationships) != len(b.Relationships) {
+		return false
+	}
+	for i := range a.Relationships {
+		if a.Relationships[i] != b.Relationships[i] {
+			return false
+		}
+	}
+	if len(a.SemanticHints) != len(b.SemanticHints) {
+		return false
+	}
+	for i := range a.SemanticHints {
+		if a.SemanticHints[i] != b.SemanticHints[i] {
+			return false
+		}
+	}
+	return true
+}

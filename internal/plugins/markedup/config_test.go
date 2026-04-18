@@ -139,6 +139,30 @@ func TestParseConfig_AcceptsNumericDimsAcrossTypes(t *testing.T) {
 	}
 }
 
+// Regression for CodeRabbit pass 3: Validate must short-circuit when
+// the plugin is globally disabled. A disabled plugin may still have
+// scaffolded embeddings/reranking blocks; those shouldn't cause config
+// load to fail.
+func TestParseConfig_DisabledSkipsNestedValidation(t *testing.T) {
+	raw := map[string]any{
+		"enabled": false,
+		"embeddings": map[string]any{
+			"enabled":  true,
+			"provider": "openai-compatible",
+			// endpoint and model deliberately missing — would normally
+			// fail Validate, but the plugin is disabled so we accept.
+		},
+		"reranking": map[string]any{
+			"enabled": true,
+			// model deliberately missing.
+		},
+	}
+	_, err := ParseConfig(raw)
+	if err != nil {
+		t.Fatalf("disabled plugin should skip nested validation; got %v", err)
+	}
+}
+
 func TestParseConfig_RejectsFractionalDims(t *testing.T) {
 	// A fractional float isn't a legitimate dim count — toInt should
 	// refuse it and leave the default in place rather than silently

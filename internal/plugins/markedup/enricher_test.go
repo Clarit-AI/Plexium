@@ -1,12 +1,14 @@
 package markedup
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Clarit-AI/Plexium/internal/manifest"
 	"github.com/Clarit-AI/Plexium/internal/plugins"
@@ -262,6 +264,60 @@ func TestEnricherPlugin_UntrackedPageDoesNotBumpManifest(t *testing.T) {
 	m, _ := mgr.Load()
 	if m.Version != 1 {
 		t.Errorf("expected Version=1 when no tracked pages matched, got %d", m.Version)
+	}
+}
+
+// Regression for CodeRabbit pass 3: a second convert pass over an
+// unchanged wiki must NOT re-stamp LastEnriched or trigger a manifest
+// save. The first pass writes graph metadata; the second pass should
+// find the manifest already reflects Tier 1's output and skip silently.
+//
+// Without this behavior, the manifest is rewritten on every pipeline
+// pass even when nothing has changed, producing noisy git diffs and
+// LastEnriched churn.
+func TestEnricherPlugin_IdempotentAcrossRunsAtManifestLevel(t *testing.T) {
+	repoRoot, wikiRoot := setupWikiFixture(t, map[string]string{
+		"a.md": "# A\n\n#topic [[b]]",
+	})
+
+	p := NewEnricher(Config{Enabled: true, AutoEnrich: true})
+	data := &plugins.PipelineData{
+		RepoRoot: repoRoot,
+		WikiRoot: wikiRoot,
+		Pages:    []plugins.PipelinePage{{WikiPath: "a.md", Title: "A"}},
+	}
+
+	// First pass populates the manifest.
+	if err := p.Process(context.Background(), data); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := manifest.DefaultPath(repoRoot)
+	firstStat, err := os.Stat(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstBytes, _ := os.ReadFile(manifestPath)
+
+	// Sleep just long enough that any mtime update would be visible.
+	time.Sleep(15 * time.Millisecond)
+
+	// Second pass on unchanged inputs.
+	if err := p.Process(context.Background(), data); err != nil {
+		t.Fatal(err)
+	}
+	secondStat, err := os.Stat(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondBytes, _ := os.ReadFile(manifestPath)
+
+	if !bytes.Equal(firstBytes, secondBytes) {
+		t.Errorf("manifest content drifted on idempotent re-run:\nfirst:\n%s\n\nsecond:\n%s",
+			firstBytes, secondBytes)
+	}
+	if !secondStat.ModTime().Equal(firstStat.ModTime()) {
+		t.Errorf("manifest was rewritten despite unchanged input; first mod=%v second mod=%v",
+			firstStat.ModTime(), secondStat.ModTime())
 	}
 }
 
