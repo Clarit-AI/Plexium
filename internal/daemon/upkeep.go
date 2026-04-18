@@ -23,11 +23,12 @@ const (
 	executionModeCodingAgentPrimary = "coding-agent-primary"
 	executionModeProviderPrimary    = "provider-primary"
 
-	jobTypeBootstrap = "bootstrap"
-	jobTypeRepoDrift = "repo-drift"
-	jobTypeRawIngest = "raw-ingest"
-	jobTypeDebt      = "debt"
-	jobTypeLint      = "lint"
+	jobTypeBootstrap       = "bootstrap"
+	jobTypeRepoDrift       = "repo-drift"
+	jobTypeRawIngest       = "raw-ingest"
+	jobTypeDebt            = "debt"
+	jobTypeLint            = "lint"
+	jobTypeMarkedupEnrich  = "markedup-enrich"
 
 	jobStateQueued          = "queued"
 	jobStateRunning         = "running"
@@ -198,6 +199,12 @@ func (d *Daemon) discoverJobs() ([]*upkeepJob, []TickAction) {
 		}
 		actions = append(actions, lintAction)
 	}
+	if enrichJob, enrichAction := d.detectMarkedupEnrichJob(); enrichJob != nil || enrichAction.Watch != "" {
+		if enrichJob != nil {
+			jobs = append(jobs, enrichJob)
+		}
+		actions = append(actions, enrichAction)
+	}
 
 	return prioritizeJobs(jobs), actions
 }
@@ -221,6 +228,8 @@ func jobPriority(jobType string) int {
 		return 3
 	case jobTypeLint:
 		return 4
+	case jobTypeMarkedupEnrich:
+		return 5
 	default:
 		return 100
 	}

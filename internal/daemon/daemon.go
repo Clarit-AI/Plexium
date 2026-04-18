@@ -136,10 +136,25 @@ func (d *Daemon) Stop() {
 }
 
 // tick runs all enabled watches and returns the actions taken.
+//
+// Most job types are dispatched into a fresh git worktree via executeJob
+// and run a coding-agent runner. The markedup-enrich job is the
+// exception: enrichment is a pure-Go transform over the existing wiki +
+// manifest, so it does not need a worktree, a runner, or a coding-agent
+// budget — we run it directly in-process and skip the canExecuteJobs
+// gate (which checks specifically for runner/cascade availability).
 func (d *Daemon) tick(ctx context.Context) []TickAction {
 	jobs, actions := d.discoverJobs()
-	if len(jobs) > 0 && d.canExecuteJobs() {
-		actions = append(actions, d.executeJob(ctx, jobs[0]))
+	if len(jobs) == 0 {
+		return actions
+	}
+	job := jobs[0]
+	if job.Type == jobTypeMarkedupEnrich {
+		actions = append(actions, d.runMarkedupEnrichJob(ctx, job))
+		return actions
+	}
+	if d.canExecuteJobs() {
+		actions = append(actions, d.executeJob(ctx, job))
 	}
 	return actions
 }

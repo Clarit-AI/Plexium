@@ -18,7 +18,13 @@ package markedup
 
 import (
 	"fmt"
+	"time"
 )
+
+// DefaultRefreshInterval is the fallback TTL for the daemon's
+// re-enrichment watch when plugins.markedup.daemon.refreshInterval
+// is unset or unparseable.
+const DefaultRefreshInterval = 24 * time.Hour
 
 // Config is the parsed form of the plugins.markedup section in
 // .plexium/config.yml. All fields are optional; zero values give safe
@@ -48,6 +54,34 @@ type Config struct {
 	// Reranking configures an optional cross-encoder reranker. Disabled
 	// by default.
 	Reranking RerankingConfig `yaml:"reranking"`
+
+	// Daemon controls the daemon's periodic re-enrichment behavior.
+	Daemon DaemonConfig `yaml:"daemon"`
+}
+
+// DaemonConfig controls how the Plexium daemon periodically refreshes
+// markedup enrichment for tracked manifest entries.
+type DaemonConfig struct {
+	// RefreshInterval is the TTL after which a manifest entry's
+	// LastEnriched timestamp is considered stale and a re-enrichment
+	// job is queued. Parsed via time.ParseDuration. Defaults to
+	// DefaultRefreshInterval (24h) when unset or unparseable.
+	RefreshInterval string `yaml:"refreshInterval"`
+}
+
+// RefreshIntervalDuration returns the parsed RefreshInterval, falling
+// back to DefaultRefreshInterval when the value is empty or invalid.
+// Centralizing the parse here keeps the daemon caller free of any
+// markedup-internal knowledge of the YAML field's string shape.
+func (d DaemonConfig) RefreshIntervalDuration() time.Duration {
+	if d.RefreshInterval == "" {
+		return DefaultRefreshInterval
+	}
+	parsed, err := time.ParseDuration(d.RefreshInterval)
+	if err != nil || parsed <= 0 {
+		return DefaultRefreshInterval
+	}
+	return parsed
 }
 
 // EmbeddingsConfig controls semantic-search indexing.
@@ -100,6 +134,9 @@ func DefaultConfig() Config {
 			Enabled:  false,
 			Provider: "jina",
 		},
+		Daemon: DaemonConfig{
+			RefreshInterval: "",
+		},
 	}
 }
 
@@ -112,6 +149,13 @@ var allowedTopLevelKeys = map[string]struct{}{
 	"writeEnrichedFrontmatter": {},
 	"embeddings":               {},
 	"reranking":                {},
+	"daemon":                   {},
+}
+
+// allowedDaemonKeys constrains the nested daemon block (see allowed*Keys
+// for the rationale).
+var allowedDaemonKeys = map[string]struct{}{
+	"refreshInterval": {},
 }
 
 // allowedEmbeddingsKeys and allowedRerankingKeys constrain the nested
@@ -239,6 +283,21 @@ func ParseConfig(raw map[string]any) (Config, error) {
 		}
 	}
 
+	if dRaw, present := raw["daemon"]; present {
+		dm, ok := dRaw.(map[string]any)
+		if !ok {
+			return Config{}, fmt.Errorf("markedup.daemon must be a map")
+		}
+		if err := rejectUnknownKeys("markedup.daemon", dm, allowedDaemonKeys); err != nil {
+			return Config{}, err
+		}
+		if v, ok := dm["refreshInterval"].(string); ok {
+			cfg.Daemon.RefreshInterval = v
+		} else if _, p := dm["refreshInterval"]; p {
+			return Config{}, fmt.Errorf("markedup.daemon.refreshInterval must be a string (e.g. \"24h\")")
+		}
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -299,6 +358,14 @@ func (c Config) Validate() error {
 	}
 	if c.Reranking.Enabled && c.Reranking.Model == "" {
 		return fmt.Errorf("markedup.reranking: model is required when reranking is enabled")
+	}
+	if c.Daemon.RefreshInterval != "" {
+		// Surface a typo'd duration at config-load time rather than
+		// silently falling through to the 24h default at daemon-tick
+		// time, where the user has no easy way to see the fallback.
+		if _, err := time.ParseDuration(c.Daemon.RefreshInterval); err != nil {
+			return fmt.Errorf("markedup.daemon.refreshInterval: invalid duration %q: %w", c.Daemon.RefreshInterval, err)
+		}
 	}
 	return nil
 }
