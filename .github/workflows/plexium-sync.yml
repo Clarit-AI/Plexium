@@ -31,7 +31,7 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
             echo "### Plexium Sync skipped" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "No \`.plexium/config.yml\` found — this repository hasn't been initialized as a Plexium-managed project. Run \`plexium setup\` locally and commit the config to enable wiki sync." >> "$GITHUB_STEP_SUMMARY"
+            echo "No \`.plexium/config.yml\` found — this repository hasn't been initialized as a Plexium-managed project. Run \`plexium init\` locally and commit the generated \`.plexium/config.yml\` to enable wiki sync." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Set up Go
