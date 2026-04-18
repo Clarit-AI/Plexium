@@ -18,22 +18,43 @@ jobs:
           submodules: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Skip early (with a note in the job summary) if the repo hasn't
+      # been initialized as a Plexium-managed project. Without this guard
+      # every push to main fires a "failure" email because the Plexium
+      # source repo itself has no .plexium/config.yml.
+      - name: Check for Plexium config
+        id: config_check
+        run: |
+          if [ -f .plexium/config.yml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "### Plexium Sync skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "No \`.plexium/config.yml\` found — this repository hasn't been initialized as a Plexium-managed project. Run \`plexium init\` locally and commit the generated \`.plexium/config.yml\` to enable wiki sync." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Set up Go
+        if: steps.config_check.outputs.present == 'true'
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
 
       - name: Build Plexium
+        if: steps.config_check.outputs.present == 'true'
         run: go build ./cmd/plexium
 
       - name: Sync wiki
+        if: steps.config_check.outputs.present == 'true'
         run: ./plexium sync --ci
 
       - name: Publish to GitHub Wiki
+        if: steps.config_check.outputs.present == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./plexium gh-wiki-sync --push
 
       - name: Emit sync report
+        if: steps.config_check.outputs.present == 'true'
         run: |
           ./plexium report --format markdown >> "$GITHUB_STEP_SUMMARY"
