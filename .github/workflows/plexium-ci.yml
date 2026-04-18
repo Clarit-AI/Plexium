@@ -9,30 +9,13 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      # The MarkedUp plugin imports github.com/KHAEntertainment/markedup,
-      # which is a private module. GOPRIVATE bypasses the public proxy +
-      # checksum DB so `go mod download` fetches directly via git.
-      GOPRIVATE: github.com/KHAEntertainment/*
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configure git auth for private modules
-        # MARKEDUP_FETCH_TOKEN must be a repo secret with read access to
-        # github.com/KHAEntertainment/markedup. Without this step the
-        # private module fetch fails with "terminal prompts disabled".
-        run: |
-          git config --global url."https://x-access-token:${MARKEDUP_FETCH_TOKEN}@github.com/KHAEntertainment/".insteadOf "https://github.com/KHAEntertainment/"
-        env:
-          MARKEDUP_FETCH_TOKEN: ${{ secrets.MARKEDUP_FETCH_TOKEN }}
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
-
       - name: Build
         run: go build ./cmd/plexium
-
       - name: Run tests
         run: go test ./... -count=1 -timeout 120s
