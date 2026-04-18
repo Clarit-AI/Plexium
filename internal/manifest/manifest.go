@@ -11,14 +11,18 @@ import (
 
 // Manifest represents the state manifest stored at .plexium/manifest.json
 type Manifest struct {
-	Version               int              `json:"version"`
-	LastProcessedCommit   string           `json:"lastProcessedCommit"`
-	LastPublishTimestamp  string           `json:"lastPublishTimestamp"`
-	Pages                 []PageEntry      `json:"pages"`
-	UnmanagedPages        []UnmanagedEntry `json:"unmanagedPages"`
+	Version              int              `json:"version"`
+	LastProcessedCommit  string           `json:"lastProcessedCommit"`
+	LastPublishTimestamp string           `json:"lastPublishTimestamp"`
+	Pages                []PageEntry      `json:"pages"`
+	UnmanagedPages       []UnmanagedEntry `json:"unmanagedPages"`
 }
 
-// PageEntry represents a managed wiki page in the manifest
+// PageEntry represents a managed wiki page in the manifest.
+//
+// v2 adds knowledge-graph fields populated by the MarkedUp plugin. All
+// v2 fields use `omitempty` so v1 manifests read/write cleanly: v1
+// behaviour is preserved when no plugin populates them.
 type PageEntry struct {
 	WikiPath      string       `json:"wikiPath"`
 	Title         string       `json:"title"`
@@ -30,6 +34,30 @@ type PageEntry struct {
 	UpdatedBy     string       `json:"updatedBy"`
 	InboundLinks  []string     `json:"inboundLinks"`
 	OutboundLinks []string     `json:"outboundLinks"`
+
+	// Knowledge-graph fields (v2, populated by the MarkedUp plugin).
+	EntityType    string            `json:"entityType,omitempty"`
+	Entities      []EntityRef       `json:"entities,omitempty"`
+	Relationships []RelationshipRef `json:"relationships,omitempty"`
+	Confidence    float64           `json:"confidence,omitempty"`
+	SemanticHints []string          `json:"semanticHints,omitempty"`
+	LastEnriched  string            `json:"lastEnriched,omitempty"`
+	EnrichedBy    string            `json:"enrichedBy,omitempty"`
+}
+
+// EntityRef is a reference to a named entity on a page. It mirrors the
+// shape of schema.Entity in the markedup library without forcing a direct
+// dependency on that schema at the manifest layer.
+type EntityRef struct {
+	Name string `json:"name"`
+	Role string `json:"role,omitempty"`
+}
+
+// RelationshipRef is a typed edge to another wiki page.
+type RelationshipRef struct {
+	Target   string  `json:"target"` // WikiPath of the target page
+	Type     string  `json:"type"`   // e.g. "depends-on", "implements"
+	Strength float64 `json:"strength,omitempty"`
 }
 
 // SourceFile represents a source file that feeds into a wiki page
@@ -48,8 +76,8 @@ type UnmanagedEntry struct {
 
 // Manager handles manifest CRUD operations
 type Manager struct {
-	path    string
-	mu      sync.RWMutex
+	path string
+	mu   sync.RWMutex
 }
 
 // NewManager creates a new manifest manager for the given manifest path
@@ -142,4 +170,39 @@ func NewEmptyManifest() *Manifest {
 		Pages:          []PageEntry{},
 		UnmanagedPages: []UnmanagedEntry{},
 	}
+}
+
+// GraphMetadata bundles the knowledge-graph fields set by an enrichment
+// plugin. It's accepted by ApplyGraphMetadata to update a page in-place.
+type GraphMetadata struct {
+	EntityType    string
+	Entities      []EntityRef
+	Relationships []RelationshipRef
+	Confidence    float64
+	SemanticHints []string
+	LastEnriched  string
+	EnrichedBy    string
+}
+
+// ApplyGraphMetadata overwrites the v2 graph fields on the page entry with
+// matching WikiPath. If no such page exists, returns false with no error.
+// The manifest's Version is bumped to 2 when any graph fields are set.
+func (m *Manifest) ApplyGraphMetadata(wikiPath string, g GraphMetadata) bool {
+	for i := range m.Pages {
+		if m.Pages[i].WikiPath != wikiPath {
+			continue
+		}
+		m.Pages[i].EntityType = g.EntityType
+		m.Pages[i].Entities = g.Entities
+		m.Pages[i].Relationships = g.Relationships
+		m.Pages[i].Confidence = g.Confidence
+		m.Pages[i].SemanticHints = g.SemanticHints
+		m.Pages[i].LastEnriched = g.LastEnriched
+		m.Pages[i].EnrichedBy = g.EnrichedBy
+		if m.Version < 2 {
+			m.Version = 2
+		}
+		return true
+	}
+	return false
 }
