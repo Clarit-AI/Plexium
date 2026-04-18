@@ -12,6 +12,11 @@ import (
 	"github.com/Clarit-AI/Plexium/internal/plugins"
 )
 
+// RetrievalVersion is the version string for the retrieval plugin.
+// Kept distinct from EnricherVersion so the MCP tool surface and the
+// enricher pipeline contract can evolve on independent cadences.
+const RetrievalVersion = "markedup-v1"
+
 // RetrievalPlugin exposes MarkedUp search, graph traversal, and graph
 // summary as MCP tools on the PageIndex server.
 //
@@ -31,7 +36,7 @@ func NewRetrieval(cfg Config) *RetrievalPlugin {
 // Plugin interface
 
 func (p *RetrievalPlugin) Name() string             { return "markedup-retrieval" }
-func (p *RetrievalPlugin) Version() string          { return EnricherVersion }
+func (p *RetrievalPlugin) Version() string          { return RetrievalVersion }
 func (p *RetrievalPlugin) Description() string      { return "MarkedUp semantic search and graph traversal" }
 func (p *RetrievalPlugin) Type() plugins.PluginType { return plugins.PluginTypeRetrieval }
 

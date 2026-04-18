@@ -72,6 +72,23 @@ func (p *EnricherPlugin) Process(ctx context.Context, data *plugins.PipelineData
 	now := time.Now().UTC().Format(time.RFC3339)
 	applied := 0
 
+	// Buffer frontmatter-write tasks rather than flushing per-page. If we
+	// wrote files during the loop and then hit an error on a later page,
+	// the manifest save would be skipped and the .wiki/ files would carry
+	// enriched frontmatter with no corresponding manifest record — the
+	// two sources of truth would drift. Instead we commit the manifest
+	// first; only if that succeeds do we flush the buffered writes.
+	// pendingWrite holds the pre-rendered file bytes for a deferred
+	// frontmatter write. We render before the manifest save so any
+	// template/YAML errors surface before mutating any state, and flush
+	// only after the manifest save confirms the enrichment committed.
+	type pendingWrite struct {
+		filePath string
+		wikiPath string
+		content  []byte // rendered file content ready for os.WriteFile
+	}
+	var pending []pendingWrite
+
 	for _, page := range data.Pages {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -125,13 +142,18 @@ func (p *EnricherPlugin) Process(ctx context.Context, data *plugins.PipelineData
 		applied++
 
 		if p.cfg.WriteEnrichedFrontmatter {
+			// Pre-build the content now while we still have `raw` and
+			// the merged frontmatter in hand, but defer the actual
+			// disk write until after the manifest commit succeeds.
 			newContent, werr := markdown.ReplaceFrontmatter(&enriched.Frontmatter, raw)
 			if werr != nil {
 				return fmt.Errorf("markedup: build frontmatter for %s: %w", page.WikiPath, werr)
 			}
-			if werr := markdown.WriteFrontmatterFile(filePath, newContent); werr != nil {
-				return fmt.Errorf("markedup: write frontmatter for %s: %w", page.WikiPath, werr)
-			}
+			pending = append(pending, pendingWrite{
+				filePath: filePath,
+				wikiPath: page.WikiPath,
+				content:  newContent,
+			})
 		}
 	}
 
@@ -140,6 +162,16 @@ func (p *EnricherPlugin) Process(ctx context.Context, data *plugins.PipelineData
 	}
 	if err := mgr.Save(m); err != nil {
 		return fmt.Errorf("markedup: save manifest: %w", err)
+	}
+	for _, w := range pending {
+		if err := markdown.WriteFrontmatterFile(w.filePath, w.content); err != nil {
+			// The manifest is already saved; a single frontmatter write
+			// failure here creates a manifest-has-data / disk-missing
+			// asymmetry for this one file. Surface the error so the
+			// operator can retry the pipeline pass (EnrichPage is
+			// idempotent — a second run will re-attempt the write).
+			return fmt.Errorf("markedup: write frontmatter for %s: %w", w.wikiPath, err)
+		}
 	}
 	return nil
 }

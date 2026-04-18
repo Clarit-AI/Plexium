@@ -178,11 +178,13 @@ func ParseConfig(raw map[string]any) (Config, error) {
 	return cfg, nil
 }
 
-// toInt normalizes any YAML/JSON numeric shape (int, int64, float64,
-// json.Number, or decimal string) to a plain int. Returns (0, false) on
-// any other type or parse failure. This keeps config parsing robust
-// against the fact that Viper, mapstructure, and a hand-built map[any]
-// decoder can each emit numbers as different Go types.
+// toInt normalizes the numeric shapes that Viper / YAML emit for
+// integer-valued config keys. It accepts int, int32, int64, and
+// whole-number float64; it rejects fractional floats and every other
+// type by returning (0, false). json.Number and numeric strings are
+// deliberately NOT accepted — they don't appear in the current
+// Viper-backed config pipeline, and letting them through would paper
+// over a misconfigured decoder at the config boundary.
 func toInt(v any) (int, bool) {
 	switch x := v.(type) {
 	case int:

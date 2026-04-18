@@ -175,6 +175,63 @@ func TestEnricherPlugin_SkipsMissingWikiFiles(t *testing.T) {
 	}
 }
 
+// Regression for CodeRabbit review pass 2: with WriteEnrichedFrontmatter=true,
+// frontmatter writes must NOT be flushed to disk until after the manifest
+// save succeeds. Otherwise a mid-pipeline failure could leave the .wiki/
+// files carrying enriched frontmatter with no manifest record, drifting
+// the two sources of truth apart. We verify the ordering by checking
+// that both sides land together (manifest v2 + file rewritten) on the
+// success path — and, separately, that when the enricher runs with
+// WriteEnrichedFrontmatter=false, files stay untouched even though the
+// manifest advances.
+func TestEnricherPlugin_WriteFrontmatterDeferredUntilManifestSave(t *testing.T) {
+	repoRoot, wikiRoot := setupWikiFixture(t, map[string]string{
+		"a.md": "# A\n\n[[b]]\n",
+		"b.md": "# B\n\nContent.\n",
+	})
+
+	beforeA, _ := os.ReadFile(filepath.Join(wikiRoot, "a.md"))
+	beforeB, _ := os.ReadFile(filepath.Join(wikiRoot, "b.md"))
+
+	p := NewEnricher(Config{
+		Enabled:                  true,
+		AutoEnrich:               true,
+		WriteEnrichedFrontmatter: true,
+	})
+	err := p.Process(context.Background(), &plugins.PipelineData{
+		RepoRoot: repoRoot,
+		WikiRoot: wikiRoot,
+		Pages: []plugins.PipelinePage{
+			{WikiPath: "a.md", Title: "A"},
+			{WikiPath: "b.md", Title: "B"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	// Both files should now carry frontmatter (the deferred writes
+	// fired because the manifest save succeeded).
+	afterA, _ := os.ReadFile(filepath.Join(wikiRoot, "a.md"))
+	afterB, _ := os.ReadFile(filepath.Join(wikiRoot, "b.md"))
+	if string(afterA) == string(beforeA) {
+		t.Error("a.md should have been rewritten with frontmatter")
+	}
+	if string(afterB) == string(beforeB) {
+		t.Error("b.md should have been rewritten with frontmatter")
+	}
+	if !strings.HasPrefix(string(afterA), "---") {
+		t.Errorf("a.md missing frontmatter delimiter: %s", afterA)
+	}
+
+	// Manifest must have advanced too.
+	mgr, _ := manifest.NewManager(manifest.DefaultPath(repoRoot))
+	m, _ := mgr.Load()
+	if m.Version != 2 {
+		t.Errorf("expected Version=2 after successful enrichment, got %d", m.Version)
+	}
+}
+
 // Regression: if the pipeline delivers a page that isn't tracked in the
 // manifest, the enricher must not save a spurious v1→v2 bump or invent
 // a manifest entry. Addresses CodeRabbit review finding on enricher.go:131.
