@@ -2,10 +2,40 @@ package pageindex
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/Clarit-AI/Plexium/internal/plugins"
 )
+
+// stubRetrievalPlugin implements plugins.RetrievalPlugin for server-level
+// tool-aggregation tests, so we can assert wiring without pulling in the
+// markedup package and its on-disk index loader.
+type stubRetrievalPlugin struct {
+	name  string
+	tools []plugins.MCPToolDef
+	// callResults maps tool name -> response value returned by HandleMCPCall.
+	callResults map[string]any
+}
+
+func (s *stubRetrievalPlugin) Name() string                  { return s.name }
+func (s *stubRetrievalPlugin) Version() string               { return "stub-v0" }
+func (s *stubRetrievalPlugin) Description() string           { return "stub" }
+func (s *stubRetrievalPlugin) Type() plugins.PluginType      { return plugins.PluginTypeRetrieval }
+func (s *stubRetrievalPlugin) Initialize(_ context.Context, _ string) error { return nil }
+func (s *stubRetrievalPlugin) Search(_ context.Context, _ string, _ plugins.SearchOpts) ([]plugins.PluginSearchResult, error) {
+	return nil, nil
+}
+func (s *stubRetrievalPlugin) MCPTools() []plugins.MCPToolDef { return s.tools }
+func (s *stubRetrievalPlugin) HandleMCPCall(_ context.Context, tool string, _ json.RawMessage) (any, error) {
+	if v, ok := s.callResults[tool]; ok {
+		return v, nil
+	}
+	return nil, fmt.Errorf("stub: unknown tool %q", tool)
+}
 
 func TestHandleRequest_ToolsList(t *testing.T) {
 	wikiDir := setupTestWiki(t)
@@ -393,6 +423,128 @@ func TestServer_StdioLoop(t *testing.T) {
 
 	if resp.Error != nil {
 		t.Errorf("unexpected error in response: %v", resp.Error)
+	}
+}
+
+// TestHandleRequest_ToolsList_WithRegistry verifies that retrieval-plugin
+// MCP tools are appended to the builtin set when a Registry is attached.
+// Asserts: 3 builtin + 3 stub = 6 tools, and that the stub names appear.
+func TestHandleRequest_ToolsList_WithRegistry(t *testing.T) {
+	wikiDir := setupTestWiki(t)
+	s := NewServer(wikiDir)
+	if err := s.Index.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	stub := &stubRetrievalPlugin{
+		name: "stub-retrieval",
+		tools: []plugins.MCPToolDef{
+			{Name: "stub_search", Description: "stub semantic search",
+				InputSchema: map[string]any{"type": "object"}},
+			{Name: "stub_traverse", Description: "stub graph walk",
+				InputSchema: map[string]any{"type": "object"}},
+			{Name: "stub_graph", Description: "stub graph summary",
+				InputSchema: map[string]any{"type": "object"}},
+		},
+		callResults: map[string]any{
+			"stub_search": []map[string]any{{"page": "x.md", "score": 0.9}},
+		},
+	}
+	reg := plugins.NewRegistry()
+	if err := reg.Register(stub); err != nil {
+		t.Fatalf("register stub: %v", err)
+	}
+	s.Registry = reg
+
+	resp := s.handleRequest(JSONRPCRequest{JSONRPC: "2.0", ID: 1, Method: "tools/list"})
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+
+	resultMap := resp.Result.(map[string]interface{})
+	tools := resultMap["tools"].([]ToolDefinition)
+	if len(tools) != 6 {
+		t.Errorf("expected 6 tools (3 builtin + 3 stub), got %d", len(tools))
+	}
+
+	want := map[string]bool{
+		"pageindex_search": false, "pageindex_get_page": false, "pageindex_list_pages": false,
+		"stub_search": false, "stub_traverse": false, "stub_graph": false,
+	}
+	for _, td := range tools {
+		if _, ok := want[td.Name]; ok {
+			want[td.Name] = true
+		}
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("expected tool %q in tools/list response", name)
+		}
+	}
+}
+
+// TestHandleRequest_ToolsCall_DelegatesToPlugin verifies that an unknown
+// builtin tool is dispatched to a registered retrieval plugin and its
+// result is wrapped in the standard ToolResult envelope.
+func TestHandleRequest_ToolsCall_DelegatesToPlugin(t *testing.T) {
+	wikiDir := setupTestWiki(t)
+	s := NewServer(wikiDir)
+	if err := s.Index.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	stub := &stubRetrievalPlugin{
+		name: "stub-retrieval",
+		tools: []plugins.MCPToolDef{
+			{Name: "stub_search", Description: "stub", InputSchema: map[string]any{}},
+		},
+		callResults: map[string]any{
+			"stub_search": []map[string]any{{"page": "auth.md", "score": 0.42}},
+		},
+	}
+	reg := plugins.NewRegistry()
+	if err := reg.Register(stub); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	s.Registry = reg
+
+	args, _ := json.Marshal(map[string]any{"query": "anything"})
+	params, _ := json.Marshal(ToolCallParams{Name: "stub_search", Arguments: args})
+	resp := s.handleRequest(JSONRPCRequest{JSONRPC: "2.0", ID: 99, Method: "tools/call", Params: params})
+
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	rb, _ := json.Marshal(resp.Result)
+	var tr ToolResult
+	if err := json.Unmarshal(rb, &tr); err != nil {
+		t.Fatalf("unmarshal ToolResult: %v", err)
+	}
+	if tr.IsError {
+		t.Fatalf("expected success, got error result: %s", tr.Content[0].Text)
+	}
+	if !strings.Contains(tr.Content[0].Text, "auth.md") {
+		t.Errorf("expected stub payload in response, got: %s", tr.Content[0].Text)
+	}
+}
+
+// TestHandleRequest_ToolsList_NilRegistry confirms the pre-D4 behavior
+// is preserved when no Registry is attached: only 3 builtin tools.
+func TestHandleRequest_ToolsList_NilRegistry(t *testing.T) {
+	wikiDir := setupTestWiki(t)
+	s := NewServer(wikiDir)
+	if err := s.Index.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	// s.Registry is nil — that is the pre-D4 default.
+
+	resp := s.handleRequest(JSONRPCRequest{JSONRPC: "2.0", ID: 1, Method: "tools/list"})
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	tools := resp.Result.(map[string]interface{})["tools"].([]ToolDefinition)
+	if len(tools) != 3 {
+		t.Errorf("expected exactly 3 builtin tools without registry, got %d", len(tools))
 	}
 }
 

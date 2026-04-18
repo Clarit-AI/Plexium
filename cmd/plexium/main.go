@@ -1557,8 +1557,39 @@ var pageidxServeCmd = &cobra.Command{
 		if cfg != nil && cfg.Wiki.Root != "" {
 			wikiRoot = cfg.Wiki.Root
 		}
+		absWikiRoot := filepath.Join(repoRoot, wikiRoot)
 
-		server := pageindex.NewServer(filepath.Join(repoRoot, wikiRoot))
+		// Build the plugin registry so retrieval plugins (e.g. markedup)
+		// can surface their MCP tools alongside the built-in pageindex_*
+		// tools. A nil cfg or no enabled plugins yields an empty registry,
+		// which the server treats as "builtin tools only" — preserving
+		// pre-D4 behavior for unconfigured projects.
+		var bootstrapOpts bootstrap.Options
+		if cfg != nil {
+			cascade, _ := buildCascadeFromConfig(cfg)
+			bootstrapOpts.Cascade = cascade
+		}
+		reg, err := bootstrap.BuildRegistry(cmd.Context(), repoRoot, cfg, bootstrapOpts)
+		if err != nil {
+			return fmt.Errorf("plugin registry: %w", err)
+		}
+
+		// BuildRegistry constructs retrieval plugins but never calls
+		// Initialize (it doesn't know which wiki root the consuming
+		// surface targets). The MCP server needs an initialized index
+		// to answer markedup_* tool calls, so do it here. A failure
+		// here is logged and the plugin is left uninitialized — its
+		// HandleMCPCall will return a clear "not initialized" error
+		// rather than crashing the whole server.
+		ctx := cmd.Context()
+		for _, rp := range reg.RetrievalPlugins() {
+			if initErr := rp.Initialize(ctx, absWikiRoot); initErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: retrieval plugin %q initialize failed: %v\n", rp.Name(), initErr)
+			}
+		}
+
+		server := pageindex.NewServer(absWikiRoot)
+		server.Registry = reg
 		fmt.Fprintf(os.Stderr, "PageIndex MCP server running (stdio mode)\n")
 		return server.Start()
 	},
