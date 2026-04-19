@@ -385,6 +385,7 @@ func setupAgent(repoRoot, agent string, opts setupAgentOptions) (*setupResult, e
 	if _, err := os.Stat(filepath.Join(repoRoot, "lefthook.yml")); err == nil {
 		result.Steps = append(result.Steps, maybeInstallLefthook(repoRoot))
 	}
+	logEnabledBuiltinPlugins(repoRoot, opts.Stderr)
 	if baselineStep := maybeCreateInitialBaselineCommit(repoRoot, opts); baselineStep != nil {
 		result.Steps = append(result.Steps, *baselineStep)
 	}
@@ -1116,6 +1117,23 @@ func initialPopulationMode(agentName string) string {
 		return "Claude agent teams (retriever, documenter, optional validator)"
 	}
 	return "Codex sub-agents (retriever, documenter, optional validator)"
+}
+
+// logEnabledBuiltinPlugins emits an info-level line for each built-in
+// plugin that the freshly-loaded config has enabled. This is purely
+// informational — setup never actually invokes plugin code; the next
+// `plexium convert` is what loads the registry and runs the plugins.
+func logEnabledBuiltinPlugins(repoRoot string, stderr io.Writer) {
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		return
+	}
+	if cfg.PluginEnabled("markedup") {
+		fmt.Fprintln(stderr, "info: plugins.markedup enabled — will run on next convert")
+	}
 }
 
 func loadConfigOrNil(repoRoot string) *config.Config {

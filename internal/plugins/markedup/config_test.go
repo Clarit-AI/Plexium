@@ -270,3 +270,23 @@ func TestParseConfig_InheritEmbeddingsAllowedWithoutEndpoint(t *testing.T) {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
 }
+
+// TestParseConfig_RejectsNonPositiveRefreshInterval verifies that
+// Validate now refuses zero/negative refreshInterval values rather than
+// silently falling through to the 24h default at daemon-tick time. The
+// pre-fix behavior accepted "0s" and "-1h" with no error, leaving the
+// runtime mismatch (RefreshIntervalDuration treats parsed<=0 as
+// invalid) hidden until the first tick.
+func TestParseConfig_RejectsNonPositiveRefreshInterval(t *testing.T) {
+	cases := []string{"0s", "-1h"}
+	for _, v := range cases {
+		raw := map[string]any{
+			"enabled": true,
+			"daemon":  map[string]any{"refreshInterval": v},
+		}
+		_, err := ParseConfig(raw)
+		if err == nil {
+			t.Errorf("ParseConfig(%q): expected validation error, got nil", v)
+		}
+	}
+}

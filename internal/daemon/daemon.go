@@ -67,6 +67,13 @@ type Daemon struct {
 	runner        RunnerAdapter
 	cascade       *agent.ProviderCascade
 	rateTracker   *agent.RateLimitTracker
+	// apiKeyResolver, when set, is forwarded to bootstrap.Options so
+	// markedup's inherited embedder shares the same credential
+	// resolution (`.plexium/credentials.json` → env) the assistive
+	// cascade uses. The CLI sets this in main.go after NewDaemon;
+	// tests and code paths that don't set it fall back to os.Getenv
+	// inside the bootstrap, preserving prior behavior.
+	apiKeyResolver func(envName string) string
 	pollInterval  time.Duration
 	maxConcurrent int
 	stopCh        chan struct{}
@@ -95,6 +102,17 @@ func NewDaemon(opts DaemonOpts, workspace *WorkspaceMgr, tracker TrackerAdapter,
 		maxConcurrent: opts.MaxConcurrent,
 		stopCh:        make(chan struct{}),
 	}
+}
+
+// SetAPIKeyResolver wires a credential resolver (typically
+// cmd/plexium's loadAPIKey, which checks .plexium/credentials.json
+// before falling back to env) into the daemon. The resolver is
+// forwarded to bootstrap.BuildRegistry so daemon-driven plugin
+// re-enrichment uses the same embeddings credentials as the convert
+// path. Safe to leave unset; the bootstrap then falls back to
+// os.Getenv directly.
+func (d *Daemon) SetAPIKeyResolver(fn func(envName string) string) {
+	d.apiKeyResolver = fn
 }
 
 // Run starts the poll loop. It executes one tick immediately, then ticks on
@@ -136,10 +154,32 @@ func (d *Daemon) Stop() {
 }
 
 // tick runs all enabled watches and returns the actions taken.
+//
+// Most job types are dispatched into a fresh git worktree via executeJob
+// and run a coding-agent runner. The markedup-enrich job is the
+// exception: enrichment is a pure-Go transform over the existing wiki +
+// manifest, so it does not need a worktree, a runner, or a coding-agent
+// budget — we run it directly in-process and skip the canExecuteJobs
+// gate (which checks specifically for runner/cascade availability).
 func (d *Daemon) tick(ctx context.Context) []TickAction {
 	jobs, actions := d.discoverJobs()
-	if len(jobs) > 0 && d.canExecuteJobs() {
-		actions = append(actions, d.executeJob(ctx, jobs[0]))
+	if len(jobs) == 0 {
+		return actions
+	}
+	// Always drain in-process markedup-enrich jobs first; they don't
+	// need a runner/cascade and must not be starved by runner-gated
+	// jobs (lint/debt/repo-drift) that cannot execute when the daemon
+	// has no runner configured.
+	var remaining []*upkeepJob
+	for _, j := range jobs {
+		if j.Type == jobTypeMarkedupEnrich {
+			actions = append(actions, d.runMarkedupEnrichJob(ctx, j))
+			continue
+		}
+		remaining = append(remaining, j)
+	}
+	if len(remaining) > 0 && d.canExecuteJobs() {
+		actions = append(actions, d.executeJob(ctx, remaining[0]))
 	}
 	return actions
 }

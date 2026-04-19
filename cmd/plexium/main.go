@@ -26,6 +26,7 @@ import (
 	"github.com/Clarit-AI/Plexium/internal/integrations/pageindex"
 	"github.com/Clarit-AI/Plexium/internal/lint"
 	"github.com/Clarit-AI/Plexium/internal/migrate"
+	"github.com/Clarit-AI/Plexium/internal/plugins/bootstrap"
 	"github.com/Clarit-AI/Plexium/internal/publish"
 	"github.com/Clarit-AI/Plexium/internal/retry"
 	plexiumsync "github.com/Clarit-AI/Plexium/internal/sync"
@@ -331,12 +332,43 @@ var convertCmd = &cobra.Command{
 		var cfg *config.Config
 		cfg, _ = config.LoadFromDir(repoRoot)
 
+		// Build the plugin registry. When cfg is nil or no plugins are
+		// enabled, this returns an empty registry — the pipeline will
+		// simply skip its plugin hooks. A bootstrap error is fatal: the
+		// user explicitly enabled a plugin and it failed to construct.
+		//
+		// Pass the assistive cascade so markedup's Tier 2 enrichment
+		// (modelEnrich: true) and embeddings (embeddings.enabled: true)
+		// can inherit the same provider configuration the rest of the
+		// CLI uses. A nil cascade silently disables those tiers.
+		var bootstrapOpts bootstrap.Options
+		if cfg != nil {
+			cascade, rateTracker := buildCascadeFromConfig(cfg)
+			bootstrapOpts.Cascade = cascade
+			// Propagate the rate-limit tracker so Tier 2 LLM calls
+			// record token usage against the same daily-spend ledger
+			// the daemon path (NewDaemon) and `agent spend` use.
+			// Without this the convert/MCP paths silently fall outside
+			// the assistive-provider budget.
+			bootstrapOpts.RateTracker = rateTracker
+			// Share the same credential resolver
+			// (.plexium/credentials.json → env fallback) used by
+			// buildCascadeFromConfig so inherited embeddings see the
+			// same key as the LLM cascade.
+			bootstrapOpts.APIKeyResolver = loadAPIKey
+		}
+		reg, err := bootstrap.BuildRegistry(cmd.Context(), repoRoot, cfg, bootstrapOpts)
+		if err != nil {
+			return fmt.Errorf("plugin registry: %w", err)
+		}
+
 		pipeline := convert.NewPipeline(convert.PipelineOptions{
 			RepoRoot: repoRoot,
 			Config:   cfg,
 			DryRun:   dryRun,
 			Depth:    depth,
 			Agent:    agent,
+			Registry: reg,
 		})
 
 		result, err := pipeline.Run()
@@ -1069,6 +1101,10 @@ var daemonCmd = &cobra.Command{
 
 		cascade, rateTracker := buildCascadeFromConfig(cfg)
 		d := daemon.NewDaemon(opts, workspace, tracker, runner, cascade, rateTracker)
+		// Share the same credential resolver the cascade uses so
+		// daemon-driven markedup re-enrichment picks up keys written
+		// by `plexium agent setup` into .plexium/credentials.json.
+		d.SetAPIKeyResolver(loadAPIKey)
 
 		fmt.Printf("Plexium daemon starting (poll=%ds, maxConcurrent=%d)\n", pollInterval, maxConcurrent)
 
@@ -1536,8 +1572,50 @@ var pageidxServeCmd = &cobra.Command{
 		if cfg != nil && cfg.Wiki.Root != "" {
 			wikiRoot = cfg.Wiki.Root
 		}
+		absWikiRoot := filepath.Join(repoRoot, wikiRoot)
 
-		server := pageindex.NewServer(filepath.Join(repoRoot, wikiRoot))
+		// Build the plugin registry so retrieval plugins (e.g. markedup)
+		// can surface their MCP tools alongside the built-in pageindex_*
+		// tools. A nil cfg or no enabled plugins yields an empty registry,
+		// which the server treats as "builtin tools only" — preserving
+		// pre-D4 behavior for unconfigured projects.
+		var bootstrapOpts bootstrap.Options
+		if cfg != nil {
+			cascade, rateTracker := buildCascadeFromConfig(cfg)
+			bootstrapOpts.Cascade = cascade
+			// Propagate the rate-limit tracker so Tier 2 LLM calls
+			// record token usage against the same daily-spend ledger
+			// the daemon path (NewDaemon) and `agent spend` use.
+			// Without this the convert/MCP paths silently fall outside
+			// the assistive-provider budget.
+			bootstrapOpts.RateTracker = rateTracker
+			// Share the same credential resolver
+			// (.plexium/credentials.json → env fallback) used by
+			// buildCascadeFromConfig so inherited embeddings see the
+			// same key as the LLM cascade.
+			bootstrapOpts.APIKeyResolver = loadAPIKey
+		}
+		reg, err := bootstrap.BuildRegistry(cmd.Context(), repoRoot, cfg, bootstrapOpts)
+		if err != nil {
+			return fmt.Errorf("plugin registry: %w", err)
+		}
+
+		// BuildRegistry constructs retrieval plugins but never calls
+		// Initialize (it doesn't know which wiki root the consuming
+		// surface targets). The MCP server needs an initialized index
+		// to answer markedup_* tool calls, so do it here. A failure
+		// here is logged and the plugin is left uninitialized — its
+		// HandleMCPCall will return a clear "not initialized" error
+		// rather than crashing the whole server.
+		ctx := cmd.Context()
+		for _, rp := range reg.RetrievalPlugins() {
+			if initErr := rp.Initialize(ctx, absWikiRoot); initErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: retrieval plugin %q initialize failed: %v\n", rp.Name(), initErr)
+			}
+		}
+
+		server := pageindex.NewServer(absWikiRoot)
+		server.Registry = reg
 		fmt.Fprintf(os.Stderr, "PageIndex MCP server running (stdio mode)\n")
 		return server.Start()
 	},
