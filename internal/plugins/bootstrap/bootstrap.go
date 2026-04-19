@@ -255,7 +255,13 @@ func buildInheritedEmbedder(mcfg markedup.Config, cfg *config.Config, opts Optio
 		}
 		model := mcfg.Embeddings.Model
 		if model == "" {
-			model = pc.Model
+			// pc.Model is the chat/completion model; using it as an
+			// embedding model would either be rejected by the provider
+			// or — worse — silently return wrong-shape vectors at query
+			// time. Refuse to wire and tell the operator exactly what
+			// to set.
+			log.Printf("plugins.markedup.embeddings: enabled in inherit mode but embeddings.model is empty; semantic search disabled (set plugins.markedup.embeddings.model to an embedding model such as text-embedding-3-small)")
+			return nil
 		}
 		// Use the shared resolver so inherited embeddings see the
 		// same key the cascade does (env OR

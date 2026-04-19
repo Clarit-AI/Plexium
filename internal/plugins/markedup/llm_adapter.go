@@ -64,11 +64,19 @@ func (a *CascadeLLMProvider) ExtractGraph(ctx context.Context, body string) (*en
 	if err != nil {
 		return nil, "", fmt.Errorf("markedup: cascade.Complete: %w", err)
 	}
+	// Defensive: some Provider implementations can return (nil, nil) on
+	// degenerate paths (e.g. a stub provider whose IsAvailable flickers).
+	// Without this guard the downstream `completion.Response` deref would
+	// panic; returning a normal error lets the enricher's non-fatal Tier 2
+	// path log + degrade to Tier 1 instead.
+	if completion == nil {
+		return nil, "", fmt.Errorf("markedup: provider returned nil completion")
+	}
 
 	// Best-effort: record this call against the daily-spend ledger so
 	// the convert path's Tier 2 usage shows up in `agent spend`. A
 	// failure here must not abort enrichment — log and continue.
-	if a.RateTracker != nil && completion != nil && completion.Provider != "" {
+	if a.RateTracker != nil && completion.Provider != "" {
 		if err := a.RateTracker.Record(completion.Provider, completion.TokensUsed, completion.CostUSD); err != nil {
 			log.Printf("markedup: rate tracker record (%s): %v", completion.Provider, err)
 		}

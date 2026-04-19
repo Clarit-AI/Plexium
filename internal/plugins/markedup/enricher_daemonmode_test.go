@@ -35,8 +35,17 @@ func TestEnricherPlugin_DaemonMode_TouchesLastEnrichedOnNoOp(t *testing.T) {
 		t.Fatalf("first process: %v", err)
 	}
 
-	mgr, _ := manifest.NewManager(manifest.DefaultPath(repoRoot))
-	m, _ := mgr.Load()
+	mgr, err := manifest.NewManager(manifest.DefaultPath(repoRoot))
+	if err != nil {
+		t.Fatalf("manifest manager: %v", err)
+	}
+	m, err := mgr.Load()
+	if err != nil {
+		t.Fatalf("manifest load: %v", err)
+	}
+	if len(m.Pages) == 0 {
+		t.Fatalf("manifest has no pages after first process")
+	}
 	firstStamp := m.Pages[0].LastEnriched
 	if firstStamp == "" {
 		t.Fatalf("expected LastEnriched populated after first call, got empty")
@@ -49,7 +58,13 @@ func TestEnricherPlugin_DaemonMode_TouchesLastEnrichedOnNoOp(t *testing.T) {
 	if err := p.Process(context.Background(), data); err != nil {
 		t.Fatalf("second process: %v", err)
 	}
-	m2, _ := mgr.Load()
+	m2, err := mgr.Load()
+	if err != nil {
+		t.Fatalf("manifest reload: %v", err)
+	}
+	if len(m2.Pages) == 0 {
+		t.Fatalf("manifest has no pages after second process")
+	}
 	secondStamp := m2.Pages[0].LastEnriched
 	if secondStamp == firstStamp {
 		t.Errorf("daemon mode: expected LastEnriched to advance on no-op enrichment; first=%q second=%q",
@@ -92,8 +107,17 @@ func TestEnricherPlugin_NoDaemonMode_LeavesLastEnrichedFixedOnNoOp(t *testing.T)
 		t.Fatalf("first process: %v", err)
 	}
 
-	mgr, _ := manifest.NewManager(manifest.DefaultPath(repoRoot))
-	m, _ := mgr.Load()
+	mgr, err := manifest.NewManager(manifest.DefaultPath(repoRoot))
+	if err != nil {
+		t.Fatalf("manifest manager: %v", err)
+	}
+	m, err := mgr.Load()
+	if err != nil {
+		t.Fatalf("manifest load: %v", err)
+	}
+	if len(m.Pages) == 0 {
+		t.Fatalf("manifest has no pages after first process")
+	}
 	firstStamp := m.Pages[0].LastEnriched
 	if firstStamp == "" {
 		t.Fatalf("expected LastEnriched populated after first call, got empty")
@@ -104,7 +128,13 @@ func TestEnricherPlugin_NoDaemonMode_LeavesLastEnrichedFixedOnNoOp(t *testing.T)
 	if err := p.Process(context.Background(), data); err != nil {
 		t.Fatalf("second process: %v", err)
 	}
-	m2, _ := mgr.Load()
+	m2, err := mgr.Load()
+	if err != nil {
+		t.Fatalf("manifest reload: %v", err)
+	}
+	if len(m2.Pages) == 0 {
+		t.Fatalf("manifest has no pages after second process")
+	}
 	secondStamp := m2.Pages[0].LastEnriched
 	if secondStamp != firstStamp {
 		t.Errorf("non-daemon mode: expected LastEnriched unchanged on no-op (idempotency); first=%q second=%q",

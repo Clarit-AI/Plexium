@@ -313,8 +313,14 @@ func TestBuildRegistry_EmbeddingsEnabled_InheritFromCascade(t *testing.T) {
 		},
 		Plugins: map[string]map[string]any{
 			"markedup": {
-				"enabled":    true,
-				"embeddings": map[string]any{"enabled": true},
+				"enabled": true,
+				"embeddings": map[string]any{
+					"enabled": true,
+					// inherit mode requires an explicit embedding model;
+					// pc.Model is the chat model and is not a valid
+					// fallback (see F2 fix in bootstrap.go).
+					"model": "text-embedding-3-small",
+				},
 			},
 		},
 	}
@@ -333,6 +339,58 @@ func TestBuildRegistry_EmbeddingsEnabled_InheritFromCascade(t *testing.T) {
 	}
 	if !findRetrieval(t, reg).HasEmbedder() {
 		t.Errorf("retrieval should have embedder when embeddings.enabled=true and cascade is supplied")
+	}
+}
+
+// TestBuildRegistry_EmbeddingsInherit_MissingModelDisables is the
+// regression test for CodeRabbit pass 5 F2: inherit mode used to fall
+// back to the chat/completion model (pc.Model) when
+// plugins.markedup.embeddings.model was empty, silently producing a
+// broken embedder. The fix refuses to wire and logs a directed warning
+// so the operator knows exactly which key to set.
+func TestBuildRegistry_EmbeddingsInherit_MissingModelDisables(t *testing.T) {
+	var buf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	cfg := &config.Config{
+		AssistiveAgent: config.AssistiveAgent{
+			Providers: []config.ProviderConfig{
+				{
+					Name:     "test",
+					Enabled:  true,
+					Type:     "openai-compatible",
+					Endpoint: "http://localhost:8080",
+					Model:    "gpt-4o-mini", // chat model — must NOT be reused
+				},
+			},
+		},
+		Plugins: map[string]map[string]any{
+			"markedup": {
+				"enabled":    true,
+				"embeddings": map[string]any{"enabled": true},
+			},
+		},
+	}
+	provider := agent.NewOllamaProvider("http://localhost:11434", "test",
+		func(ctx context.Context, url, body string) (string, int, error) {
+			return "{}", 0, nil
+		},
+	)
+	cascade := agent.NewCascade([]agent.Provider{provider}, retry.DefaultPolicy())
+
+	reg, err := bootstrap.BuildRegistry(context.Background(), t.TempDir(), cfg,
+		bootstrap.Options{Cascade: cascade},
+	)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if findRetrieval(t, reg).HasEmbedder() {
+		t.Errorf("retrieval must not wire an embedder in inherit mode when embeddings.model is empty")
+	}
+	if !strings.Contains(buf.String(), "embeddings.model is empty") {
+		t.Errorf("expected directed warning about missing embeddings.model; got: %s", buf.String())
 	}
 }
 
@@ -406,8 +464,13 @@ func TestBuildRegistry_EmbeddingsEnabled_APIKeyResolverShared(t *testing.T) {
 		},
 		Plugins: map[string]map[string]any{
 			"markedup": {
-				"enabled":    true,
-				"embeddings": map[string]any{"enabled": true},
+				"enabled": true,
+				"embeddings": map[string]any{
+					"enabled": true,
+					// inherit mode requires an explicit embedding model
+					// (see F2 fix); pc.Model is the chat model.
+					"model": "text-embedding-3-small",
+				},
 			},
 		},
 	}
