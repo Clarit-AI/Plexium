@@ -67,6 +67,13 @@ type Daemon struct {
 	runner        RunnerAdapter
 	cascade       *agent.ProviderCascade
 	rateTracker   *agent.RateLimitTracker
+	// apiKeyResolver, when set, is forwarded to bootstrap.Options so
+	// markedup's inherited embedder shares the same credential
+	// resolution (`.plexium/credentials.json` → env) the assistive
+	// cascade uses. The CLI sets this in main.go after NewDaemon;
+	// tests and code paths that don't set it fall back to os.Getenv
+	// inside the bootstrap, preserving prior behavior.
+	apiKeyResolver func(envName string) string
 	pollInterval  time.Duration
 	maxConcurrent int
 	stopCh        chan struct{}
@@ -95,6 +102,17 @@ func NewDaemon(opts DaemonOpts, workspace *WorkspaceMgr, tracker TrackerAdapter,
 		maxConcurrent: opts.MaxConcurrent,
 		stopCh:        make(chan struct{}),
 	}
+}
+
+// SetAPIKeyResolver wires a credential resolver (typically
+// cmd/plexium's loadAPIKey, which checks .plexium/credentials.json
+// before falling back to env) into the daemon. The resolver is
+// forwarded to bootstrap.BuildRegistry so daemon-driven plugin
+// re-enrichment uses the same embeddings credentials as the convert
+// path. Safe to leave unset; the bootstrap then falls back to
+// os.Getenv directly.
+func (d *Daemon) SetAPIKeyResolver(fn func(envName string) string) {
+	d.apiKeyResolver = fn
 }
 
 // Run starts the poll loop. It executes one tick immediately, then ticks on

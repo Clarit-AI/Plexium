@@ -170,8 +170,9 @@ func (d *Daemon) runMarkedupEnrichJob(ctx context.Context, job *upkeepJob) TickA
 	// daemon-driven enrichment on the same daily-spend ledger as
 	// convert-time enrichment.
 	reg, err := bootstrap.BuildRegistry(ctx, d.config.RepoRoot, d.config.Config, bootstrap.Options{
-		Cascade:     d.cascade,
-		RateTracker: d.rateTracker,
+		Cascade:        d.cascade,
+		RateTracker:    d.rateTracker,
+		APIKeyResolver: d.apiKeyResolver,
 	})
 	if err != nil {
 		action.Error = fmt.Sprintf("build registry: %v", err)

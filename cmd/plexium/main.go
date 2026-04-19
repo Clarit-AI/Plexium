@@ -351,6 +351,11 @@ var convertCmd = &cobra.Command{
 			// Without this the convert/MCP paths silently fall outside
 			// the assistive-provider budget.
 			bootstrapOpts.RateTracker = rateTracker
+			// Share the same credential resolver
+			// (.plexium/credentials.json → env fallback) used by
+			// buildCascadeFromConfig so inherited embeddings see the
+			// same key as the LLM cascade.
+			bootstrapOpts.APIKeyResolver = loadAPIKey
 		}
 		reg, err := bootstrap.BuildRegistry(cmd.Context(), repoRoot, cfg, bootstrapOpts)
 		if err != nil {
@@ -1096,6 +1101,10 @@ var daemonCmd = &cobra.Command{
 
 		cascade, rateTracker := buildCascadeFromConfig(cfg)
 		d := daemon.NewDaemon(opts, workspace, tracker, runner, cascade, rateTracker)
+		// Share the same credential resolver the cascade uses so
+		// daemon-driven markedup re-enrichment picks up keys written
+		// by `plexium agent setup` into .plexium/credentials.json.
+		d.SetAPIKeyResolver(loadAPIKey)
 
 		fmt.Printf("Plexium daemon starting (poll=%ds, maxConcurrent=%d)\n", pollInterval, maxConcurrent)
 
@@ -1580,6 +1589,11 @@ var pageidxServeCmd = &cobra.Command{
 			// Without this the convert/MCP paths silently fall outside
 			// the assistive-provider budget.
 			bootstrapOpts.RateTracker = rateTracker
+			// Share the same credential resolver
+			// (.plexium/credentials.json → env fallback) used by
+			// buildCascadeFromConfig so inherited embeddings see the
+			// same key as the LLM cascade.
+			bootstrapOpts.APIKeyResolver = loadAPIKey
 		}
 		reg, err := bootstrap.BuildRegistry(cmd.Context(), repoRoot, cfg, bootstrapOpts)
 		if err != nil {

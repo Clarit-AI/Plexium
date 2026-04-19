@@ -337,6 +337,104 @@ func TestBuildRegistry_EmbeddingsEnabled_InheritFromCascade(t *testing.T) {
 // degradation: embeddings requested but neither an explicit embedder
 // nor a cascade provided. The plugin must still build (keyword-only)
 // and a single warning must surface so the operator can debug.
+// TestBuildRegistry_EmbeddingsEnabled_ExplicitProviderRejectsNonOpenAI
+// is the regression test for the pass-2 finding: the explicit-provider
+// override branch (embeddings.provider != "" && != "inherit") must
+// apply the same OpenAI-compatible guard the inherit loop uses. A
+// config with provider: "ollama" passes ParseConfig.Validate but
+// muembed.NewFromProvider only speaks /v1/embeddings, so it would
+// silently produce broken embeddings at query time. BuildRegistry
+// must drop to keyword-only and log a warning instead.
+func TestBuildRegistry_EmbeddingsEnabled_ExplicitProviderRejectsNonOpenAI(t *testing.T) {
+	var buf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	cfg := &config.Config{
+		Plugins: map[string]map[string]any{
+			"markedup": {
+				"enabled": true,
+				"embeddings": map[string]any{
+					"enabled":  true,
+					"provider": "ollama",
+					"endpoint": "http://localhost:11434",
+					"model":    "nomic-embed-text",
+				},
+			},
+		},
+	}
+	reg, err := bootstrap.BuildRegistry(context.Background(), t.TempDir(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if findRetrieval(t, reg).HasEmbedder() {
+		t.Errorf("retrieval must not wire a non-OpenAI-compatible explicit provider")
+	}
+	if !strings.Contains(buf.String(), "not OpenAI-compatible") {
+		t.Errorf("expected explicit-provider rejection warning; got: %s", buf.String())
+	}
+}
+
+// TestBuildRegistry_EmbeddingsEnabled_APIKeyResolverShared is the
+// regression test for the pass-2 finding: the inherited embedder
+// path used to call os.Getenv directly, bypassing the credential
+// resolver buildCascadeFromConfig uses. A user who set their key
+// via `plexium agent setup` (which writes .plexium/credentials.json)
+// would get a working Tier 2 LLM but an empty-key embedder. We
+// install a fake resolver and assert it's consulted for the
+// expected env name; the embedder is constructed (HasEmbedder true)
+// regardless of the key value, so resolver invocation is the
+// observable signal here.
+func TestBuildRegistry_EmbeddingsEnabled_APIKeyResolverShared(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{
+		AssistiveAgent: config.AssistiveAgent{
+			Providers: []config.ProviderConfig{
+				{
+					Name:      "test",
+					Enabled:   true,
+					Type:      "openai-compatible",
+					Endpoint:  "http://localhost:8080",
+					Model:     "test-model",
+					APIKeyEnv: "PLEXIUM_TEST_API_KEY",
+				},
+			},
+		},
+		Plugins: map[string]map[string]any{
+			"markedup": {
+				"enabled":    true,
+				"embeddings": map[string]any{"enabled": true},
+			},
+		},
+	}
+	provider := agent.NewOllamaProvider("http://localhost:11434", "test",
+		func(ctx context.Context, url, body string) (string, int, error) {
+			return "{}", 0, nil
+		},
+	)
+	cascade := agent.NewCascade([]agent.Provider{provider}, retry.DefaultPolicy())
+
+	var seenEnv string
+	resolver := func(envName string) string {
+		seenEnv = envName
+		return "resolved-key"
+	}
+
+	reg, err := bootstrap.BuildRegistry(context.Background(), t.TempDir(), cfg,
+		bootstrap.Options{Cascade: cascade, APIKeyResolver: resolver},
+	)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !findRetrieval(t, reg).HasEmbedder() {
+		t.Errorf("expected embedder to be wired when cascade + resolver are supplied")
+	}
+	if seenEnv != "PLEXIUM_TEST_API_KEY" {
+		t.Errorf("expected APIKeyResolver to be called with %q, got %q", "PLEXIUM_TEST_API_KEY", seenEnv)
+	}
+}
+
 func TestBuildRegistry_EmbeddingsEnabled_NoCascadeWarns(t *testing.T) {
 	var buf bytes.Buffer
 	prev := log.Writer()

@@ -59,6 +59,29 @@ type Options struct {
 	// (the "inherit" path); this hook exists for tests and for
 	// future explicit-provider configurations.
 	EmbeddingProvider muembed.Embedder
+
+	// APIKeyResolver resolves provider API keys by env-var name.
+	// Callers should pass the same resolver used to build the
+	// assistive cascade (e.g. cmd/plexium's loadAPIKey, which checks
+	// .plexium/credentials.json before falling back to env) so that
+	// inherited embeddings share credentials with the LLM cascade.
+	// When nil, BuildRegistry falls back to os.Getenv — preserving
+	// the legacy behavior for callers (e.g. tests) that don't care
+	// about the credentials store.
+	APIKeyResolver func(envName string) string
+}
+
+// resolveAPIKey returns the API key for envName, using the caller's
+// APIKeyResolver when supplied and falling back to os.Getenv otherwise.
+// An empty envName always returns "" without consulting either source.
+func (o Options) resolveAPIKey(envName string) string {
+	if envName == "" {
+		return ""
+	}
+	if o.APIKeyResolver != nil {
+		return o.APIKeyResolver(envName)
+	}
+	return os.Getenv(envName)
 }
 
 // BuildRegistry constructs a plugin Registry populated with every built-in
@@ -137,7 +160,7 @@ func buildMarkedupRetrieval(mcfg markedup.Config, repoRoot string, cfg *config.C
 
 	embedder := opts.EmbeddingProvider
 	if embedder == nil {
-		embedder = buildInheritedEmbedder(mcfg, cfg, opts.Cascade)
+		embedder = buildInheritedEmbedder(mcfg, cfg, opts)
 	}
 	if embedder == nil {
 		// Reason already logged by buildInheritedEmbedder when applicable.
@@ -162,17 +185,22 @@ func buildMarkedupRetrieval(mcfg markedup.Config, repoRoot string, cfg *config.C
 // are not yet implemented here; ParseConfig.Validate already requires
 // explicit endpoint+model in that mode, so a follow-up can read them
 // directly off mcfg.Embeddings without touching the cascade.
-func buildInheritedEmbedder(mcfg markedup.Config, cfg *config.Config, cascade *agent.ProviderCascade) muembed.Embedder {
+func buildInheritedEmbedder(mcfg markedup.Config, cfg *config.Config, opts Options) muembed.Embedder {
 	if mcfg.Embeddings.Provider != "" && mcfg.Embeddings.Provider != "inherit" {
 		// Explicit provider: build directly from mcfg.Embeddings.
-		// APIKeyEnv resolution is deliberately done by the caller for
-		// the inherit path (via cfg.AssistiveAgent loadAPIKey at the
-		// CLI layer); for an explicit-provider config the env-var
-		// lookup is local to this function.
-		apiKey := ""
-		if mcfg.Embeddings.APIKeyEnv != "" {
-			apiKey = os.Getenv(mcfg.Embeddings.APIKeyEnv)
+		// muembed.NewFromProvider only speaks the OpenAI-compatible
+		// /v1/embeddings protocol — guard the same way the inherit
+		// branch does so that a user-supplied embeddings.provider of
+		// e.g. "ollama" doesn't pass Validate() and then silently
+		// produce broken embeddings at query time.
+		if !isOpenAICompatibleEmbeddingProvider(mcfg.Embeddings.Provider) {
+			log.Printf("plugins.markedup.embeddings: provider %q is not OpenAI-compatible; semantic search disabled", mcfg.Embeddings.Provider)
+			return nil
 		}
+		// API key resolution uses the caller-supplied resolver so the
+		// explicit-provider path also picks up keys written by
+		// `plexium agent setup` into .plexium/credentials.json.
+		apiKey := opts.resolveAPIKey(mcfg.Embeddings.APIKeyEnv)
 		return muembed.NewFromProvider(
 			mcfg.Embeddings.Endpoint,
 			mcfg.Embeddings.Model,
@@ -181,7 +209,7 @@ func buildInheritedEmbedder(mcfg markedup.Config, cfg *config.Config, cascade *a
 		)
 	}
 
-	if cascade == nil || !cascade.HasProviders() {
+	if opts.Cascade == nil || !opts.Cascade.HasProviders() {
 		log.Printf("plugins.markedup.embeddings: enabled but no assistive cascade available; semantic search disabled")
 		return nil
 	}
@@ -199,19 +227,36 @@ func buildInheritedEmbedder(mcfg markedup.Config, cfg *config.Config, cascade *a
 		// don't expose that surface (e.g. ollama's /api/generate,
 		// anthropic's /v1/messages) — wiring them would silently
 		// produce broken embeddings discovered only at query time.
-		if pc.Type != "openai" && pc.Type != "openai-compatible" {
+		if !isOpenAICompatibleEmbeddingProvider(pc.Type) {
 			continue
 		}
 		model := mcfg.Embeddings.Model
 		if model == "" {
 			model = pc.Model
 		}
-		apiKey := ""
-		if pc.APIKeyEnv != "" {
-			apiKey = os.Getenv(pc.APIKeyEnv)
-		}
+		// Use the shared resolver so inherited embeddings see the
+		// same key the cascade does (env OR
+		// .plexium/credentials.json) — without it, a user who set
+		// their key via `plexium agent setup` would have a working
+		// Tier 2 LLM but a broken embedder.
+		apiKey := opts.resolveAPIKey(pc.APIKeyEnv)
 		return muembed.NewFromProvider(pc.Endpoint, model, apiKey, mcfg.Embeddings.Dims)
 	}
 	log.Printf("plugins.markedup.embeddings: no usable assistive provider found; semantic search disabled")
 	return nil
+}
+
+// isOpenAICompatibleEmbeddingProvider reports whether a provider type
+// string can be wired through muembed.NewFromProvider, which only
+// speaks the OpenAI /v1/embeddings protocol. Centralizing the check
+// keeps the explicit-provider branch and the cascade-inherit loop in
+// agreement; adding a new compatible type only needs editing this one
+// helper.
+func isOpenAICompatibleEmbeddingProvider(provider string) bool {
+	switch provider {
+	case "openai", "openai-compatible":
+		return true
+	default:
+		return false
+	}
 }
