@@ -210,6 +210,88 @@ func TestTick_MarkedupEnrichNotStarvedByRunnerGatedJobs(t *testing.T) {
 		"runner-gated debt job must not execute when canExecuteJobs()=false")
 }
 
+// TestRunMarkedupEnrichJob_AdvancesLastEnrichedOnNoOp is the regression
+// test for the infinite-requeue loop fixed alongside this case: with the
+// Phase C "manifest save skipped on semantic-equal enrichment"
+// optimization, a stale page whose graph content was unchanged would be
+// re-detected as stale on every subsequent tick because LastEnriched
+// never advanced. The fix flips the daemon's enricher into a "touch
+// LastEnriched on no-op" mode via bootstrap.Options.DaemonMode.
+//
+// This test simulates exactly that loop end-to-end through the daemon's
+// public surface: queue a stale page, run the enrichment job, then
+// re-run detection and assert no job is queued (because LastEnriched
+// has advanced past the stale cutoff).
+func TestRunMarkedupEnrichJob_AdvancesLastEnrichedOnNoOp(t *testing.T) {
+	stale := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+
+	d := markedupEnrichTestSetup(t, true, "24h", []manifest.PageEntry{
+		// Pre-seed graph fields that match what Tier 1 enrichment will
+		// produce so the enricher's "semantic-equal" branch fires —
+		// this is the exact precondition that triggered the loop.
+		// We don't know the exact enrichment output, so instead we use
+		// a body that produces minimal output and run twice: first run
+		// populates graph fields, second run should be semantic-equal.
+		{WikiPath: "Home.md", Title: "Home", Ownership: "managed", LastEnriched: stale},
+	})
+
+	// Seed the wiki file matching the manifest entry.
+	wikiDir := filepath.Join(d.config.RepoRoot, ".wiki")
+	require.NoError(t, os.WriteFile(
+		filepath.Join(wikiDir, "Home.md"),
+		[]byte("# Home\n\nThis is the home page about #welcome.\n"),
+		0o644,
+	))
+
+	// First detection should queue the stale page.
+	job1, action1 := d.detectMarkedupEnrichJob()
+	require.NotNil(t, job1, "expected initial stale detection to queue a job")
+	require.Equal(t, "queue", action1.Action)
+
+	// Run the enricher. This populates graph fields AND advances
+	// LastEnriched (real change → manifest save).
+	runAction := d.runMarkedupEnrichJob(context.Background(), job1)
+	require.True(t, runAction.Success, "first run should succeed: %+v", runAction)
+
+	// Now manually rewind LastEnriched on the manifest to simulate the
+	// page having been enriched once long ago, with the SAME graph
+	// content the enricher would produce now. This is the exact state
+	// the loop hits: stale timestamp + identical semantic content.
+	mgr, err := manifest.NewManager(manifest.DefaultPath(d.config.RepoRoot))
+	require.NoError(t, err)
+	m, err := mgr.Load()
+	require.NoError(t, err)
+	require.NotEmpty(t, m.Pages[0].LastEnriched, "first run should have populated LastEnriched")
+	m.Pages[0].LastEnriched = stale
+	require.NoError(t, mgr.Save(m))
+
+	// Second detection should re-queue (the page is stale again).
+	job2, action2 := d.detectMarkedupEnrichJob()
+	require.NotNil(t, job2, "expected stale detection to re-queue after timestamp rewind")
+	require.Equal(t, "queue", action2.Action)
+
+	// Second run: graph content is unchanged from the first run. With
+	// the daemon-mode fix, LastEnriched MUST still advance.
+	runAction2 := d.runMarkedupEnrichJob(context.Background(), job2)
+	require.True(t, runAction2.Success, "second run should succeed: %+v", runAction2)
+
+	// Third detection MUST NOT queue: the daemon-mode touch should
+	// have bumped LastEnriched past the stale cutoff. Without the fix,
+	// LastEnriched would still be `stale` and this would re-queue
+	// forever.
+	job3, action3 := d.detectMarkedupEnrichJob()
+	assert.Nil(t, job3, "no job expected after daemon-mode touch advances LastEnriched")
+	assert.Equal(t, TickAction{}, action3, "no tick action expected when no work is needed")
+
+	// Cross-check: the manifest LastEnriched is now recent.
+	m2, err := mgr.Load()
+	require.NoError(t, err)
+	parsed, perr := time.Parse(time.RFC3339, m2.Pages[0].LastEnriched)
+	require.NoError(t, perr, "LastEnriched should be a valid RFC3339 stamp")
+	assert.True(t, time.Since(parsed) < 5*time.Minute,
+		"LastEnriched should be recent after the daemon-mode touch; got %q", m2.Pages[0].LastEnriched)
+}
+
 func TestDetectMarkedupEnrichJob_NoMarkedupConfigBlockNoJob(t *testing.T) {
 	// A daemon whose config has no plugins.markedup block at all must
 	// produce no enrichment job, even with stale pages on disk.

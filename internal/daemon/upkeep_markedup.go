@@ -175,6 +175,13 @@ func (d *Daemon) runMarkedupEnrichJob(ctx context.Context, job *upkeepJob) TickA
 		Cascade:        d.cascade,
 		RateTracker:    d.rateTracker,
 		APIKeyResolver: d.apiKeyResolver,
+		// DaemonMode flips the markedup enricher into "touch
+		// LastEnriched on no-op" mode so a page whose graph content
+		// is unchanged still advances its TTL stamp. Without this,
+		// detectMarkedupEnrichJob would requeue the same page on
+		// every tick forever (Phase C idempotency optimization
+		// would otherwise skip the manifest save).
+		DaemonMode: true,
 	})
 	if err != nil {
 		action.Error = fmt.Sprintf("build registry: %v", err)

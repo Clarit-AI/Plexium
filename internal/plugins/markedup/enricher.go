@@ -75,6 +75,35 @@ type EnricherPlugin struct {
 	// across multiple Process calls; production leaves it nil and falls
 	// back to the package-level log.Printf.
 	warnLogger *log.Logger
+
+	// touchLastEnrichedOnNoOp, when true, forces a manifest write that
+	// bumps LastEnriched even when the semantic graph fields are
+	// unchanged. This breaks an infinite-requeue loop in the daemon:
+	// without it, a stale page whose enrichment produces identical
+	// graph content would skip the manifest save, leave LastEnriched
+	// unchanged, and be re-detected as stale on every subsequent tick.
+	//
+	// Convert-time callers leave this false to preserve the Phase C
+	// idempotency optimization (no disk write when nothing changed);
+	// only the daemon flips it on, since only the daemon owns the
+	// "treat unchanged-but-old as freshly checked" semantics.
+	touchLastEnrichedOnNoOp bool
+}
+
+// SetDaemonMode toggles the "touch LastEnriched on a no-op enrichment"
+// behavior. The daemon calls this after construction so that pages whose
+// graph content is unchanged still advance their LastEnriched timestamp,
+// preventing the daemon's stale-page detector from queuing the same page
+// on every tick forever.
+//
+// Convert and other one-shot callers must NOT set this — they should
+// keep the Phase C idempotency optimization (no manifest write when the
+// graph content matches what's already stored).
+func (p *EnricherPlugin) SetDaemonMode(on bool) {
+	if p == nil {
+		return
+	}
+	p.touchLastEnrichedOnNoOp = on
 }
 
 // NewEnricher constructs an EnricherPlugin from a parsed Config.
@@ -155,6 +184,11 @@ func (p *EnricherPlugin) Process(ctx context.Context, data *plugins.PipelineData
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	applied := 0
+	// touched counts pages whose only change is a daemon-mode
+	// LastEnriched bump (no semantic graph change). It's tracked
+	// separately from applied so we can decide to save the manifest
+	// even when zero pages had real enrichment changes.
+	touched := 0
 
 	// Buffer frontmatter-write tasks rather than flushing per-page. If we
 	// wrote files during the loop and then hit an error on a later page,
@@ -232,7 +266,15 @@ func (p *EnricherPlugin) Process(ctx context.Context, data *plugins.PipelineData
 
 		// Nothing changed in either tier — skip the apply so we don't
 		// re-stamp LastEnriched with identical frontmatter every pass.
+		// In daemon mode we still need to bump LastEnriched so the
+		// daemon's stale-page detector doesn't requeue this page on
+		// every tick; do that via the same touch path used below.
 		if !hasEnrichment {
+			if p.touchLastEnrichedOnNoOp {
+				if touchPageLastEnriched(m, page.WikiPath, now) {
+					touched++
+				}
+			}
 			continue
 		}
 
@@ -249,7 +291,16 @@ func (p *EnricherPlugin) Process(ctx context.Context, data *plugins.PipelineData
 		if manifest.GraphMetadataSemanticEqual(existingMeta, newMeta) {
 			// Idempotent run: the enrichment produced the same graph
 			// content the manifest already has. Skip the apply so we
-			// don't re-stamp LastEnriched or trigger a manifest save.
+			// don't re-stamp LastEnriched or trigger a manifest save —
+			// unless we're in daemon mode, in which case we MUST bump
+			// LastEnriched to break the daemon's infinite-requeue loop
+			// (semantic-equal but past TTL → enricher runs → no save →
+			// still past TTL on the next tick).
+			if p.touchLastEnrichedOnNoOp {
+				if touchPageLastEnriched(m, page.WikiPath, now) {
+					touched++
+				}
+			}
 			continue
 		}
 		// Safe to assume ApplyGraphMetadata returns true here — we
@@ -273,7 +324,7 @@ func (p *EnricherPlugin) Process(ctx context.Context, data *plugins.PipelineData
 		}
 	}
 
-	if applied == 0 {
+	if applied == 0 && touched == 0 {
 		return nil
 	}
 	if err := mgr.Save(m); err != nil {
@@ -290,6 +341,31 @@ func (p *EnricherPlugin) Process(ctx context.Context, data *plugins.PipelineData
 		}
 	}
 	return nil
+}
+
+// touchPageLastEnriched bumps the LastEnriched (and EnrichedBy) field on
+// the manifest entry for wikiPath without touching any of the semantic
+// graph fields. Used by the daemon-mode no-op path to advance the stale
+// detector's TTL clock so the same page isn't requeued every tick.
+//
+// Returns true when the page was found and the timestamp was actually
+// updated (an existing identical timestamp is a no-op and returns
+// false to avoid an unnecessary manifest save). When the page isn't
+// tracked in the manifest, returns false — same contract as
+// ApplyGraphMetadata.
+func touchPageLastEnriched(m *manifest.Manifest, wikiPath, now string) bool {
+	for i := range m.Pages {
+		if m.Pages[i].WikiPath != wikiPath {
+			continue
+		}
+		if m.Pages[i].LastEnriched == now && m.Pages[i].EnrichedBy == EnricherVersion {
+			return false
+		}
+		m.Pages[i].LastEnriched = now
+		m.Pages[i].EnrichedBy = EnricherVersion
+		return true
+	}
+	return false
 }
 
 // toGraphMetadata converts markedup's GraphFrontmatter into the narrower

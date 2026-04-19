@@ -60,6 +60,19 @@ type Options struct {
 	// future explicit-provider configurations.
 	EmbeddingProvider muembed.Embedder
 
+	// DaemonMode signals that this registry is being built for the
+	// daemon's periodic re-enrichment path rather than a one-shot
+	// convert. When true, the markedup enricher bumps LastEnriched on
+	// pages whose graph content is unchanged, preventing the daemon's
+	// stale-page detector from queuing the same page on every tick
+	// (semantic-equal but past TTL → enricher runs → no manifest save
+	// → still past TTL on the next tick — an infinite requeue loop).
+	//
+	// Convert callers leave this false to preserve the Phase C
+	// idempotency optimization (no manifest write when the graph
+	// content matches what's already stored).
+	DaemonMode bool
+
 	// APIKeyResolver resolves provider API keys by env-var name.
 	// Callers should pass the same resolver used to build the
 	// assistive cascade (e.g. cmd/plexium's loadAPIKey, which checks
@@ -120,6 +133,7 @@ func BuildRegistry(ctx context.Context, repoRoot string, cfg *config.Config, opt
 		}
 		if mcfg.Enabled {
 			enricher := buildMarkedupEnricher(mcfg, resolved.Cascade, resolved.RateTracker)
+			enricher.SetDaemonMode(resolved.DaemonMode)
 			if err := reg.Register(enricher); err != nil {
 				return nil, fmt.Errorf("register markedup-enricher: %w", err)
 			}
