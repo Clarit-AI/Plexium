@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/Clarit-AI/markedup/enrich"
@@ -60,6 +61,20 @@ type EnricherPlugin struct {
 	// llm with ModelEnrich=true triggers the warn-and-fallback path
 	// described above.
 	llm LLMProvider
+
+	// missingLLMWarnOnce guards the "ModelEnrich=true but no LLM
+	// provider attached" warning so it logs at most once per process
+	// lifetime. The daemon calls Process every refresh interval; on
+	// large repos with modelEnrich:true and no provider, a per-page
+	// warning would flood logs. Once-per-EnricherPlugin keeps a single
+	// signal visible without spam.
+	missingLLMWarnOnce sync.Once
+
+	// warnLogger is the destination for the missing-LLM warning. Tests
+	// inject a buffered logger to assert the warning fires exactly once
+	// across multiple Process calls; production leaves it nil and falls
+	// back to the package-level log.Printf.
+	warnLogger *log.Logger
 }
 
 // NewEnricher constructs an EnricherPlugin from a parsed Config.
@@ -79,6 +94,24 @@ func NewEnricher(cfg Config) *EnricherPlugin {
 // (equivalent to NewEnricher).
 func NewEnricherWithLLM(cfg Config, llm LLMProvider) *EnricherPlugin {
 	return &EnricherPlugin{cfg: cfg, llm: llm}
+}
+
+// warnMissingLLMOnce emits the "ModelEnrich=true but no LLM provider
+// attached" warning at most once per EnricherPlugin instance. It uses
+// p.warnLogger when set (tests) and falls back to the package log
+// otherwise. The page-path is intentionally omitted from the once-only
+// message because the warning concerns plugin configuration, not any
+// individual page — operators tail logs for "missing provider", not
+// for one specific WikiPath.
+func (p *EnricherPlugin) warnMissingLLMOnce() {
+	p.missingLLMWarnOnce.Do(func() {
+		const msg = "markedup: ModelEnrich=true but no LLM provider attached; falling back to Tier 1 (this warning is logged once per process)"
+		if p.warnLogger != nil {
+			p.warnLogger.Print(msg)
+			return
+		}
+		log.Print(msg)
+	})
 }
 
 // HasLLMProvider reports whether the enricher has a non-nil Tier 2 LLM
@@ -179,7 +212,7 @@ func (p *EnricherPlugin) Process(ctx context.Context, data *plugins.PipelineData
 		// is misconfigured or temporarily unavailable.
 		if p.cfg.ModelEnrich {
 			if p.llm == nil {
-				log.Printf("markedup: ModelEnrich=true but no LLM provider attached; falling back to Tier 1 for %s", page.WikiPath)
+				p.warnMissingLLMOnce()
 			} else {
 				model, summary, mErr := p.llm.ExtractGraph(ctx, enriched.Body)
 				if mErr != nil {

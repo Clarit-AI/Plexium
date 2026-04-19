@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,6 +64,7 @@ func (d *Daemon) markedupConfig() (markedup.Config, bool) {
 	}
 	cfg, err := markedup.ParseConfig(raw)
 	if err != nil {
+		log.Printf("plugins.markedup: invalid config; markedup daemon watch disabled: %v", err)
 		return markedup.Config{}, false
 	}
 	if !cfg.Enabled {

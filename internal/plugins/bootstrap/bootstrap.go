@@ -73,13 +73,22 @@ type Options struct {
 
 // resolveAPIKey returns the API key for envName, using the caller's
 // APIKeyResolver when supplied and falling back to os.Getenv otherwise.
-// An empty envName always returns "" without consulting either source.
+//
+// The resolver is consulted FIRST, even when envName is empty. This is
+// deliberate: callers like cmd/plexium's loadAPIKey can resolve a key
+// from .plexium/credentials.json without an env-var name (the credentials
+// store is keyed by provider, not by env). Short-circuiting on empty
+// envName before invoking the resolver would skip that path entirely
+// and silently break embeddings/Tier 2 for credentials-store users.
+//
+// When no resolver is supplied, an empty envName returns "" (os.Getenv("")
+// would return "" too, but this avoids the syscall).
 func (o Options) resolveAPIKey(envName string) string {
-	if envName == "" {
-		return ""
-	}
 	if o.APIKeyResolver != nil {
 		return o.APIKeyResolver(envName)
+	}
+	if envName == "" {
+		return ""
 	}
 	return os.Getenv(envName)
 }

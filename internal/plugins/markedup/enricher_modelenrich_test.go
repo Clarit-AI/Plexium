@@ -231,3 +231,49 @@ func TestEnricherPlugin_ModelEnrichNilResultIsNoOp(t *testing.T) {
 		t.Errorf("nil model result with no Tier 1 should leave manifest at v1, got %d", m.Version)
 	}
 }
+
+// TestEnricherPlugin_ModelEnrichMissingLLMWarnsOnlyOnce is the regression
+// test for the pass-3 finding: the missing-LLM warning lived inside the
+// per-page loop, so a daemon refresh on a 1000-page repo would emit 1000
+// identical warnings every TTL cycle. The fix moved the warning behind a
+// sync.Once guard on EnricherPlugin. We exercise three pages across two
+// Process calls (six potential log sites) and assert exactly one warning
+// is observed.
+func TestEnricherPlugin_ModelEnrichMissingLLMWarnsOnlyOnce(t *testing.T) {
+	repoRoot, wikiRoot := setupWikiFixture(t, map[string]string{
+		"a.md": "# A\n\n[[b]]\n",
+		"b.md": "# B\n\n[[c]]\n",
+		"c.md": "# C\n\n[[a]]\n",
+	})
+
+	var buf bytes.Buffer
+	// Inject a logger so this test does not race with other tests'
+	// log.SetOutput swaps and so the assertion is hermetic.
+	p := NewEnricher(Config{
+		Enabled:     true,
+		AutoEnrich:  true,
+		ModelEnrich: true,
+	})
+	p.warnLogger = log.New(&buf, "", 0)
+
+	pages := []plugins.PipelinePage{
+		{WikiPath: "a.md", Title: "A"},
+		{WikiPath: "b.md", Title: "B"},
+		{WikiPath: "c.md", Title: "C"},
+	}
+
+	for i := 0; i < 2; i++ {
+		if err := p.Process(context.Background(), &plugins.PipelineData{
+			RepoRoot: repoRoot,
+			WikiRoot: wikiRoot,
+			Pages:    pages,
+		}); err != nil {
+			t.Fatalf("process pass %d: %v", i, err)
+		}
+	}
+
+	count := strings.Count(buf.String(), "no LLM provider attached")
+	if count != 1 {
+		t.Errorf("expected missing-LLM warning to fire exactly once across 2 Process calls over 3 pages; got %d.\nlog:\n%s", count, buf.String())
+	}
+}

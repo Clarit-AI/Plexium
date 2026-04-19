@@ -62,8 +62,11 @@ func TestBuildRegistry_EmptyConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildRegistry(empty cfg): unexpected error: %v", err)
 	}
-	if reg == nil || reg.PluginCount() != 0 {
-		t.Fatalf("BuildRegistry(empty cfg): want empty registry, got count=%d", reg.PluginCount())
+	if reg == nil {
+		t.Fatal("BuildRegistry(empty cfg): registry must never be nil")
+	}
+	if got := reg.PluginCount(); got != 0 {
+		t.Fatalf("BuildRegistry(empty cfg): want empty registry, got count=%d", got)
 	}
 }
 
