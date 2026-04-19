@@ -360,11 +360,17 @@ func (c Config) Validate() error {
 		return fmt.Errorf("markedup.reranking: model is required when reranking is enabled")
 	}
 	if c.Daemon.RefreshInterval != "" {
-		// Surface a typo'd duration at config-load time rather than
-		// silently falling through to the 24h default at daemon-tick
-		// time, where the user has no easy way to see the fallback.
-		if _, err := time.ParseDuration(c.Daemon.RefreshInterval); err != nil {
+		// Surface a typo'd or non-positive duration at config-load
+		// time rather than silently falling through to the 24h
+		// default at daemon-tick time, where the user has no easy
+		// way to see the fallback. RefreshIntervalDuration() also
+		// rejects parsed <= 0 — keep the two checks in lockstep.
+		parsed, err := time.ParseDuration(c.Daemon.RefreshInterval)
+		if err != nil {
 			return fmt.Errorf("markedup.daemon.refreshInterval: invalid duration %q: %w", c.Daemon.RefreshInterval, err)
+		}
+		if parsed <= 0 {
+			return fmt.Errorf("markedup.daemon.refreshInterval: must be positive, got %q", c.Daemon.RefreshInterval)
 		}
 	}
 	return nil

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Clarit-AI/markedup/enrich"
 
@@ -23,17 +25,24 @@ import (
 // enricher treats that as a non-fatal Tier 2 failure (logs + falls back
 // to Tier 1) so a flaky model doesn't abort the entire convert pass.
 type CascadeLLMProvider struct {
-	Cascade *agent.ProviderCascade
+	Cascade     *agent.ProviderCascade
+	RateTracker *agent.RateLimitTracker // optional; records token/cost per call when non-nil
 }
 
 // NewCascadeLLMProvider constructs a CascadeLLMProvider. Returns nil if
 // cascade is nil or has no usable providers — callers should treat a nil
 // return as "Tier 2 unavailable" and skip wiring.
-func NewCascadeLLMProvider(cascade *agent.ProviderCascade) *CascadeLLMProvider {
+//
+// rateTracker is optional: when non-nil, every successful ExtractGraph
+// call records the underlying provider's TokensUsed/CostUSD against the
+// daily-spend ledger so convert-time enrichment is budgeted alongside
+// the daemon's lint/debt jobs and `agent spend` reports. Pass nil to
+// disable budget recording (calls still succeed).
+func NewCascadeLLMProvider(cascade *agent.ProviderCascade, rateTracker *agent.RateLimitTracker) *CascadeLLMProvider {
 	if cascade == nil || !cascade.HasProviders() {
 		return nil
 	}
-	return &CascadeLLMProvider{Cascade: cascade}
+	return &CascadeLLMProvider{Cascade: cascade, RateTracker: rateTracker}
 }
 
 // extractResponse is the JSON shape we ask the model to produce. It
@@ -54,6 +63,15 @@ func (a *CascadeLLMProvider) ExtractGraph(ctx context.Context, body string) (*en
 	completion, err := a.Cascade.Complete(ctx, prompt)
 	if err != nil {
 		return nil, "", fmt.Errorf("markedup: cascade.Complete: %w", err)
+	}
+
+	// Best-effort: record this call against the daily-spend ledger so
+	// the convert path's Tier 2 usage shows up in `agent spend`. A
+	// failure here must not abort enrichment — log and continue.
+	if a.RateTracker != nil && completion != nil && completion.Provider != "" {
+		if err := a.RateTracker.Record(completion.Provider, completion.TokensUsed, completion.CostUSD); err != nil {
+			log.Printf("markedup: rate tracker record (%s): %v", completion.Provider, err)
+		}
 	}
 
 	raw := strings.TrimSpace(completion.Response)
@@ -83,7 +101,15 @@ func buildExtractionPrompt(body string) string {
 	const maxBody = 8000
 	trimmed := body
 	if len(trimmed) > maxBody {
-		trimmed = trimmed[:maxBody]
+		// Back up to the nearest UTF-8 rune boundary so we don't
+		// slice mid-sequence — multibyte runes (smart quotes, emoji,
+		// non-Latin prose) would otherwise leave an invalid tail
+		// that some tokenizers reject or render as replacement chars.
+		cut := maxBody
+		for cut > 0 && !utf8.RuneStart(trimmed[cut]) {
+			cut--
+		}
+		trimmed = trimmed[:cut]
 	}
 
 	var b strings.Builder

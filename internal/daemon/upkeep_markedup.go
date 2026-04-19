@@ -162,7 +162,17 @@ func (d *Daemon) runMarkedupEnrichJob(ctx context.Context, job *upkeepJob) TickA
 		return action
 	}
 
-	reg, err := bootstrap.BuildRegistry(ctx, d.config.RepoRoot, d.config.Config)
+	// Pass the assistive cascade so markedup's Tier 2 enrichment
+	// (modelEnrich: true) can construct an LLM-backed extractor for
+	// periodic refreshes. Without this, BuildRegistry receives a nil
+	// cascade and silently degrades to Tier 1, contradicting the user's
+	// modelEnrich opt-in on every 24h cycle. The rate tracker keeps
+	// daemon-driven enrichment on the same daily-spend ledger as
+	// convert-time enrichment.
+	reg, err := bootstrap.BuildRegistry(ctx, d.config.RepoRoot, d.config.Config, bootstrap.Options{
+		Cascade:     d.cascade,
+		RateTracker: d.rateTracker,
+	})
 	if err != nil {
 		action.Error = fmt.Sprintf("build registry: %v", err)
 		return action

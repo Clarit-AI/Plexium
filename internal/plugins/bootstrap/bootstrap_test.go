@@ -179,6 +179,47 @@ func TestBuildRegistry_MarkedupModelEnrichWithCascade(t *testing.T) {
 	if len(pipelinePlugins) != 1 || pipelinePlugins[0].Name() != "markedup-enricher" {
 		t.Fatalf("expected markedup-enricher registered, got %+v", pipelinePlugins)
 	}
+	// Pin the cascade-reached-enricher invariant: the daemon path used
+	// to call BuildRegistry without bootstrap.Options, silently nil-ing
+	// the cascade and degrading to Tier 1 on every periodic refresh.
+	// HasLLMProvider() proves the cascade actually produced an
+	// LLMProvider that was wired into the EnricherPlugin.
+	enricher, ok := pipelinePlugins[0].(*markedup.EnricherPlugin)
+	if !ok {
+		t.Fatalf("expected *markedup.EnricherPlugin, got %T", pipelinePlugins[0])
+	}
+	if !enricher.HasLLMProvider() {
+		t.Fatal("expected EnricherPlugin to have a Tier 2 LLM provider when cascade is supplied via bootstrap.Options")
+	}
+}
+
+// TestBuildRegistry_MarkedupModelEnrich_CascadeOmittedDegradesToTier1
+// is the regression test for the daemon-path bug where
+// runMarkedupEnrichJob called BuildRegistry without bootstrap.Options.
+// When no Options is passed (cascade defaults to nil) AND modelEnrich
+// is true, the enricher must end up with no LLMProvider attached — the
+// expected degraded-but-correct behavior. Pairing this with the
+// MarkedupModelEnrichWithCascade case above guards against regressions
+// in either direction (always-attached or never-attached).
+func TestBuildRegistry_MarkedupModelEnrich_CascadeOmittedDegradesToTier1(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{
+		Plugins: map[string]map[string]any{
+			"markedup": {"enabled": true, "modelEnrich": true},
+		},
+	}
+	reg, err := bootstrap.BuildRegistry(context.Background(), "/tmp/repo", cfg) // no Options
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	pipelinePlugins := reg.PipelinePlugins(plugins.StageAfterWrite)
+	if len(pipelinePlugins) != 1 {
+		t.Fatalf("expected 1 pipeline plugin, got %d", len(pipelinePlugins))
+	}
+	enricher := pipelinePlugins[0].(*markedup.EnricherPlugin)
+	if enricher.HasLLMProvider() {
+		t.Fatal("expected nil LLMProvider when no cascade Options provided (degraded Tier-1 path)")
+	}
 }
 
 func TestBuildRegistry_MarkedupInvalidConfig(t *testing.T) {

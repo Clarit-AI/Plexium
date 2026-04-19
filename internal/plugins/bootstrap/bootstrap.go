@@ -45,6 +45,14 @@ type Options struct {
 	// receives an LLMProvider that delegates to this cascade.
 	Cascade *agent.ProviderCascade
 
+	// RateTracker, when non-nil, is used by the markedup LLM adapter
+	// to record per-provider token usage and cost after every Tier 2
+	// extraction call so convert-time enrichment is budgeted against
+	// the same daily-spend ledger the daemon and `agent spend` use.
+	// A nil tracker disables budget recording (calls still succeed)
+	// — useful for tests and short-lived one-off runs.
+	RateTracker *agent.RateLimitTracker
+
 	// EmbeddingProvider, when non-nil, lets a caller supply a fully
 	// constructed markedup embedder. Most callers should leave this
 	// nil and let BuildRegistry build one from cfg.AssistiveAgent
@@ -79,7 +87,7 @@ func BuildRegistry(ctx context.Context, repoRoot string, cfg *config.Config, opt
 			return nil, fmt.Errorf("plugins.markedup: %w", err)
 		}
 		if mcfg.Enabled {
-			enricher := buildMarkedupEnricher(mcfg, resolved.Cascade)
+			enricher := buildMarkedupEnricher(mcfg, resolved.Cascade, resolved.RateTracker)
 			if err := reg.Register(enricher); err != nil {
 				return nil, fmt.Errorf("register markedup-enricher: %w", err)
 			}
@@ -99,11 +107,11 @@ func BuildRegistry(ctx context.Context, repoRoot string, cfg *config.Config, opt
 // is requested but the cascade is nil or has no usable providers, we
 // log a warning and return a Tier-1-only enricher so the convert
 // pipeline can still run.
-func buildMarkedupEnricher(mcfg markedup.Config, cascade *agent.ProviderCascade) *markedup.EnricherPlugin {
+func buildMarkedupEnricher(mcfg markedup.Config, cascade *agent.ProviderCascade, rateTracker *agent.RateLimitTracker) *markedup.EnricherPlugin {
 	if !mcfg.ModelEnrich {
 		return markedup.NewEnricher(mcfg)
 	}
-	llm := markedup.NewCascadeLLMProvider(cascade)
+	llm := markedup.NewCascadeLLMProvider(cascade, rateTracker)
 	if llm == nil {
 		log.Printf("plugins.markedup: modelEnrich is enabled but no assistive provider is configured; Tier 2 disabled")
 		return markedup.NewEnricher(mcfg)
@@ -184,6 +192,14 @@ func buildInheritedEmbedder(mcfg markedup.Config, cfg *config.Config, cascade *a
 	// Pick the first enabled, non-inherit provider with an endpoint.
 	for _, pc := range cfg.AssistiveAgent.Providers {
 		if !pc.Enabled || pc.Type == "inherit" || pc.Endpoint == "" {
+			continue
+		}
+		// muembed.NewFromProvider speaks the OpenAI-compatible
+		// /v1/embeddings protocol. Skip provider types whose APIs
+		// don't expose that surface (e.g. ollama's /api/generate,
+		// anthropic's /v1/messages) — wiring them would silently
+		// produce broken embeddings discovered only at query time.
+		if pc.Type != "openai" && pc.Type != "openai-compatible" {
 			continue
 		}
 		model := mcfg.Embeddings.Model

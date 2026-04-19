@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -125,6 +126,88 @@ func TestDetectMarkedupEnrichJob_DefaultTTLIs24h(t *testing.T) {
 
 	job2, _ := d2.detectMarkedupEnrichJob()
 	require.NotNil(t, job2, "25h-old entry must be stale at the 24h default")
+}
+
+// TestTick_MarkedupEnrichNotStarvedByRunnerGatedJobs is the regression
+// test for the starvation bug fixed alongside this case: tick used to
+// only consider jobs[0]. With debt > threshold (a runner-gated
+// "auto-fix" job that sorts ahead of markedup-enrich) AND a stale
+// markedup page, an unconfigured runner (canExecuteJobs() == false)
+// caused the markedup-enrich job at jobs[1..] to be skipped every tick
+// — even though it runs in-process and needs no runner.
+//
+// The fix scans the queue for markedup-enrich and runs it unconditionally
+// before falling through to the runner-gated dispatch. This test pins
+// that invariant: with no runner configured and both job types queued,
+// markedup-enrich must still execute (via runMarkedupEnrichJob), while
+// debt is left unrun.
+func TestTick_MarkedupEnrichNotStarvedByRunnerGatedJobs(t *testing.T) {
+	stale := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+
+	cfg := &config.Config{
+		Wiki: config.Wiki{Root: ".wiki"},
+		Plugins: map[string]map[string]any{
+			"markedup": {
+				"enabled":    true,
+				"autoEnrich": true,
+				"daemon":     map[string]any{"refreshInterval": "24h"},
+			},
+		},
+	}
+
+	d, repoRoot := newTestDaemon(t, DaemonOpts{
+		Config: cfg,
+		// No RunnerName -> canExecuteJobs() == false. This is exactly
+		// the configuration where the bug manifested: a user enables
+		// the markedup plugin without ever configuring a coding-agent
+		// runner because enrichment doesn't need one.
+		Watches: WatchOpts{
+			Debt: WatchDef{Enabled: true, Action: "auto-fix", Threshold: "1"},
+		},
+	})
+
+	// Create wiki + manifest so detectMarkedupEnrichJob fires.
+	require.NoError(t, os.MkdirAll(filepath.Join(repoRoot, ".plexium"), 0o755))
+	wikiDir := filepath.Join(repoRoot, ".wiki")
+	require.NoError(t, os.MkdirAll(wikiDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(wikiDir, "Home.md"), []byte("# Home\n"), 0o644))
+
+	mgr, err := manifest.NewManager(manifest.DefaultPath(repoRoot))
+	require.NoError(t, err)
+	m := manifest.NewEmptyManifest()
+	m.Pages = []manifest.PageEntry{
+		{WikiPath: "Home.md", Title: "Home", Ownership: "managed", LastEnriched: stale},
+	}
+	require.NoError(t, mgr.Save(m))
+
+	// Create wiki log with WIKI-DEBT entries so detectDebtJob fires
+	// above its threshold and emits a runner-gated job.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(wikiDir, "_log.md"),
+		[]byte("WIKI-DEBT: a\nWIKI-DEBT: b\nWIKI-DEBT: c\n"),
+		0o644,
+	))
+
+	// Sanity-check the precondition the bug depends on: the runner is
+	// not configured, so canExecuteJobs() must return false. Without
+	// this the test would pass trivially via the gated-dispatch path.
+	require.False(t, d.canExecuteJobs(), "test precondition: canExecuteJobs() must be false")
+
+	actions := d.tick(context.Background())
+
+	var sawMarkedupExecute, sawDebtExecute bool
+	for _, a := range actions {
+		if a.Watch == "markedup" && a.Action == "execute" {
+			sawMarkedupExecute = true
+		}
+		if a.Watch == "debt" && (a.Action == "execute" || a.Action == "dispatch") {
+			sawDebtExecute = true
+		}
+	}
+	assert.True(t, sawMarkedupExecute,
+		"markedup-enrich must execute even when a runner-gated job is queued ahead of it; got actions=%+v", actions)
+	assert.False(t, sawDebtExecute,
+		"runner-gated debt job must not execute when canExecuteJobs()=false")
 }
 
 func TestDetectMarkedupEnrichJob_NoMarkedupConfigBlockNoJob(t *testing.T) {

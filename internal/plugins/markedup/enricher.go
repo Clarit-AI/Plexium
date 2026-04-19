@@ -47,12 +47,19 @@ type LLMProvider interface {
 // WriteEnrichedFrontmatter config flag is true, the enriched frontmatter
 // is also written back into the .wiki/ files.
 //
-// Tier 2 (LLM-based) extraction is planned but not yet implemented in this
-// plugin; callers can enable it via the ModelEnrich config flag once the
-// assistive-agent wiring lands.
+// Tier 2 (LLM-based) extraction runs when cfg.ModelEnrich is true AND an
+// LLMProvider has been attached via NewEnricherWithLLM. The bootstrap layer
+// owns this wiring: it builds a CascadeLLMProvider over the assistive
+// agent's ProviderCascade and passes it in here. When ModelEnrich is on
+// but the provider is nil (no usable assistive cascade configured), the
+// enricher logs a warning at Process time and continues with Tier 1 only
+// — keeping convert/daemon usable instead of failing the whole pipeline.
 type EnricherPlugin struct {
 	cfg Config
-	llm LLMProvider // optional; required when cfg.ModelEnrich is true
+	// llm is optional. Required when cfg.ModelEnrich is true; a nil
+	// llm with ModelEnrich=true triggers the warn-and-fallback path
+	// described above.
+	llm LLMProvider
 }
 
 // NewEnricher constructs an EnricherPlugin from a parsed Config.
@@ -72,6 +79,13 @@ func NewEnricher(cfg Config) *EnricherPlugin {
 // (equivalent to NewEnricher).
 func NewEnricherWithLLM(cfg Config, llm LLMProvider) *EnricherPlugin {
 	return &EnricherPlugin{cfg: cfg, llm: llm}
+}
+
+// HasLLMProvider reports whether the enricher has a non-nil Tier 2 LLM
+// attached. Exposed for bootstrap-layer tests that need to assert the
+// caller's cascade reached the plugin without poking at unexported fields.
+func (p *EnricherPlugin) HasLLMProvider() bool {
+	return p != nil && p.llm != nil
 }
 
 // Plugin interface

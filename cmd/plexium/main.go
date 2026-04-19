@@ -343,8 +343,14 @@ var convertCmd = &cobra.Command{
 		// CLI uses. A nil cascade silently disables those tiers.
 		var bootstrapOpts bootstrap.Options
 		if cfg != nil {
-			cascade, _ := buildCascadeFromConfig(cfg)
+			cascade, rateTracker := buildCascadeFromConfig(cfg)
 			bootstrapOpts.Cascade = cascade
+			// Propagate the rate-limit tracker so Tier 2 LLM calls
+			// record token usage against the same daily-spend ledger
+			// the daemon path (NewDaemon) and `agent spend` use.
+			// Without this the convert/MCP paths silently fall outside
+			// the assistive-provider budget.
+			bootstrapOpts.RateTracker = rateTracker
 		}
 		reg, err := bootstrap.BuildRegistry(cmd.Context(), repoRoot, cfg, bootstrapOpts)
 		if err != nil {
@@ -1566,8 +1572,14 @@ var pageidxServeCmd = &cobra.Command{
 		// pre-D4 behavior for unconfigured projects.
 		var bootstrapOpts bootstrap.Options
 		if cfg != nil {
-			cascade, _ := buildCascadeFromConfig(cfg)
+			cascade, rateTracker := buildCascadeFromConfig(cfg)
 			bootstrapOpts.Cascade = cascade
+			// Propagate the rate-limit tracker so Tier 2 LLM calls
+			// record token usage against the same daily-spend ledger
+			// the daemon path (NewDaemon) and `agent spend` use.
+			// Without this the convert/MCP paths silently fall outside
+			// the assistive-provider budget.
+			bootstrapOpts.RateTracker = rateTracker
 		}
 		reg, err := bootstrap.BuildRegistry(cmd.Context(), repoRoot, cfg, bootstrapOpts)
 		if err != nil {

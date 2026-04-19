@@ -197,10 +197,10 @@ func TestEnricherPlugin_ModelEnrichLLMErrorIsNonFatal(t *testing.T) {
 	}
 }
 
-// TestEnricherPlugin_ModelEnrichOnlyAppliesWhenLLMReturnsContent
-// verifies that when AutoEnrich=false and Tier 2 returns nil model
-// (e.g. model declined to extract), the enricher does NOT bump the
-// manifest. This guards against re-stamping on every pipeline pass.
+// TestEnricherPlugin_ModelEnrichNilResultIsNoOp verifies that when
+// AutoEnrich=false and Tier 2 returns nil model (e.g. model declined to
+// extract), the enricher does NOT bump the manifest. This guards against
+// re-stamping on every pipeline pass.
 func TestEnricherPlugin_ModelEnrichNilResultIsNoOp(t *testing.T) {
 	repoRoot, wikiRoot := setupWikiFixture(t, map[string]string{
 		"a.md": "# A\n\n[[b]]",

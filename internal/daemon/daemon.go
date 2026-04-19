@@ -148,13 +148,20 @@ func (d *Daemon) tick(ctx context.Context) []TickAction {
 	if len(jobs) == 0 {
 		return actions
 	}
-	job := jobs[0]
-	if job.Type == jobTypeMarkedupEnrich {
-		actions = append(actions, d.runMarkedupEnrichJob(ctx, job))
-		return actions
+	// Always drain in-process markedup-enrich jobs first; they don't
+	// need a runner/cascade and must not be starved by runner-gated
+	// jobs (lint/debt/repo-drift) that cannot execute when the daemon
+	// has no runner configured.
+	var remaining []*upkeepJob
+	for _, j := range jobs {
+		if j.Type == jobTypeMarkedupEnrich {
+			actions = append(actions, d.runMarkedupEnrichJob(ctx, j))
+			continue
+		}
+		remaining = append(remaining, j)
 	}
-	if d.canExecuteJobs() {
-		actions = append(actions, d.executeJob(ctx, job))
+	if len(remaining) > 0 && d.canExecuteJobs() {
+		actions = append(actions, d.executeJob(ctx, remaining[0]))
 	}
 	return actions
 }
