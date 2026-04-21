@@ -189,6 +189,7 @@ func (d *Daemon) runTick(ctx context.Context) {
 	d.writeTickStarted(startedAt)
 	actions := d.tick(ctx)
 	d.writeTickCompleted(startedAt, actions)
+	d.sweepStaleWorktrees()
 }
 
 // countDebtEntries counts lines containing "WIKI-DEBT" in the given file.
@@ -272,7 +273,9 @@ func (d *Daemon) handleAction(watch, action, target string) TickAction {
 			ta.Success = true
 		}
 
-		_ = d.workspace.Cleanup(wt.ID)
+		if err := d.workspace.Cleanup(wt.ID); err != nil {
+			fmt.Fprintf(os.Stderr, "daemon: cleanup %s: %v\n", wt.ID, err)
+		}
 
 	default:
 		ta.Success = false
@@ -312,6 +315,35 @@ func (d *Daemon) lifecycleContext() context.Context {
 		return d.runCtx
 	}
 	return context.Background()
+}
+
+// ---------------------------------------------------------------------------
+// Stale worktree sweep
+// ---------------------------------------------------------------------------
+
+// staleWorktreeAge is how old a completed/failed worktree must be before the
+// periodic sweep will clean it up.
+const staleWorktreeAge = 1 * time.Hour
+
+// sweepStaleWorktrees removes completed and failed worktrees older than
+// staleWorktreeAge. Called at the end of each tick so orphaned worktrees from
+// failed cleanup defers are eventually reclaimed.
+func (d *Daemon) sweepStaleWorktrees() {
+	worktrees, err := d.workspace.List()
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-staleWorktreeAge)
+	for _, wt := range worktrees {
+		if wt.Status != "completed" && wt.Status != "failed" {
+			continue
+		}
+		if wt.StartedAt.Before(cutoff) {
+			if err := d.workspace.Cleanup(wt.ID); err != nil {
+				fmt.Fprintf(os.Stderr, "daemon: stale sweep cleanup %s: %v\n", wt.ID, err)
+			}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

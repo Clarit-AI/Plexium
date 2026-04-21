@@ -59,8 +59,9 @@ type BudgetConfig struct {
 // DaemonConfig configures the autonomous maintenance loop.
 type DaemonConfig struct {
 	Enabled       bool        `yaml:"enabled"`
-	PollInterval  int         `yaml:"pollInterval"` // seconds
+	PollInterval  int         `yaml:"pollInterval"`  // seconds
 	MaxConcurrent int         `yaml:"maxConcurrent"`
+	MaxWorktrees  int         `yaml:"maxWorktrees"`  // hard cap on total worktrees on disk (default 10)
 	ExecutionMode string      `yaml:"executionMode"` // coding-agent-primary | provider-primary
 	Runner        string      `yaml:"runner"`        // claude | codex | gemini | noop
 	RunnerModel   string      `yaml:"runnerModel"`   // optional model override for runner

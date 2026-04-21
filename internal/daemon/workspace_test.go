@@ -229,7 +229,7 @@ func TestWorkspaceMgr_Create_EnforcesTotalCap(t *testing.T) {
 	mgr := newTestMgr(t)
 
 	// Fill to the cap.
-	for i := range MaxWorktrees {
+	for i := range DefaultMaxWorktrees {
 		_, err := mgr.Create(fmt.Sprintf("CAP-%d", i))
 		require.NoError(t, err, "expected create to succeed for worktree %d", i)
 	}
@@ -245,7 +245,7 @@ func TestWorkspaceMgr_Create_CapReleasedAfterCleanup(t *testing.T) {
 
 	// Fill to the cap.
 	var firstID string
-	for i := range MaxWorktrees {
+	for i := range DefaultMaxWorktrees {
 		wt, err := mgr.Create(fmt.Sprintf("REL-%d", i))
 		require.NoError(t, err)
 		if i == 0 {
@@ -366,4 +366,82 @@ func TestNewWorkspaceMgr(t *testing.T) {
 	assert.Equal(t, "/repo/.plexium/workspaces", mgr.basePath)
 	assert.Equal(t, "/repo", mgr.repoRoot)
 	assert.NotNil(t, mgr.gitExec)
+}
+
+// ---------------------------------------------------------------------------
+// CleanupOrphans
+// ---------------------------------------------------------------------------
+
+func TestWorkspaceMgr_CleanupOrphans(t *testing.T) {
+	mgr := newTestMgr(t)
+
+	// Create three worktrees.
+	wtRun, err := mgr.Create("ORPHAN-RUN")
+	require.NoError(t, err)
+	wtAtt, err := mgr.Create("ORPHAN-ATT")
+	require.NoError(t, err)
+	wtComp, err := mgr.Create("ORPHAN-COMP")
+	require.NoError(t, err)
+
+	// Set statuses: running (default), attention_needed, completed.
+	require.NoError(t, mgr.UpdateStatus(wtAtt.ID, "attention_needed"))
+	require.NoError(t, mgr.UpdateStatus(wtComp.ID, "completed"))
+
+	// Verify all three exist.
+	list, err := mgr.List()
+	require.NoError(t, err)
+	assert.Len(t, list, 3)
+
+	// CleanupOrphans should only remove the running one.
+	cleaned, err := mgr.CleanupOrphans()
+	require.NoError(t, err)
+	assert.Equal(t, 1, cleaned)
+
+	// running should be gone; attention_needed and completed preserved.
+	_, err = mgr.Get(wtRun.ID)
+	assert.Error(t, err)
+
+	gotAtt, err := mgr.Get(wtAtt.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "attention_needed", gotAtt.Status)
+
+	gotComp, err := mgr.Get(wtComp.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", gotComp.Status)
+}
+
+// ---------------------------------------------------------------------------
+// SetMaxWorktrees
+// ---------------------------------------------------------------------------
+
+func TestWorkspaceMgr_SetMaxWorktrees(t *testing.T) {
+	mgr := newTestMgr(t)
+
+	// Default cap should be DefaultMaxWorktrees.
+	assert.Equal(t, DefaultMaxWorktrees, mgr.MaxWorktreeCap())
+
+	// Set a lower custom cap.
+	mgr.SetMaxWorktrees(3)
+	assert.Equal(t, 3, mgr.MaxWorktreeCap())
+
+	// Fill to the custom cap.
+	for i := 0; i < 3; i++ {
+		_, err := mgr.Create(fmt.Sprintf("CUSTOM-%d", i))
+		require.NoError(t, err)
+	}
+
+	// Fourth must be rejected.
+	_, err := mgr.Create("CUSTOM-overflow")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "total worktree limit reached")
+}
+
+func TestWorkspaceMgr_SetMaxWorktrees_Clamped(t *testing.T) {
+	mgr := newTestMgr(t)
+	// Values below 1 are clamped to 1.
+	mgr.SetMaxWorktrees(0)
+	assert.Equal(t, 1, mgr.MaxWorktreeCap())
+
+	mgr.SetMaxWorktrees(-5)
+	assert.Equal(t, 1, mgr.MaxWorktreeCap())
 }

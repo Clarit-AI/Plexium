@@ -44,7 +44,7 @@ var rootCmd = &cobra.Command{
 	Short:         "Self-documenting repositories via LLM Wiki pattern",
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	Long: `Plexium transforms repositories into self-documenting systems by applying 
+	Long: `Plexium transforms repositories into self-documentinging systems by applying 
 Karpathy's LLM Wiki pattern to agentic coding workflows. Instead of stateless RAG 
 rediscovery on every session, LLM coding agents incrementally build and maintain 
 a persistent, interlinked wiki — a compiled knowledge layer that compounds with 
@@ -64,6 +64,7 @@ func init() {
 	initCmd.Flags().Bool("with-memento", false, "Initialize memento session tracking")
 	initCmd.Flags().Bool("with-beads", false, "Initialize beads task tracking")
 	initCmd.Flags().Bool("with-pageindex", false, "Initialize PageIndex retrieval")
+	initCmd.Flags().Bool("full", false, "Enable all integrations (--with-memento, --with-beads, --with-pageindex)")
 
 	// convert flags
 	convertCmd.Flags().String("depth", "shallow", "Scour depth: shallow|deep")
@@ -126,7 +127,7 @@ func init() {
 	agentSetupCmd.Flags().String("model", "", "Select the OpenRouter model to write into assistiveAgent config")
 	agentSetupCmd.Flags().Float64("daily-budget-usd", 0, "Optional daily assistive-provider budget in USD (0 = unlimited)")
 	agentSetupCmd.Flags().String("execution-mode", "", "Daemon upkeep mode: coding-agent-primary|provider-primary")
-	agentTestCmd.Flags().String("provider", "", "Test a specific provider")
+	agentSetupCmd.Flags().String("provider", "", "Test a specific provider")
 
 	// Register subcommands
 	ciCmd.AddCommand(ciiCheckCmd)
@@ -208,6 +209,12 @@ var initCmd = &cobra.Command{
 		withMemento, _ := cmd.Flags().GetBool("with-memento")
 		withBeads, _ := cmd.Flags().GetBool("with-beads")
 		withPageIndex, _ := cmd.Flags().GetBool("with-pageindex")
+		full, _ := cmd.Flags().GetBool("full")
+		if full {
+			withMemento = true
+			withBeads = true
+			withPageIndex = true
+		}
 
 		repoRoot, err := currentGitRepoRoot()
 		if err != nil {
@@ -1020,12 +1027,28 @@ var daemonCmd = &cobra.Command{
 			return fmt.Errorf("getting working directory: %w", err)
 		}
 
+		// Enforce singleton — refuse if another daemon is already alive.
+		pidFile := filepath.Join(repoRoot, ".plexium", "daemon.pid")
+		if pid, err := readPIDFile(pidFile); err == nil {
+			if processAlive(pid) {
+				return fmt.Errorf("daemon already running (PID %d); use 'plexium agent stop' first", pid)
+			}
+			_ = os.Remove(pidFile) // stale PID file
+		}
+		if err := os.MkdirAll(filepath.Dir(pidFile), 0o755); err == nil {
+			_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644)
+		}
+		defer os.Remove(pidFile)
+
 		pollInterval, _ := cmd.Flags().GetInt("poll-interval")
 		maxConcurrent, _ := cmd.Flags().GetInt("max-concurrent")
 
 		cfg, _ := config.LoadFromDir(repoRoot)
 
 		workspace := daemon.NewWorkspaceMgr(repoRoot)
+		if cfg != nil && cfg.Daemon.MaxWorktrees > 0 {
+			workspace.SetMaxWorktrees(cfg.Daemon.MaxWorktrees)
+		}
 
 		// Read runner/tracker from config, default to noop/none
 		runnerType := "noop"
@@ -1111,9 +1134,12 @@ var daemonCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Clean up stale worktrees from prior runs
-		if err := workspace.CleanupAll(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: worktree cleanup: %v\n", err)
+		// Sweep orphaned worktrees (status=running) from crashed prior runs.
+		// Preserves attention_needed/completed/failed worktrees for operator review.
+		if cleaned, sweepErr := workspace.CleanupOrphans(); sweepErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: orphan sweep: %v\n", sweepErr)
+		} else if cleaned > 0 {
+			fmt.Fprintf(os.Stderr, "Cleaned %d orphaned worktree(s) from prior run\n", cleaned)
 		}
 
 		return d.Run(ctx)

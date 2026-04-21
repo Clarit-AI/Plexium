@@ -89,16 +89,40 @@ func runPluginList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Println("Available plugins:")
+	var agents, converters []plugins.AdapterInfo
 	for _, p := range available {
-		status := "built-in"
-		if !p.BuiltIn {
-			status = "custom"
+		if p.Category == "converter-plugin" {
+			converters = append(converters, p)
+		} else {
+			agents = append(agents, p)
 		}
-		if p.Installed {
-			status += ", installed"
+	}
+
+	if len(agents) > 0 {
+		fmt.Println("Agent adapters:")
+		for _, p := range agents {
+			status := "built-in"
+			if !p.BuiltIn {
+				status = "custom"
+			}
+			if p.Installed {
+				status += ", installed"
+			}
+			fmt.Printf("  - %s [%s]: %s\n", p.Name, status, p.Description)
 		}
-		fmt.Printf("  - %s [%s]: %s\n", p.Name, status, p.Description)
+	}
+	if len(converters) > 0 {
+		if len(agents) > 0 {
+			fmt.Println()
+		}
+		fmt.Println("Converter plugins:")
+		for _, p := range converters {
+			status := "built-in"
+			if p.Installed {
+				status += ", enabled"
+			}
+			fmt.Printf("  - %s [%s]: %s\n", p.Name, status, p.Description)
+		}
 	}
 
 	return nil

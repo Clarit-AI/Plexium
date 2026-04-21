@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/Clarit-AI/Plexium/internal/config"
 )
 
 //go:embed builtins/*/*
@@ -34,6 +36,7 @@ type AdapterInfo struct {
 	BuiltIn         bool   `json:"builtIn"`
 	Description     string `json:"description"`
 	InstructionFile string `json:"instructionFile"`
+	Category        string `json:"category,omitempty"` // "agent-adapter" or "converter-plugin"
 }
 
 // InstallResult describes a completed adapter installation.
@@ -82,6 +85,7 @@ func ListAdapters(repoRoot string) ([]AdapterInfo, error) {
 			BuiltIn:         true,
 			Description:     manifest.Description,
 			InstructionFile: manifest.InstructionFile,
+			Category:        "agent-adapter",
 		})
 		seen[name] = true
 	}
@@ -96,7 +100,19 @@ func ListAdapters(repoRoot string) ([]AdapterInfo, error) {
 			BuiltIn:         false,
 			Description:     manifest.Description,
 			InstructionFile: manifest.InstructionFile,
+			Category:        "agent-adapter",
 		})
+	}
+
+	// Merge converter plugins.
+	cfg, _ := config.LoadFromDir(repoRoot)
+	for name, info := range converterPlugins {
+		if seen[name] {
+			continue
+		}
+		info.Installed = cfg != nil && cfg.PluginEnabled(name)
+		adapters = append(adapters, info)
+		seen[name] = true
 	}
 
 	sort.Slice(adapters, func(i, j int) bool {
@@ -113,8 +129,24 @@ var builtinGoAdapters = map[string]func(string) error{
 	"claude": RunClaudeAdapter,
 }
 
+// converterPlugins lists built-in converter plugins that are compiled into
+// the binary and enabled via config (not materialized to disk).
+var converterPlugins = map[string]AdapterInfo{
+	"markedup": {
+		Name:        "markedup",
+		BuiltIn:     true,
+		Description: "MarkedUp knowledge-graph enrichment and retrieval",
+		Category:    "converter-plugin",
+	},
+}
+
 // InstallAdapter materializes an adapter into .plexium/plugins and runs it.
 func InstallAdapter(repoRoot, name, pluginPath string) (*InstallResult, error) {
+	// Converter plugins are compiled in — enable them in config instead of copying files.
+	if conv, ok := converterPlugins[name]; ok && pluginPath == "" {
+		return installConverterPlugin(repoRoot, name, conv)
+	}
+
 	manifest, srcDir, builtIn, err := resolveInstallSource(name, pluginPath)
 	if err != nil {
 		return nil, err
@@ -430,6 +462,39 @@ func runAdapterScript(repoRoot, scriptPath string) error {
 		return fmt.Errorf("running plugin: %w", err)
 	}
 	return nil
+}
+
+func installConverterPlugin(repoRoot, name string, info AdapterInfo) (*InstallResult, error) {
+	cfg, err := config.LoadFromDir(repoRoot)
+	if err != nil {
+		return nil, fmt.Errorf("load config to enable %s: %w", name, err)
+	}
+
+	if cfg.Plugins == nil {
+		cfg.Plugins = make(map[string]map[string]any)
+	}
+	if cfg.Plugins[name] == nil {
+		cfg.Plugins[name] = make(map[string]any)
+	}
+	cfg.Plugins[name]["enabled"] = true
+
+	// Apply safe defaults for markedup.
+	if name == "markedup" {
+		if _, ok := cfg.Plugins[name]["autoEnrich"]; !ok {
+			cfg.Plugins[name]["autoEnrich"] = true
+		}
+	}
+
+	if err := config.SaveToDir(repoRoot, cfg); err != nil {
+		return nil, fmt.Errorf("save config after enabling %s: %w", name, err)
+	}
+
+	return &InstallResult{
+		Name:        name,
+		Installed:   true,
+		BuiltIn:     true,
+		Description: info.Description,
+	}, nil
 }
 
 func hasInstalledAdapter(repoRoot, name string) bool {

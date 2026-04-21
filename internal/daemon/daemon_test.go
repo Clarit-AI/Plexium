@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -568,4 +569,75 @@ func (r *contextAwareRunner) Run(ctx context.Context, _, _ string, _ []string, _
 	default:
 		return &RunResult{}, nil
 	}
+}
+
+// ---------------------------------------------------------------------------
+// sweepStaleWorktrees
+// ---------------------------------------------------------------------------
+
+func TestSweepStaleWorktrees_RemovesOldCompleted(t *testing.T) {
+	d, _ := newTestDaemon(t, DaemonOpts{})
+
+	// Create a worktree and mark it completed.
+	wt, err := d.workspace.Create("SWEEP-OLD")
+	require.NoError(t, err)
+	require.NoError(t, d.workspace.UpdateStatus(wt.ID, "completed"))
+
+	// Manually backdate StartedAt in meta.json so it looks older than 1 hour.
+	metaFile := filepath.Join(d.workspace.basePath, wt.ID, "meta.json")
+	data, err := os.ReadFile(metaFile)
+	require.NoError(t, err)
+	var meta Worktree
+	require.NoError(t, json.Unmarshal(data, &meta))
+	meta.StartedAt = time.Now().Add(-2 * time.Hour)
+	backdated, err := json.MarshalIndent(meta, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(metaFile, backdated, 0o644))
+
+	// Sweep should remove it.
+	d.sweepStaleWorktrees()
+
+	_, err = d.workspace.Get(wt.ID)
+	assert.Error(t, err)
+}
+
+func TestSweepStaleWorktrees_PreservesRecentCompleted(t *testing.T) {
+	d, _ := newTestDaemon(t, DaemonOpts{})
+
+	// Create a worktree, mark completed, but keep recent StartedAt.
+	wt, err := d.workspace.Create("SWEEP-RECENT")
+	require.NoError(t, err)
+	require.NoError(t, d.workspace.UpdateStatus(wt.ID, "completed"))
+
+	// Sweep should NOT remove it (just created).
+	d.sweepStaleWorktrees()
+
+	got, err := d.workspace.Get(wt.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", got.Status)
+}
+
+func TestSweepStaleWorktrees_PreservesRunning(t *testing.T) {
+	d, _ := newTestDaemon(t, DaemonOpts{})
+
+	// Create a running worktree and backdate it.
+	wt, err := d.workspace.Create("SWEEP-RUNNING")
+	require.NoError(t, err)
+
+	metaFile := filepath.Join(d.workspace.basePath, wt.ID, "meta.json")
+	data, err := os.ReadFile(metaFile)
+	require.NoError(t, err)
+	var meta Worktree
+	require.NoError(t, json.Unmarshal(data, &meta))
+	meta.StartedAt = time.Now().Add(-2 * time.Hour)
+	backdated, err := json.MarshalIndent(meta, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(metaFile, backdated, 0o644))
+
+	// Sweep should NOT touch running worktrees.
+	d.sweepStaleWorktrees()
+
+	got, err := d.workspace.Get(wt.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "running", got.Status)
 }

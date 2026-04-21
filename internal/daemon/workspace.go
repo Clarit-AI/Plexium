@@ -10,20 +10,19 @@ import (
 	"time"
 )
 
-// MaxWorktrees is the hard ceiling on the total number of worktrees
-// (running + completed + failed) that Plexium will ever hold on disk.
-// This guards against daemon glitches that repeatedly create worktrees
-// without cleaning them up.
-const MaxWorktrees = 10
+// DefaultMaxWorktrees is the default hard ceiling on the total number of
+// worktrees (running + completed + failed) that Plexium will hold on disk.
+const DefaultMaxWorktrees = 10
 
 // WorkspaceMgr manages git worktree-based workspaces for isolated wiki
 // maintenance tasks. Each workspace is a git worktree checked out under
 // .plexium/workspaces/.
 type WorkspaceMgr struct {
-	basePath string // .plexium/workspaces/
-	repoRoot string
-	gitExec  func(args ...string) ([]byte, error) // injectable for testing
-	mu       sync.Mutex
+	basePath     string // .plexium/workspaces/
+	repoRoot     string
+	gitExec      func(args ...string) ([]byte, error) // injectable for testing
+	maxWorktrees int                                    // configurable cap, defaults to DefaultMaxWorktrees
+	mu           sync.Mutex
 }
 
 // Worktree represents a single worktree workspace and its metadata.
@@ -32,7 +31,7 @@ type Worktree struct {
 	Path      string    `json:"path"`
 	IssueID   string    `json:"issueID"`
 	Branch    string    `json:"branch"`
-	Status    string    `json:"status"` // running | completed | failed
+	Status    string    `json:"status"` // running | completed | failed | attention_needed
 	StartedAt time.Time `json:"startedAt"`
 }
 
@@ -40,10 +39,25 @@ type Worktree struct {
 // stored under <repoRoot>/.plexium/workspaces/.
 func NewWorkspaceMgr(repoRoot string) *WorkspaceMgr {
 	return &WorkspaceMgr{
-		basePath: filepath.Join(repoRoot, ".plexium", "workspaces"),
-		repoRoot: repoRoot,
-		gitExec:  defaultGitExec,
+		basePath:     filepath.Join(repoRoot, ".plexium", "workspaces"),
+		repoRoot:     repoRoot,
+		gitExec:      defaultGitExec,
+		maxWorktrees: DefaultMaxWorktrees,
 	}
+}
+
+// SetMaxWorktrees overrides the default worktree ceiling. Must be called
+// before any Create calls. Values below 1 are clamped to 1.
+func (m *WorkspaceMgr) SetMaxWorktrees(n int) {
+	if n < 1 {
+		n = 1
+	}
+	m.maxWorktrees = n
+}
+
+// MaxWorktreeCap returns the currently configured ceiling.
+func (m *WorkspaceMgr) MaxWorktreeCap() int {
+	return m.maxWorktrees
 }
 
 // defaultGitExec shells out to git via os/exec.
@@ -68,7 +82,7 @@ func (m *WorkspaceMgr) metaPath(id string) string {
 
 // Create creates a new git worktree workspace for the given issue. It creates
 // a new branch and checks it out in a dedicated directory under basePath.
-// Returns an error if the total worktree count would exceed MaxWorktrees.
+// Returns an error if the total worktree count would exceed the configured cap.
 func (m *WorkspaceMgr) Create(issueID string) (*Worktree, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -88,8 +102,8 @@ func (m *WorkspaceMgr) Create(issueID string) (*Worktree, error) {
 	if err != nil {
 		return nil, fmt.Errorf("workspace: count worktrees: %w", err)
 	}
-	if total >= MaxWorktrees {
-		return nil, fmt.Errorf("workspace: total worktree limit reached (%d/%d); run 'plexium daemon --cleanup' to prune completed worktrees", total, MaxWorktrees)
+	if total >= m.maxWorktrees {
+		return nil, fmt.Errorf("workspace: total worktree limit reached (%d/%d); run 'plexium daemon --cleanup' to prune completed worktrees", total, m.maxWorktrees)
 	}
 
 	// Create the git worktree with a new branch.
@@ -187,6 +201,26 @@ func (m *WorkspaceMgr) CleanupAll() error {
 		}
 	}
 	return firstErr
+}
+
+// CleanupOrphans removes only worktrees with status "running" — these are
+// orphans from a previous daemon run that crashed before cleanup. Worktrees
+// with status attention_needed, completed, or failed are preserved.
+func (m *WorkspaceMgr) CleanupOrphans() (cleaned int, firstErr error) {
+	worktrees, err := m.List()
+	if err != nil {
+		return 0, err
+	}
+	for _, wt := range worktrees {
+		if wt.Status != "running" {
+			continue
+		}
+		if err := m.Cleanup(wt.ID); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		cleaned++
+	}
+	return cleaned, firstErr
 }
 
 // ActiveCount returns the number of worktrees with status "running".

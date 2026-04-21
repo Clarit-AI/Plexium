@@ -153,6 +153,16 @@ func InitRepo(repoRoot, provider string) error {
 
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoRoot
+
+	if provider == "" {
+		// No provider specified — git-memento will prompt interactively.
+		// Connect to parent's TTY so the user can respond to the prompt.
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	}
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		text := strings.TrimSpace(string(output))

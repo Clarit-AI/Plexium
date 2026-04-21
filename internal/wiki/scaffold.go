@@ -229,10 +229,13 @@ func Init(opts InitOptions) (*InitResult, error) {
 	// Memento onboarding is handled by the CLI entrypoints so they can
 	// offer installation when git-memento is missing.
 	if opts.WithBeads && !opts.DryRun {
-		cmd := exec.Command("bd", "init")
-		cmd.Dir = opts.RepoRoot
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: bd init failed: %v\n", err)
+		beadsDir := filepath.Join(opts.RepoRoot, ".beads")
+		if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+			cmd := exec.Command("bd", "init")
+			cmd.Dir = opts.RepoRoot
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: bd init failed: %v\n", err)
+			}
 		}
 	}
 
@@ -548,6 +551,20 @@ integrations:
   beads: %t
   pageindex: %t
   obsidian: %t
+
+plugins:
+  markedup:
+    enabled: true
+    autoEnrich: true
+    modelEnrich: false
+    writeEnrichedFrontmatter: false
+    embeddings:
+      enabled: false
+      provider: inherit
+      dims: 768
+    reranking:
+      enabled: false
+      provider: jina
 
 reports:
   bootstrap:
