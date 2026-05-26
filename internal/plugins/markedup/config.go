@@ -18,6 +18,7 @@ package markedup
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -144,9 +145,9 @@ func DefaultConfig() Config {
 // root of the plugins.markedup block. Anything else is a config error.
 var allowedTopLevelKeys = map[string]struct{}{
 	"enabled":                  {},
-	"autoEnrich":               {},
-	"modelEnrich":              {},
-	"writeEnrichedFrontmatter": {},
+	"autoenrich":               {},
+	"modelenrich":              {},
+	"writeenrichedfrontmatter": {},
 	"embeddings":               {},
 	"reranking":                {},
 	"daemon":                   {},
@@ -155,7 +156,7 @@ var allowedTopLevelKeys = map[string]struct{}{
 // allowedDaemonKeys constrains the nested daemon block (see allowed*Keys
 // for the rationale).
 var allowedDaemonKeys = map[string]struct{}{
-	"refreshInterval": {},
+	"refreshinterval": {},
 }
 
 // allowedEmbeddingsKeys and allowedRerankingKeys constrain the nested
@@ -166,7 +167,7 @@ var allowedEmbeddingsKeys = map[string]struct{}{
 	"provider":  {},
 	"model":     {},
 	"endpoint":  {},
-	"apiKeyEnv": {},
+	"apikeyenv": {},
 	"dims":      {},
 }
 
@@ -175,7 +176,7 @@ var allowedRerankingKeys = map[string]struct{}{
 	"provider":  {},
 	"model":     {},
 	"endpoint":  {},
-	"apiKeyEnv": {},
+	"apikeyenv": {},
 }
 
 // ParseConfig reads the plugins.markedup block from the raw map form used
@@ -191,6 +192,8 @@ var allowedRerankingKeys = map[string]struct{}{
 //   - An unknown key, a malformed nested block, or an invalid value
 //     (e.g. non-positive embeddings.dims) returns an error.
 func ParseConfig(raw map[string]any) (Config, error) {
+	normalizeKeys(raw)
+
 	cfg := DefaultConfig()
 	cfg.Enabled = false // strict: only an explicit `enabled: true` turns it on
 	if len(raw) == 0 {
@@ -206,19 +209,19 @@ func ParseConfig(raw map[string]any) (Config, error) {
 	} else if _, present := raw["enabled"]; present {
 		return Config{}, fmt.Errorf("markedup.enabled must be a boolean")
 	}
-	if v, ok := raw["autoEnrich"].(bool); ok {
+	if v, ok := raw["autoenrich"].(bool); ok {
 		cfg.AutoEnrich = v
-	} else if _, present := raw["autoEnrich"]; present {
+	} else if _, present := raw["autoenrich"]; present {
 		return Config{}, fmt.Errorf("markedup.autoEnrich must be a boolean")
 	}
-	if v, ok := raw["modelEnrich"].(bool); ok {
+	if v, ok := raw["modelenrich"].(bool); ok {
 		cfg.ModelEnrich = v
-	} else if _, present := raw["modelEnrich"]; present {
+	} else if _, present := raw["modelenrich"]; present {
 		return Config{}, fmt.Errorf("markedup.modelEnrich must be a boolean")
 	}
-	if v, ok := raw["writeEnrichedFrontmatter"].(bool); ok {
+	if v, ok := raw["writeenrichedfrontmatter"].(bool); ok {
 		cfg.WriteEnrichedFrontmatter = v
-	} else if _, present := raw["writeEnrichedFrontmatter"]; present {
+	} else if _, present := raw["writeenrichedfrontmatter"]; present {
 		return Config{}, fmt.Errorf("markedup.writeEnrichedFrontmatter must be a boolean")
 	}
 
@@ -244,7 +247,7 @@ func ParseConfig(raw map[string]any) (Config, error) {
 		if v, ok := emb["endpoint"].(string); ok {
 			cfg.Embeddings.Endpoint = v
 		}
-		if v, ok := emb["apiKeyEnv"].(string); ok {
+		if v, ok := emb["apikeyenv"].(string); ok {
 			cfg.Embeddings.APIKeyEnv = v
 		}
 		if dimsRaw, p := emb["dims"]; p {
@@ -278,7 +281,7 @@ func ParseConfig(raw map[string]any) (Config, error) {
 		if v, ok := rr["endpoint"].(string); ok {
 			cfg.Reranking.Endpoint = v
 		}
-		if v, ok := rr["apiKeyEnv"].(string); ok {
+		if v, ok := rr["apikeyenv"].(string); ok {
 			cfg.Reranking.APIKeyEnv = v
 		}
 	}
@@ -291,9 +294,9 @@ func ParseConfig(raw map[string]any) (Config, error) {
 		if err := rejectUnknownKeys("markedup.daemon", dm, allowedDaemonKeys); err != nil {
 			return Config{}, err
 		}
-		if v, ok := dm["refreshInterval"].(string); ok {
+		if v, ok := dm["refreshinterval"].(string); ok {
 			cfg.Daemon.RefreshInterval = v
-		} else if _, p := dm["refreshInterval"]; p {
+		} else if _, p := dm["refreshinterval"]; p {
 			return Config{}, fmt.Errorf("markedup.daemon.refreshInterval must be a string (e.g. \"24h\")")
 		}
 	}
@@ -304,11 +307,30 @@ func ParseConfig(raw map[string]any) (Config, error) {
 	return cfg, nil
 }
 
+// normalizeKeys recursively lowercases all string keys in the map.
+// Viper lowercases YAML keys when decoding to map[string]any, but
+// tests and other callers may pass camelCase keys directly. This
+// ensures lookups in ParseConfig always use lowercase keys.
+func normalizeKeys(m map[string]any) {
+	for k, v := range m {
+		lower := strings.ToLower(k)
+		if lower != k {
+			delete(m, k)
+			m[lower] = v
+		}
+		if nested, ok := v.(map[string]any); ok {
+			normalizeKeys(nested)
+		}
+	}
+}
+
 // rejectUnknownKeys returns a config error if got contains any key that
 // isn't in allowed. scope is prepended to the error message for context.
+// Keys are compared case-insensitively because Viper lowercases all map
+// keys on unmarshal.
 func rejectUnknownKeys(scope string, got map[string]any, allowed map[string]struct{}) error {
 	for k := range got {
-		if _, ok := allowed[k]; !ok {
+		if _, ok := allowed[strings.ToLower(k)]; !ok {
 			return fmt.Errorf("%s: unknown key %q", scope, k)
 		}
 	}

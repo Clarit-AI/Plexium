@@ -1,5 +1,5 @@
-github.com/Clarit-AI/markedup v0.0.0-20260418185353-12e3cc5f0d89 h1:7DxgiIXe17JLwfjaE+YnAmMzzTqneVvjMCn7baLY4G4=
-github.com/Clarit-AI/markedup v0.0.0-20260418185353-12e3cc5f0d89/go.mod h1:IMDGULtUy68kQ1dKlDgT7gD9lD7KJZ0dDRDPqf79x9s=
+github.com/Clarit-AI/markedup v0.0.0-20260419063450-0c5745b5a986 h1:7wQfT3hNTXKTcAFrJnQMJmOTzxAJ6/HQKUiDDpfbS9o=
+github.com/Clarit-AI/markedup v0.0.0-20260419063450-0c5745b5a986/go.mod h1:Dpgx+f+jzufgRjrHkujDruoKOJOh0H7EtHcyRpliXWQ=
 github.com/bmatcuk/doublestar/v2 v2.0.4 h1:6I6oUiT/sU27eE2OFcWqBhL1SwjyvQuOssxT4a1yidI=
 github.com/bmatcuk/doublestar/v2 v2.0.4/go.mod h1:QMmcs3H2AUQICWhfzLXz+IYln8lRQmTZRptLie8RgRw=
 github.com/cpuguy83/go-md2man/v2 v2.0.4/go.mod h1:tgQtvFlXSQOSOSIRvRPT7W67SCa46tRHOmNcaadrF8o=
@@ -72,6 +72,8 @@ golang.org/x/sync v0.20.0 h1:e0PTpb7pjO8GAtTs2dQ6jYa5BWYlMuX047Dco/pItO4=
 golang.org/x/sync v0.20.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
 golang.org/x/sys v0.38.0 h1:3yZWxaJjBmCWXqhN1qh02AkOnCQ1poK6oF+a7xWL6Gc=
 golang.org/x/sys v0.38.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
+golang.org/x/term v0.3.0 h1:qoo4akIqOcDME5bhc/NgxUdovd6BSS2uMsVjB56q1xI=
+golang.org/x/term v0.3.0/go.mod h1:q750SLmJuPmVoN1blW3UFBPREJfb1KmY3vwxfr+nFDA=
 golang.org/x/text v0.14.0 h1:ScX5w1eTa3QqT8oi6+ziP7dTV1S2+ALU0bI+0zXKWiQ=
 golang.org/x/text v0.14.0/go.mod h1:18ZOQIKpY8NJVqYksKHtTdi31H5itFRjB5/qKTNYzSU=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=

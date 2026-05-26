@@ -131,7 +131,7 @@ func (cl *ConvertLinter) createStub(moduleName string) PageData {
 	b.WriteString("---\n")
 	b.WriteString(fmt.Sprintf("title: %q\n", title))
 	b.WriteString("ownership: managed\n")
-	b.WriteString("confidence: low\n")
+	b.WriteString("confidence: 0.1\n")
 	b.WriteString("review-status: unreviewed\n")
 	b.WriteString("---\n\n")
 	b.WriteString(fmt.Sprintf("# %s\n\n", title))

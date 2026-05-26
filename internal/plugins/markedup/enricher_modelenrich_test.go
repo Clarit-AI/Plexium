@@ -35,7 +35,7 @@ func (f *fakeLLM) ExtractGraph(ctx context.Context, body string) (*enrich.ModelR
 // what Tier 1 produced.
 func TestEnricherPlugin_ModelEnrichMergesLLMResult(t *testing.T) {
 	repoRoot, wikiRoot := setupWikiFixture(t, map[string]string{
-		"a.md": "# A\n\nThis page is about authentication.\n",
+		"a.md": "# A\n\nRelates to [[b]].\nThis page is about authentication.\n",
 	})
 
 	llm := &fakeLLM{
@@ -89,15 +89,25 @@ func TestEnricherPlugin_ModelEnrichMergesLLMResult(t *testing.T) {
 	if !foundOAuth || !foundJWT {
 		t.Errorf("expected OAuth2 and JWT entities from LLM; got %+v", entry.Entities)
 	}
-	// LLM-extracted relationship should appear too.
-	foundRel := false
+	// Tier 1 wikilink should be in entry.Relationships.
+	foundB := false
 	for _, r := range entry.Relationships {
-		if r.Target == "auth-server" && r.Type == "depends-on" {
-			foundRel = true
+		if r.Target == "b" {
+			foundB = true
 		}
 	}
-	if !foundRel {
-		t.Errorf("expected auth-server relationship from LLM; got %+v", entry.Relationships)
+	if !foundB {
+		t.Errorf("expected Tier 1 wikilink to survive in Relationships; got %+v", entry.Relationships)
+	}
+	// Tier 2 NER edge should be in SemanticRelationships.
+	foundAuthServer := false
+	for _, r := range entry.SemanticRelationships {
+		if r.Target == "auth-server" && r.Type == "depends-on" {
+			foundAuthServer = true
+		}
+	}
+	if !foundAuthServer {
+		t.Errorf("expected Tier 2 NER edge to appear in SemanticRelationships; got %+v", entry.SemanticRelationships)
 	}
 	if entry.EnrichedBy != EnricherVersion {
 		t.Errorf("expected EnrichedBy=%q, got %q", EnricherVersion, entry.EnrichedBy)
