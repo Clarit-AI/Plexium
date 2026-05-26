@@ -39,13 +39,14 @@ func TestContract_ManifestStructFields(t *testing.T) {
 		// v2 knowledge-graph fields (populated by the MarkedUp enricher
 		// plugin; all JSON-tagged `omitempty` so v1 manifests round-trip
 		// unchanged).
-		"EntityType":    "string",
-		"Entities":      "[]manifest.EntityRef",
-		"Relationships": "[]manifest.RelationshipRef",
-		"Confidence":    "float64",
-		"SemanticHints": "[]string",
-		"LastEnriched":  "string",
-		"EnrichedBy":    "string",
+		"EntityType":            "string",
+		"Entities":              "[]manifest.EntityRef",
+		"Relationships":         "[]manifest.RelationshipRef",
+		"SemanticRelationships": "[]manifest.RelationshipRef",
+		"Confidence":            "float64",
+		"SemanticHints":         "[]string",
+		"LastEnriched":          "string",
+		"EnrichedBy":            "string",
 	}
 
 	for name, expectedType := range expectedFields {

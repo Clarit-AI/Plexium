@@ -387,16 +387,26 @@ func toGraphMetadata(fm schema.GraphFrontmatter, timestamp string) manifest.Grap
 		})
 	}
 
+	semanticRels := make([]manifest.RelationshipRef, 0, len(fm.SemanticRelationships))
+	for _, r := range fm.SemanticRelationships {
+		semanticRels = append(semanticRels, manifest.RelationshipRef{
+			Target:   r.Target,
+			Type:     r.Type,
+			Strength: r.Strength,
+		})
+	}
+
 	hints := make([]string, len(fm.SemanticHints))
 	copy(hints, fm.SemanticHints)
 
 	return manifest.GraphMetadata{
-		EntityType:    fm.EntityType,
-		Entities:      entities,
-		Relationships: rels,
-		Confidence:    fm.Confidence,
-		SemanticHints: hints,
-		LastEnriched:  timestamp,
-		EnrichedBy:    EnricherVersion,
+		EntityType:            fm.EntityType,
+		Entities:              entities,
+		Relationships:         rels,
+		SemanticRelationships: semanticRels,
+		Confidence:            fm.Confidence,
+		SemanticHints:         hints,
+		LastEnriched:          timestamp,
+		EnrichedBy:            EnricherVersion,
 	}
 }

@@ -3,7 +3,7 @@ module github.com/Clarit-AI/Plexium
 go 1.25.1
 
 require (
-	github.com/Clarit-AI/markedup v0.0.0-20260418185353-12e3cc5f0d89
+	github.com/Clarit-AI/markedup v0.0.0-20260419063450-0c5745b5a986
 	github.com/bmatcuk/doublestar/v2 v2.0.4
 	github.com/gobwas/glob v0.2.3
 	github.com/pelletier/go-toml/v2 v2.1.0
@@ -33,6 +33,7 @@ require (
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/term v0.3.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 )

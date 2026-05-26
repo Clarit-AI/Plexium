@@ -43,13 +43,14 @@ type PageEntry struct {
 	// "I have zero confidence" signal is semantically equivalent to
 	// "unset" for current consumers — if we ever need to distinguish
 	// the two cases we should switch this to *float64 at that point.
-	EntityType    string            `json:"entityType,omitempty"`
-	Entities      []EntityRef       `json:"entities,omitempty"`
-	Relationships []RelationshipRef `json:"relationships,omitempty"`
-	Confidence    float64           `json:"confidence,omitempty"`
-	SemanticHints []string          `json:"semanticHints,omitempty"`
-	LastEnriched  string            `json:"lastEnriched,omitempty"`
-	EnrichedBy    string            `json:"enrichedBy,omitempty"`
+	EntityType            string            `json:"entityType,omitempty"`
+	Entities              []EntityRef       `json:"entities,omitempty"`
+	Relationships         []RelationshipRef `json:"relationships,omitempty"`
+	SemanticRelationships []RelationshipRef `json:"semanticRelationships,omitempty"`
+	Confidence            float64           `json:"confidence,omitempty"`
+	SemanticHints         []string          `json:"semanticHints,omitempty"`
+	LastEnriched          string            `json:"lastEnriched,omitempty"`
+	EnrichedBy            string            `json:"enrichedBy,omitempty"`
 }
 
 // EntityRef is a reference to a named entity on a page. It mirrors the
@@ -182,13 +183,14 @@ func NewEmptyManifest() *Manifest {
 // GraphMetadata bundles the knowledge-graph fields set by an enrichment
 // plugin. It's accepted by ApplyGraphMetadata to update a page in-place.
 type GraphMetadata struct {
-	EntityType    string
-	Entities      []EntityRef
-	Relationships []RelationshipRef
-	Confidence    float64
-	SemanticHints []string
-	LastEnriched  string
-	EnrichedBy    string
+	EntityType            string
+	Entities              []EntityRef
+	Relationships         []RelationshipRef
+	SemanticRelationships []RelationshipRef
+	Confidence            float64
+	SemanticHints         []string
+	LastEnriched          string
+	EnrichedBy            string
 }
 
 // ApplyGraphMetadata overwrites the v2 graph fields on the page entry with
@@ -204,6 +206,7 @@ func (m *Manifest) ApplyGraphMetadata(wikiPath string, g GraphMetadata) bool {
 		m.Pages[i].EntityType = g.EntityType
 		m.Pages[i].Entities = g.Entities
 		m.Pages[i].Relationships = g.Relationships
+		m.Pages[i].SemanticRelationships = g.SemanticRelationships
 		m.Pages[i].Confidence = g.Confidence
 		m.Pages[i].SemanticHints = g.SemanticHints
 		m.Pages[i].LastEnriched = g.LastEnriched
@@ -222,6 +225,7 @@ func hasGraphFields(g GraphMetadata) bool {
 	return g.EntityType != "" ||
 		len(g.Entities) > 0 ||
 		len(g.Relationships) > 0 ||
+		len(g.SemanticRelationships) > 0 ||
 		g.Confidence != 0 ||
 		len(g.SemanticHints) > 0 ||
 		g.LastEnriched != "" ||
@@ -243,13 +247,14 @@ func (m *Manifest) GraphMetadataForPage(wikiPath string) (GraphMetadata, bool) {
 		}
 		p := m.Pages[i]
 		return GraphMetadata{
-			EntityType:    p.EntityType,
-			Entities:      p.Entities,
-			Relationships: p.Relationships,
-			Confidence:    p.Confidence,
-			SemanticHints: p.SemanticHints,
-			LastEnriched:  p.LastEnriched,
-			EnrichedBy:    p.EnrichedBy,
+			EntityType:            p.EntityType,
+			Entities:              p.Entities,
+			Relationships:         p.Relationships,
+			SemanticRelationships: p.SemanticRelationships,
+			Confidence:            p.Confidence,
+			SemanticHints:         p.SemanticHints,
+			LastEnriched:          p.LastEnriched,
+			EnrichedBy:            p.EnrichedBy,
 		}, true
 	}
 	return GraphMetadata{}, false
@@ -287,6 +292,14 @@ func GraphMetadataSemanticEqual(a, b GraphMetadata) bool {
 	}
 	for i := range a.Relationships {
 		if a.Relationships[i] != b.Relationships[i] {
+			return false
+		}
+	}
+	if len(a.SemanticRelationships) != len(b.SemanticRelationships) {
+		return false
+	}
+	for i := range a.SemanticRelationships {
+		if a.SemanticRelationships[i] != b.SemanticRelationships[i] {
 			return false
 		}
 	}
