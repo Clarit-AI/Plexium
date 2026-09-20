@@ -20,6 +20,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -89,12 +90,20 @@ const (
 	EntrySettlement  EntryType = "settlement"
 	EntryAdjustment  EntryType = "adjustment" // for manual corrections with audit trail
 	EntryInit        EntryType = "init"       // initialization header (first line)
+	// EntryMismatch records a settled (or attempted) settlement where the
+	// actual billed rate/tokens drifted from the reservation. The entry
+	// carries both the reserved and the actual values so reviewers can
+	// audit the audit. The reservation ID referenced is marked terminal and
+	// cannot be re-settled as "valid" later; the ledger latches a durable
+	// halt that blocks new spending (Reserve) but still permits Settle on
+	// already-in-flight (pre-halt) reservations for reconciliation.
+	EntryMismatch EntryType = "mismatch"
 )
 
 // Entry is a single ledger record. All fields are immutable once written.
 type Entry struct {
 	ID              string    `json:"id"`          // UUID or deterministic key
-	Type            EntryType `json:"type"`        // reservation | settlement | adjustment | init
+	Type            EntryType `json:"type"`        // reservation | settlement | adjustment | init | mismatch
 	Timestamp       time.Time `json:"timestamp"`   // UTC
 	RunID           string    `json:"runId"`       // evaluation run identifier
 	Attempt         int       `json:"attempt"`     // attempt number within run
@@ -111,9 +120,22 @@ type Entry struct {
 	RefID           string    `json:"refId,omitempty"`           // for settlements: the reservation ID being settled
 	ProtocolVersion string    `json:"protocolVersion,omitempty"` // protocol version at reservation time
 	// Init-only fields (present only on EntryInit):
-	AuthorizedCap MicroUnit    `json:"authorizedCap,omitempty"` // authorized cap at init time
-	ManifestKey   *ManifestKey `json:"manifestKey,omitempty"`   // full manifest key at init time
-	Halted        bool         `json:"halted,omitempty"`        // whether ledger is halted (persisted on init)
+	AuthorizedCap    MicroUnit    `json:"authorizedCap,omitempty"`    // authorized cap at init time
+	ManifestKey      *ManifestKey `json:"manifestKey,omitempty"`      // full manifest key at init time
+	Halted           bool         `json:"halted,omitempty"`           // whether ledger is halted (persisted on init)
+	RateOutPresent   bool         `json:"rateOutPresent,omitempty"`   // true if RateOut was supplied (incl. zero) at init
+	TokenBoundsValue *TokenBounds `json:"tokenBoundsValue,omitempty"` // numeric token bounds, persisted on init
+	// Mismatch fields (present on EntryMismatch):
+	ExpectedRateIn       MicroUnit `json:"expectedRateIn,omitempty"`       // reserved rate in
+	ExpectedRateOut      MicroUnit `json:"expectedRateOut,omitempty"`      // reserved rate out
+	ActualRateIn         MicroUnit `json:"actualRateIn,omitempty"`         // billed rate in
+	ActualRateOut        MicroUnit `json:"actualRateOut,omitempty"`        // billed rate out (0 means omitted by caller)
+	ActualRateOutPresent bool      `json:"actualRateOutPresent,omitempty"` // whether caller supplied actual rate out
+	ActualTokensIn       int64     `json:"actualTokensIn,omitempty"`       // billed input tokens
+	ActualTokensOut      int64     `json:"actualTokensOut,omitempty"`      // billed output tokens
+	ActualCost           MicroUnit `json:"actualCost,omitempty"`           // billed cost in micro-units
+	MismatchReason       string    `json:"mismatchReason,omitempty"`       // rate-mismatch | token-mismatch
+	ReservationTerminal  bool      `json:"reservationTerminal,omitempty"`  // marks the reservation as terminal/disputed
 }
 
 // ManifestKey is a digest used to detect manifest/model drift between
@@ -259,6 +281,13 @@ func Open(cfg LedgerConfig) (*Ledger, error) {
 			_ = l.Close()
 			return nil, err
 		}
+		// C2: After the initial init write, fsync the parent directory so
+		// the freshly-created ledger file is durably linked into the
+		// directory entry. A failure here is fail-closed.
+		if err := syncDir(filepathDir(cfg.Path)); err != nil {
+			_ = l.Close()
+			return nil, &LedgerError{Code: LedgerCodeIO, Message: "sync parent directory after init", Cause: err}
+		}
 	} else {
 		if err := l.validateDrift(); err != nil {
 			_ = l.Close()
@@ -274,38 +303,50 @@ func Open(cfg LedgerConfig) (*Ledger, error) {
 }
 
 // writeInitEntry writes the initialization header as the first line of the ledger.
-// This persists the full ManifestKey and AuthorizedCap for drift detection on reopen.
+// This persists the full ManifestKey, AuthorizedCap, numeric RateIn /
+// RateOut (with presence marker), and numeric TokenBounds for drift
+// detection on reopen. The persistence is critical: callers cannot bypass
+// the binding by simply re-supplying matching hash strings.
 func (l *Ledger) writeInitEntry() error {
 	var rateOutVal MicroUnit
+	var rateOutPresent bool
 	if l.cfg.RateOut != nil {
 		rateOutVal = *l.cfg.RateOut
+		rateOutPresent = true
 	}
+	tb := l.cfg.TokenBounds
 	init := Entry{
-		ID:              fmt.Sprintf("init-%s-%d", l.cfg.RunID, time.Now().UnixNano()),
-		Type:            EntryInit,
-		Timestamp:       time.Now().UTC(),
-		RunID:           l.cfg.RunID,
-		Attempt:         0,
-		Model:           l.cfg.Model,
-		Task:            "",
-		SourceGroup:     "",
-		Amount:          0,
-		Balance:         0,
-		TokensIn:        0,
-		TokensOut:       0,
-		RateIn:          0,
-		RateOut:         rateOutVal,
-		Notes:           "initialization header",
-		ProtocolVersion: l.cfg.ManifestKey.ProtocolVersion,
-		AuthorizedCap:   l.cfg.AuthorizedCap,
-		ManifestKey:     &l.cfg.ManifestKey,
-		Halted:          l.halted,
+		ID:               fmt.Sprintf("init-%s-%d", l.cfg.RunID, time.Now().UnixNano()),
+		Type:             EntryInit,
+		Timestamp:        time.Now().UTC(),
+		RunID:            l.cfg.RunID,
+		Attempt:          0,
+		Model:            l.cfg.Model,
+		Task:             "",
+		SourceGroup:      "",
+		Amount:           0,
+		Balance:          0,
+		TokensIn:         0,
+		TokensOut:        0,
+		RateIn:           l.cfg.RateIn,
+		RateOut:          rateOutVal,
+		RateOutPresent:   rateOutPresent,
+		TokenBoundsValue: &tb,
+		Notes:            "initialization header",
+		ProtocolVersion:  l.cfg.ManifestKey.ProtocolVersion,
+		AuthorizedCap:    l.cfg.AuthorizedCap,
+		ManifestKey:      &l.cfg.ManifestKey,
+		Halted:           l.halted,
 	}
 	return l.appendEntry(init)
 }
 
 // rewriteInitEntry rewrites the first line (init entry) with the current halted state.
 // This is called when the ledger is halted to persist the halted state.
+//
+// C2: After the atomic rename, the parent directory is fsynced so the
+// rename itself is durable across crashes. A failure here is fail-closed;
+// we revert to the in-memory state and report the IO error.
 func (l *Ledger) rewriteInitEntry() error {
 	if len(l.entries) == 0 || l.entries[0].Type != EntryInit {
 		return errors.New("no init entry to rewrite")
@@ -346,6 +387,10 @@ func (l *Ledger) rewriteInitEntry() error {
 		os.Remove(tempPath)
 		return &LedgerError{Code: LedgerCodeIO, Message: "atomic rename for rewrite", Cause: err}
 	}
+	// C2: fsync the parent directory so the rename itself is durable.
+	if err := syncDir(filepathDir(l.file.Name())); err != nil {
+		return &LedgerError{Code: LedgerCodeIO, Message: "sync parent directory after rename", Cause: err}
+	}
 	// Reopen the file handle to the new file.
 	oldFile := l.file
 	l.file, err = os.OpenFile(l.file.Name(), os.O_RDWR|os.O_APPEND, 0600)
@@ -354,6 +399,27 @@ func (l *Ledger) rewriteInitEntry() error {
 	}
 	_ = oldFile.Close()
 	return nil
+}
+
+// filepathDir returns the directory portion of path. The filepath package
+// is used instead of path so we get OS-correct separators on all platforms.
+func filepathDir(path string) string {
+	return filepath.Dir(path)
+}
+
+// syncDir fsyncs the parent directory so atomic renames inside it are
+// durable across crashes. Without this, the rename can be lost if the
+// system crashes between the rename and the directory entry flush.
+func syncDir(dir string) error {
+	if dir == "" || dir == "." {
+		return nil
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 
 // replay reads all lines from the file, parses entries, and reconstructs balance.
@@ -417,6 +483,12 @@ func (l *Ledger) replay() error {
 }
 
 // validateDrift checks that the init entry's persisted config matches current config.
+//
+// B2: In addition to comparing the supplied ManifestKey hash strings, the
+// validation compares the actual numeric RateIn / RateOut (with presence
+// marker) and numeric TokenBounds persisted at init time. A caller who
+// re-supplies the same hash strings but changes the underlying values is
+// rejected by the numeric binding rather than silently accepted.
 func (l *Ledger) validateDrift() error {
 	if len(l.entries) == 0 {
 		return nil
@@ -457,6 +529,27 @@ func (l *Ledger) validateDrift() error {
 	if mk.TokenBoundsHash != l.cfg.ManifestKey.TokenBoundsHash {
 		return &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("token bounds hash drift: ledger has %q, config has %q", mk.TokenBoundsHash, l.cfg.ManifestKey.TokenBoundsHash)}
 	}
+
+	// B2: Numeric RateIn / RateOut (with presence marker) / TokenBounds binding.
+	if first.RateIn != l.cfg.RateIn {
+		return &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("rateIn drift: ledger has %d, config has %d", first.RateIn, l.cfg.RateIn)}
+	}
+	cfgRateOutPresent := l.cfg.RateOut != nil
+	if first.RateOutPresent != cfgRateOutPresent {
+		return &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("rateOut presence drift: ledger has %v, config has %v", first.RateOutPresent, cfgRateOutPresent)}
+	}
+	if first.RateOutPresent && l.cfg.RateOut != nil && first.RateOut != *l.cfg.RateOut {
+		return &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("rateOut drift: ledger has %d, config has %d", first.RateOut, *l.cfg.RateOut)}
+	}
+	if first.TokenBoundsValue == nil {
+		return &LedgerError{Code: LedgerCodeDrift, Message: "init entry missing numeric token bounds"}
+	}
+	if first.TokenBoundsValue.MaxInputTokens != l.cfg.TokenBounds.MaxInputTokens {
+		return &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("maxInputTokens drift: ledger has %d, config has %d", first.TokenBoundsValue.MaxInputTokens, l.cfg.TokenBounds.MaxInputTokens)}
+	}
+	if first.TokenBoundsValue.MaxOutputTokens != l.cfg.TokenBounds.MaxOutputTokens {
+		return &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("maxOutputTokens drift: ledger has %d, config has %d", first.TokenBoundsValue.MaxOutputTokens, l.cfg.TokenBounds.MaxOutputTokens)}
+	}
 	return nil
 }
 
@@ -465,10 +558,13 @@ func (l *Ledger) validateEntry(e Entry) error {
 	if e.ID == "" {
 		return errors.New("empty entry id")
 	}
-	if e.Type != EntryReservation && e.Type != EntrySettlement && e.Type != EntryAdjustment && e.Type != EntryInit {
+	if e.Type != EntryReservation && e.Type != EntrySettlement && e.Type != EntryAdjustment && e.Type != EntryInit && e.Type != EntryMismatch {
 		return fmt.Errorf("invalid entry type %q", e.Type)
 	}
-	if e.Type != EntryInit && e.Amount == 0 {
+	// Mismatch entries are evidence-only: their Amount may be 0 when the
+	// existing reservation already covers the conservative exposure; we
+	// only enforce positivity for active ledger entries.
+	if e.Type != EntryInit && e.Type != EntryMismatch && e.Amount == 0 {
 		return errors.New("entry amount is zero")
 	}
 	if e.Type != EntryInit && e.Balance < 0 {
@@ -480,8 +576,8 @@ func (l *Ledger) validateEntry(e Entry) error {
 	if e.RateIn < 0 || e.RateOut < 0 {
 		return errors.New("rates cannot be negative")
 	}
-	if e.Type == EntrySettlement && e.RefID == "" {
-		return errors.New("settlement entry missing refId")
+	if (e.Type == EntrySettlement || e.Type == EntryMismatch) && e.RefID == "" {
+		return errors.New("settlement/mismatch entry missing refId")
 	}
 	if e.Type == EntryInit {
 		if e.AuthorizedCap < 0 {
@@ -512,10 +608,6 @@ func (l *Ledger) Reserve(ctx context.Context, attempt int, task, sourceGroup str
 
 	if l.closed {
 		return "", 0, &LedgerError{Code: LedgerCodeIO, Message: "ledger is closed"}
-	}
-	// L3: Block new reservations if halted due to overrun.
-	if l.halted {
-		return "", 0, &LedgerError{Code: LedgerCodeHalted, Message: "ledger halted due to prior overrun; no further reservations permitted"}
 	}
 
 	// Validate rates are known (fail closed if missing).
@@ -552,6 +644,13 @@ func (l *Ledger) Reserve(ctx context.Context, attempt int, task, sourceGroup str
 	newBalance := l.balance + total
 	if newBalance > l.cfg.AuthorizedCap {
 		return "", 0, &LedgerError{Code: LedgerCodeCapExceeded, Message: fmt.Sprintf("reservation %d would exceed cap %d (current balance %d)", newBalance, l.cfg.AuthorizedCap, l.balance)}
+	}
+
+	// Halted-ledger rule: no new spending via Reserve. Settle on a
+	// non-terminal, pre-halt reservation is the only allowed path; the
+	// terminal/disputed check inside Settle enforces evidence durability.
+	if l.halted {
+		return "", 0, &LedgerError{Code: LedgerCodeHalted, Message: "ledger halted; new reservations rejected to prevent new spending"}
 	}
 
 	// Include protocol version in the first reservation for drift detection.
@@ -595,9 +694,17 @@ func (l *Ledger) Reserve(ctx context.Context, attempt int, task, sourceGroup str
 //   - Actual cost exceeds reservation (overrun) — ledger records the overrun and returns error
 //   - Actual cost is negative/nonfinite/overflow
 //   - Amount is zero
+//   - Reservation is already terminal (mismatch) — re-settle is rejected
 //
-// L3: Latches halted flag on overrun; subsequent Reserve/Settle blocked.
+// L3: Latches halted flag on overrun; subsequent Reserve blocked.
 // L4: Verifies actual rates/tokens against reservation.
+// B1: Rate/token mismatch appends a durable mismatch entry carrying
+//
+//	reserved + actual rate/tokens/cost and reservation ID, marks the
+//	reservation terminal/disputed, latches the halted flag, and the
+//	ledger holds at least max(reserved, actual) conservative exposure
+//	so a follow-up "valid" settlement cannot silently reopen spend.
+//
 // Actual billed cost stays recorded even when drift/overrun occurs (never rolled back).
 func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit, actualTokensIn, actualTokensOut int64, actualRateIn, actualRateOut MicroUnit) (MicroUnit, error) {
 	l.mu.Lock()
@@ -634,25 +741,95 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 			return 0, &LedgerError{Code: LedgerCodeDuplicateSettle, Message: fmt.Sprintf("reservation %q already settled", refID)}
 		}
 	}
-
-	// L4: Verify actual rates match reservation rates.
-	// Note: If actualRateOut is 0 (omitted), we skip the output rate check
-	// since the reservation may have had an estimated rateOut > 0.
-	// But if both are non-zero, they must match exactly.
-	if actualRateIn != 0 && res.RateIn != 0 && actualRateIn != res.RateIn {
-		return 0, &LedgerError{Code: LedgerCodeRateMismatch, Message: fmt.Sprintf("actual rateIn %d does not match reserved rateIn %d", actualRateIn, res.RateIn)}
-	}
-	if actualRateOut != 0 && res.RateOut != 0 && actualRateOut != res.RateOut {
-		return 0, &LedgerError{Code: LedgerCodeRateMismatch, Message: fmt.Sprintf("actual rateOut %d does not match reserved rateOut %d", actualRateOut, res.RateOut)}
+	// B1: A previously-mismatched reservation cannot be re-settled as
+	// "valid" — its terminal/disputed status is durable evidence.
+	for _, e := range l.entries {
+		if e.Type == EntryMismatch && e.RefID == refID {
+			return 0, &LedgerError{Code: LedgerCodeDuplicateSettle, Message: fmt.Sprintf("reservation %q is terminal (mismatch on record); cannot re-settle", refID)}
+		}
 	}
 
-	// L4: Verify actual tokens do not exceed reserved tokens.
-	if actualTokensIn > res.TokensIn {
-		return 0, &LedgerError{Code: LedgerCodeTokenMismatch, Message: fmt.Sprintf("actual tokensIn %d exceeds reserved tokensIn %d", actualTokensIn, res.TokensIn)}
+	// B1: Detect rate/token mismatch. When detected we MUST persist
+	// immutable evidence before returning the error. The mismatch entry
+	// carries the actual rate/tokens/cost, the reservation ID, and the
+	// reservation-vs-actual rates for reviewer audit. The reservation is
+	// marked terminal; a subsequent valid-shaped settle on the same
+	// reservation is rejected as duplicate.
+	rateMismatch := (actualRateIn != 0 && res.RateIn != 0 && actualRateIn != res.RateIn) ||
+		(actualRateOut != 0 && res.RateOut != 0 && actualRateOut != res.RateOut)
+	tokenMismatch := actualTokensIn > res.TokensIn || actualTokensOut > res.TokensOut
+	if rateMismatch || tokenMismatch {
+		reason := "rate-mismatch"
+		if !rateMismatch {
+			reason = "token-mismatch"
+		}
+		// Preserve at least max(reserved, actual) conservative exposure so
+		// the ledger continues to reflect the worst-case billing.
+		reservedAmount := res.Amount
+		conservative := reservedAmount
+		if actualCost > conservative {
+			conservative = actualCost
+		}
+		delta := conservative - l.balance
+		if delta < 0 {
+			delta = 0
+		}
+		// Append the mismatch evidence first (durable, before error return).
+		mismatchEntry := Entry{
+			ID:                   fmt.Sprintf("mis-%s-%d", l.cfg.RunID, time.Now().UnixNano()),
+			Type:                 EntryMismatch,
+			Timestamp:            time.Now().UTC(),
+			RunID:                l.cfg.RunID,
+			Attempt:              res.Attempt,
+			Model:                l.cfg.Model,
+			Task:                 res.Task,
+			SourceGroup:          res.SourceGroup,
+			Amount:               delta,
+			Balance:              conservative,
+			TokensIn:             res.TokensIn,
+			TokensOut:            res.TokensOut,
+			RateIn:               res.RateIn,
+			RateOut:              res.RateOut,
+			Notes:                fmt.Sprintf("rate/token mismatch for reservation %q; actual billed %d", refID, actualCost),
+			RefID:                refID,
+			ExpectedRateIn:       res.RateIn,
+			ExpectedRateOut:      res.RateOut,
+			ActualRateIn:         actualRateIn,
+			ActualRateOut:        actualRateOut,
+			ActualRateOutPresent: actualRateOut != 0,
+			ActualTokensIn:       actualTokensIn,
+			ActualTokensOut:      actualTokensOut,
+			ActualCost:           actualCost,
+			MismatchReason:       reason,
+			ReservationTerminal:  true,
+		}
+		if err := l.appendEntry(mismatchEntry); err != nil {
+			return 0, err
+		}
+		l.balance = conservative
+		l.lastEntry++
+		// Latch durable halt and persist via init entry rewrite.
+		l.halted = true
+		if len(l.entries) > 0 && l.entries[0].Type == EntryInit {
+			l.entries[0].Halted = true
+			if err := l.rewriteInitEntry(); err != nil {
+				return 0, err
+			}
+		}
+		errCode := LedgerCodeRateMismatch
+		if !rateMismatch {
+			errCode = LedgerCodeTokenMismatch
+		}
+		return 0, &LedgerError{Code: errCode, Message: fmt.Sprintf("%s for reservation %q; mismatch evidence persisted; ledger halted", reason, refID)}
 	}
-	if actualTokensOut > res.TokensOut {
-		return 0, &LedgerError{Code: LedgerCodeTokenMismatch, Message: fmt.Sprintf("actual tokensOut %d exceeds reserved tokensOut %d", actualTokensOut, res.TokensOut)}
-	}
+
+	// Halted-ledger rule: Reserve on a halted ledger is fully blocked
+	// (enforced above), so any reservation that exists was made before
+	// the halt. Settle for such a reservation is the "already-in-flight
+	// billed cost" reconciliation explicitly allowed by the directive,
+	// unless the reservation has been recorded as terminal/disputed via
+	// the mismatch check above. We therefore do not block Settle here on
+	// the halt flag — only the terminal/disputed check above can do that.
 
 	// Reconcile: actual cost must not exceed reservation.
 	reservedAmount := res.Amount

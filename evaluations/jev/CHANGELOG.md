@@ -1,5 +1,95 @@
 # KHA-579 evaluation harness changelog
 
+## v0.3.4 — ledger/dryrun B1 + B2 correction pass
+
+Supersedes v0.3.3 (commit `8f4b550`). The v0.3.3 ledger and dryrun code
+remains in git history as commits `93742d2` and `8f4b550`; the prior
+mismatch-evidence defect was unaddressed. Every existing v0.3 ledger
+test continues to pass; the new regressions below fail to compile at
+`8f4b550` because `EntryMismatch`, `ReservationTerminal`,
+`ExpectedRateIn`, `ActualRateIn`, `ActualCost`, and `MismatchReason`
+did not exist on the `Entry` type at that commit.
+
+The v0.3.3 re-review artifact
+(`/Users/bbrenner/.traycer/epics/1088c958-cb42-463c-8c23-d9e728f7a0aa/artifacts/jev-ledger-review/v0.3.3-rereview/index.md`)
+cataloged B1, B2, C1–C3. The table below records the finding, the
+resolution, and the test that demonstrates the fix.
+
+### B1 — CRITICAL carryover: rate/token-mismatched billing had no durable evidence
+
+| Finding | Resolution | Verification |
+|---------|------------|--------------|
+| Settle with rate/token mismatch returns an error string but writes nothing; later "valid" settle on the same reservation erases evidence; halt is not latched | `Settle` detects rate/token mismatch BEFORE returning the error, appends a durable `EntryMismatch` entry carrying the actual billed rate/tokens/cost, the reservation ID, and expected-vs-actual rates, marks the reservation terminal/disputed (`ReservationTerminal: true`), preserves `max(reservation, actual)` conservative exposure on the ledger, and latches a durable halt. Re-settle of the same reservation returns `LedgerCodeDuplicateSettle`. New `Reserve` on a halted ledger returns `LedgerCodeHalted`. Other already-in-flight reservations (made before halt) can still settle. `validateEntry` accepts the new `EntryMismatch` type. `validateDrift` is unchanged in this regard (mismatch entries are not init entries). | `ledger/mismatch_test.go::TestSettleRateMismatchPersistsEvidenceAndHalts`, `TestSettleTokenMismatchPersistsEvidenceAndHalts`. The mismatch test fails to compile at `8f4b550` because the `EntryMismatch` EntryType and the required Entry fields do not exist. |
+
+### B2 — required: numeric rate/bounds binding
+
+| Finding | Resolution | Verification |
+|---------|------------|--------------|
+| `validateDrift` only compared manifest hash strings; a caller who recomputed the hash over new values bypassed the binding | Init entry now persists `RateIn`, `RateOut` (with `RateOutPresent` marker), and numeric `TokenBoundsValue{MaxInputTokens, MaxOutputTokens}`. `validateDrift` compares these numeric values directly in addition to the manifest hashes. | `TestRateInDriftRejectedOnUsedLedger`, `TestRateOutDriftRejectedOnUsedLedger`, `TestRateOutPresenceDriftRejectedOnUsedLedger`, `TestNumericTokenBoundsDriftRejectedOnUsedLedger`, `TestEmptyLedgerRateInValidation`. |
+
+### C1 — minor: dryrun tests were structural, not CLI-executed
+
+| Finding | Resolution | Verification |
+|---------|------------|--------------|
+| The 26 dryrun tests called `analyzeFixtures` / `estimateCostMicro` / `MicroUnitFromBaseString` directly; none shelled out to `go run ./cmd/jev-dryrun` | Added `cmd/jev-dryrun/cli_integration_test.go` with `TestDryRunCLIIntegration` that builds the binary into a temp dir and exercises it via `os/exec` against the real `fixtures.jsonl`. Cases: free output (`-rate-out 0`), 332-fixture count, default `repetitions=3`, default `$0` cap → nonzero exit with `EXCEEDS CAP`, missing `-rate-in` → nonzero exit. | `TestDryRunCLIIntegration/free_output_accepted`, `/default_repetitions_3`, `/default_cap_zero_nonzero_exit`, `/missing_rate_in_nonzero_exit`. |
+
+### C2 — minor: missing directory fsync after rename
+
+| Finding | Resolution | Verification |
+|---------|------------|--------------|
+| `rewriteInitEntry` temp+rename was correct but the directory was not fsynced, so the rename itself was not durable across crashes | Added `syncDir` helper. `Open` calls it after the initial init write; `rewriteInitEntry` calls it after the rename. Both are fail-closed on sync error. | Covered indirectly by every `TestSettle*` and `TestHalted*` test, which exercise both paths. |
+
+### C3 — cosmetic: README heading said "v0.3.2"
+
+| Finding | Resolution | Verification |
+|---------|------------|--------------|
+| README heading said `Budget ledger (v0.3.2, new)` though this commit is v0.3.4 | README rewritten to describe v0.3.4 ledger and dryrun semantics; explicit section on mismatch-evidence persistence, numeric config binding, and directory fsync. | `git diff 8f4b550..HEAD -- README.md` shows new "Budget ledger (v0.3.4)" and "Dry-run CLI (v0.3.4)" sections. |
+
+### Quality Gates (v0.3.4)
+
+| Check | Result |
+|-------|--------|
+| `gofmt -l .` | Clean |
+| `go vet ./...` | Clean |
+| `go test -race -count=1 ./...` | 13 packages pass |
+| B1 regression at `8f4b550` | Build fails: undefined `EntryMismatch`, `ReservationTerminal`, `ExpectedRateIn`, `ActualRateIn`, `ActualCost`, `MismatchReason` |
+| B1 regression at HEAD | `TestSettleRateMismatchPersistsEvidenceAndHalts`, `TestSettleTokenMismatchPersistsEvidenceAndHalts` PASS |
+| B2 regression at `8f4b550` | No numeric-binding rejection path exists |
+| B2 regression at HEAD | `TestRateInDriftRejectedOnUsedLedger`, `TestRateOutDriftRejectedOnUsedLedger`, `TestRateOutPresenceDriftRejectedOnUsedLedger`, `TestNumericTokenBoundsDriftRejectedOnUsedLedger`, `TestEmptyLedgerRateInValidation` PASS |
+| C1 regression at HEAD | `TestDryRunCLIIntegration` (4 subtests) PASS |
+
+### Pre-existing accepted v0.3.3 fixes (preserved, not redone)
+
+The v0.3.3 commit (`8f4b550`) accepted R1 (explicit zero rate-out), R2
+(actual fixture count 332 not 110), R3 (real dryrun tests), M1 (atomic
+rewriteInitEntry via temp+rename), M2 (real SHA-256 token bounds hash),
+M3 (exact decimal parsing with conservative ceiling). These are
+preserved as-is in v0.3.4; this commit only adds the B1/B2/C1/C2/C3
+corrections on top of the v0.3.3 baseline. The `MicroUnitFromBaseString`
+path remains the only monetary CLI parser; no `float64` monetary
+arithmetic was reintroduced.
+
+### Remaining scope (documented, not corrected in this commit)
+
+* N3 (sample-size targets), N4 (body-level entity reuse), and the
+  GateEligible-as-vocabulary-coverage caveat from v0.3 are unchanged.
+* Discovery recall remains unmeasured against real extraction patterns;
+  the `discovery` package's `entityRecall = 0` reflects honest reporting
+  on bodies lacking markdown patterns, not a bug.
+* Authorized cap remains $0 by default. The `-cap 10` and `-rate-out 0.042`
+  examples in the README are unverified planning numbers, not grant of
+  authorization.
+* Live `jev-eval` and `jev-candidategen` paths remain unprobed against
+  OpenRouter until paid authorization is in place.
+
+---
+
+## v0.3.3 — R1/R2/R3/M1/M2/M3 correction pass
+
+Supersedes v0.3.2 (commit `93742d2`). Preserved as the parent of the
+v0.3.4 B1/B2/C1/C2/C3 corrections. See the v0.3.3 review artifact for
+the original R1–R3/M1–M3 list and probe results.
+
 ## v0.3.0 — focused v0.3 correction pass
 
 Supersedes v0.2.0. The v0.2 corpus, manifest, eval-report, and reports

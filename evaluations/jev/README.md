@@ -1,4 +1,4 @@
-# Offline evaluation harness for KHA-579 (Jev), protocol v0.3
+# Offline evaluation harness for KHA-579 (Jev), protocol v0.3.4
 
 This directory contains the offline evaluation harness for Linear
 [KHA-579](https://linear.app/khaentertainment/issue/KHA-579): a Go-based
@@ -6,10 +6,12 @@ harness that scores candidate-generation, deterministic-baseline, and
 remote-model pipelines against a synthesized corpus of evaluation
 fixtures.
 
-The harness follows protocol **v0.3**, which supersedes v0.2. The v0.3
-changes are recorded in `CHANGELOG.md`. Earlier reports are superseded.
-Use the root-level fixture and report paths below; the `pilot/` directory
-is a stale duplicate location, not an authoritative historical snapshot.
+The harness follows protocol **v0.3.4** (ledger/dryrun correction pass
+for B1 mismatch evidence persistence and B2 numeric config binding;
+the v0.3 protocol semantics above are unchanged). The v0.3.4 changes
+are recorded in `CHANGELOG.md`. Earlier reports are superseded. Use the
+root-level fixture and report paths below; the `pilot/` directory is a
+stale duplicate location, not an authoritative historical snapshot.
 
 ## Scope disclosure — SMOKE TEST ONLY
 
@@ -471,7 +473,7 @@ entity reuse) are documented limitations, not harness defects.
   separate report. The two reports must be cross-referenced before any
   adoption claim.
 
-## Budget ledger (v0.3.2, new)
+## Budget ledger (v0.3.4)
 
 * Package `ledger` implements a persistent, crash-safe budget ledger.
 * All monetary amounts stored as integer micro-units (1/1,000,000 base unit).
@@ -479,9 +481,59 @@ entity reuse) are documented limitations, not harness defects.
 * Retains unknown billing after timeout/crash; same-run resume preserves cap.
 * Fails closed for missing rates, missing token bounds, manifest/model drift.
 * Single writer via file lock; atomic append+fsync for crash safety.
+* Directory fsync after init write and after init-entry rename so atomic
+  renames are durable across crashes.
 * Cost/usage never stripped/fabricated; reconcile actual vs reservation; halt on overrun.
-* **Explicit zero output price (`RateOut = 0`) supported** — represents free output (Jev advertises free output). Omitted rate still rejected.
-* Halt blocks NEW reservations/settlements but permits reconciliation of in-flight billed costs.
+* **Explicit zero output price (`RateOut = 0`) supported** — represents
+  free output (Jev advertises free output). Omitted rate (`RateOut = nil`)
+  is rejected as missing. The two are distinguished by a `RateOutPresent`
+  flag persisted on the init entry.
+* Money parsed from decimal strings via `MicroUnitFromBaseString`:
+  conservative ceiling rounding, rejects negative / non-finite / overflow,
+  never saturates or rounds a positive cost down. No `float64` path
+  remains in monetary CLI flags.
+* **Mismatch evidence persistence (B1).** On rate or token mismatch the
+  ledger appends a durable `EntryMismatch` record carrying the actual
+  billed rate/tokens/cost and the reservation ID, marks that reservation
+  terminal/disputed, latches a durable halt, and returns the mismatch
+  error AFTER persistence. `max(reserved, actual)` conservative exposure
+  is preserved on the ledger while the dispute stands. Same reservation
+  cannot subsequently be settled as "valid" — that re-settle is rejected
+  as duplicate. New reservations are prohibited while halted, but other
+  already-in-flight reservations may record their bills without
+  unhalting.
+* **Numeric config binding (B2).** The init entry persists the actual
+  numeric `RateIn` / `RateOut` (with `RateOutPresent` marker) and the
+  numeric `TokenBounds.MaxInputTokens` / `TokenBounds.MaxOutputTokens`,
+  and `validateDrift` compares them directly. A caller who re-supplies
+  matching manifest hash strings but changes the underlying values is
+  rejected by the numeric binding rather than silently accepted.
+* Halt blocks NEW reservations (the only way to commit new spending);
+  Settle on existing pre-halt reservations is permitted for
+  reconciliation unless the reservation is already terminal/disputed.
+* The mismatch entry is durable: it survives reopen via replay of the
+  init entry's `Halted` flag plus the `EntryMismatch` record.
+* Initialization/torn-record corruption recovery is fail-closed: a torn
+  final entry is rejected by replay, never silently repaired.
+
+## Dry-run CLI (v0.3.4)
+
+* Command `jev-dryrun` computes offline cost projection (ZERO network calls).
+* Takes explicit unverified rates, token limits, retry assumptions as strings.
+* Emits per-task/per-group reservations with retry ceiling + discovery cost.
+* Maximum possible cost under plan + missing approvals list.
+* Default authorized cap = $0 (proposed $10/$1 not authorization).
+* Exit code 1 if plan exceeds cap; exit code 1 with explanatory stderr on
+  invalid or missing rate strings.
+* **Explicit `-repetitions` flag (default 3 per protocol)**.
+* **Exact decimal parsing with conservative ceiling rounding** — parses
+  rate strings directly without `float64` intermediate; rejects
+  negative / non-finite / overflow; never saturates positive cost down.
+* Uses real SHA-256 for token bounds hash (64 hex chars).
+* One `os/exec` CLI integration test (`TestDryRunCLIIntegration`) shells
+  out to the built binary against the real `fixtures.jsonl` and verifies
+  free output acceptance, 332-fixture count, default-repetitions-3,
+  default-cap-zero nonzero exit, and missing-rate nonzero exit.
 
 ## Dry-run CLI (v0.3.2, new)
 
