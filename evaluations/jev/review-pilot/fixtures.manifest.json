@@ -1,6 +1,6 @@
 {
   "protocolVersion": "0.4.0",
-  "generatedAt": "2026-09-20T21:12:30.93591Z",
+  "generatedAt": "2026-09-20T21:31:11.33931Z",
   "fixtureFile": "review-pilot/fixtures.jsonl",
   "fixtureCount": 24,
   "splitCounts": {
@@ -17,8 +17,7 @@
   },
   "sourceGroupCount": 24,
   "reviewStatusCount": {
-    "approved": 10,
-    "unreviewed": 14
+    "approved": 24
   },
   "challengeCount": {
     "adversarial-instruction": 2,
@@ -30,7 +29,7 @@
     "reversed-direction": 1,
     "straightforward-positive": 5
   },
-  "sha256FixtureFile": "5fb64b39ba98d1fa4d3b72440b51a7de31326ceea49207adce0c34da4e463d11",
+  "sha256FixtureFile": "bd3475c422e369e1168e03e57af962c26a232c9a10ebb457d75f750a39aca9b5",
   "sha256Manifest": "",
   "fixtureHashes": [
     {
@@ -50,12 +49,12 @@
     },
     {
       "id": "rp-et-004",
-      "sha256": "8a2289c4480998ba9f5b4199853ac70653d4b50a198fc7d4741f3b61e1c3b3a9",
+      "sha256": "20a35c423a91a196f87376901b3e25e23c54c6330b16ea0beb02b0f6deaa18f8",
       "split": "tuning"
     },
     {
       "id": "rp-et-005",
-      "sha256": "c81fd9e69cc7baf7febd07a8533bf829b2c00a7a631a7bd724922e508e1e56a9",
+      "sha256": "bb54b2f9faa66bf01669ec7b824304d0a91f81c9a075c633c1cbbee0149687aa",
       "split": "tuning"
     },
     {
@@ -65,27 +64,27 @@
     },
     {
       "id": "rp-ct-007",
-      "sha256": "accfcdc8fe1659ebc739470d023814cfef79f22e41f534a7e7c069c41f7b80d5",
+      "sha256": "af7293f1c2205584c7a4f90be2727bf081c4808284424dedcf0c31c778757e81",
       "split": "tuning"
     },
     {
       "id": "rp-ct-008",
-      "sha256": "45d61a69a56e21ba88949aeaa79fe0b54ec5385e4104d8623f1fc6bf9b8084dd",
+      "sha256": "b2061c2d8f853167dd923bb9955962ed2d5a68163359d965f9e72b9b665cd08d",
       "split": "tuning"
     },
     {
       "id": "rp-ct-009",
-      "sha256": "52173fbea3ab6a097c5e8d522f09117a8667424a1620a109652562e5077602b3",
+      "sha256": "99dd284a3cfc20460ac1bb429b931ace193112cf912339f648c42af397518f81",
       "split": "tuning"
     },
     {
       "id": "rp-ct-010",
-      "sha256": "0d5b3a7ee1c5cc3772d8b1ac73543e18f385874fc6a8970caf91d3ca87341576",
+      "sha256": "b34de228fa2123b3a09b87f55b424af7a971a7bfc0af99b61de3e88ed252a4ab",
       "split": "tuning"
     },
     {
       "id": "rp-ct-011",
-      "sha256": "dc0c4069da98864cb1b76b8580bbcf3092d5ddfcafcd8c13ca73526a66f65487",
+      "sha256": "638fe5cee56474980fcf711ee2283224860d4182483a7e88c116c86ba9426ebd",
       "split": "tuning"
     },
     {
@@ -115,17 +114,17 @@
     },
     {
       "id": "rp-rel-017",
-      "sha256": "6bd8feb7bc7824029eac922c403d53bc3e41562141f043f31ea1b70f2fa7a56a",
+      "sha256": "ecb79993b63897c8f845082ed96f8b2838b548e467847eabc48e49446d60bce4",
       "split": "tuning"
     },
     {
       "id": "rp-rel-018",
-      "sha256": "89139974bfa80e37828ff27f381c4bdc3cc4af67858beb70570642a7479141e0",
+      "sha256": "62575a5b2248947ed35d7c1a157267aa1e50e5b61833c924f264b8f9e57866b2",
       "split": "tuning"
     },
     {
       "id": "rp-cs-019",
-      "sha256": "0c5ba585b01c2c65edee784602b647e8cb0d53e9a732e49fd074f03a16eafda0",
+      "sha256": "00a6a895e2aa4ccf1e4c01c3789600c34eede8960023162447a814bad1a44c7a",
       "split": "tuning"
     },
     {
@@ -135,22 +134,22 @@
     },
     {
       "id": "rp-cs-021",
-      "sha256": "3e372a38d265bce445c7a5dbc36c42001bb24664a8b8d7176e341fac03c8c3e8",
+      "sha256": "b801f3abf3efc017cd9b649fd537a7c6328de87e1997536f5f98d23cfcaa8cb5",
       "split": "tuning"
     },
     {
       "id": "rp-cs-022",
-      "sha256": "de199b7b8664966e9d0b41f642f6aa189f20c26398feb61dbcd67d0703d04e6b",
+      "sha256": "42f524857d7d1348f4109edc0908b4ca1ae019eca9cdbd05bbc3f33abbafc9b9",
       "split": "tuning"
     },
     {
       "id": "rp-cs-023",
-      "sha256": "9da31b5a2fbc7c79b0197564b2e342dcb3663f39bb359bfad2dad1a6764aef64",
+      "sha256": "bd85dc1cec22e4690a18830f9c6ddecc431c57b57e7cf2fe3f9f03999966c471",
       "split": "tuning"
     },
     {
       "id": "rp-cs-024",
-      "sha256": "812733b29826fa4186735486f7ab010432449e422757ebe685079d6745404a44",
+      "sha256": "3f47161b42ee2a05ba3c347e81dd10355ae8e6a862590d720c634490cf1366a9",
       "split": "tuning"
     }
   ],

@@ -1,7 +1,6 @@
 // Schema and manifest validation tests for the review-pilot packet.
 // Human-reviewer spotcheck: verify proposed labels are in the closed
-// vocabulary, the ten adjudicated fixtures carry human approval, and the
-// remaining fixtures stay unreviewed.
+// vocabulary and all 24 adjudicated fixtures carry human approval.
 package main
 
 import (
@@ -66,35 +65,14 @@ func TestReviewPilotSchemaValidation(t *testing.T) {
 		t.Fatalf("expected 24 fixtures, got %d", len(fxs))
 	}
 
-	approvedIDs := map[string]bool{
-		"rp-et-001":  true,
-		"rp-et-002":  true,
-		"rp-et-003":  true,
-		"rp-et-006":  true,
-		"rp-rel-013": true,
-		"rp-rel-014": true,
-		"rp-rel-015": true,
-		"rp-ct-012":  true,
-		"rp-rel-016": true,
-		"rp-cs-020":  true,
-	}
-	// Spotcheck: every proposed label is in vocab for its task; exactly the
-	// ten adjudicated fixtures are approved; every author is set.
+	// Every adjudicated label is in vocab for its task; every fixture is
+	// human-approved and retains its author provenance.
 	for _, f := range fxs {
-		if approvedIDs[f.ID] {
-			if f.ReviewStatus != protocol.ReviewApproved {
-				t.Errorf("fixture %s: reviewStatus=%v (want approved)", f.ID, f.ReviewStatus)
-			}
-			if f.Reviewer != "KHAEntertainment" {
-				t.Errorf("fixture %s: reviewer=%q (want KHAEntertainment)", f.ID, f.Reviewer)
-			}
-		} else {
-			if f.ReviewStatus != protocol.ReviewUnreviewed {
-				t.Errorf("fixture %s: reviewStatus=%v (want unreviewed)", f.ID, f.ReviewStatus)
-			}
-			if f.Reviewer != "" {
-				t.Errorf("fixture %s: reviewer=%q (want empty for unreviewed fixture)", f.ID, f.Reviewer)
-			}
+		if f.ReviewStatus != protocol.ReviewApproved {
+			t.Errorf("fixture %s: reviewStatus=%v (want approved)", f.ID, f.ReviewStatus)
+		}
+		if f.Reviewer != "KHAEntertainment" {
+			t.Errorf("fixture %s: reviewer=%q (want KHAEntertainment)", f.ID, f.Reviewer)
 		}
 		if f.Author == "" {
 			t.Errorf("fixture %s: missing author", f.ID)
@@ -193,11 +171,11 @@ func TestReviewPilotManifest(t *testing.T) {
 	if m.SplitCounts.Tuning != 24 || m.SplitCounts.HoldOut != 0 {
 		t.Errorf("manifest SplitCounts wrong: %+v", m.SplitCounts)
 	}
-	if m.ReviewStatusCount[protocol.ReviewUnreviewed] != 14 {
-		t.Errorf("manifest reviewStatusCount[unreviewed] = %d, want 14", m.ReviewStatusCount[protocol.ReviewUnreviewed])
+	if m.ReviewStatusCount[protocol.ReviewUnreviewed] != 0 {
+		t.Errorf("manifest reviewStatusCount[unreviewed] = %d, want 0", m.ReviewStatusCount[protocol.ReviewUnreviewed])
 	}
-	if m.ReviewStatusCount[protocol.ReviewApproved] != 10 {
-		t.Errorf("manifest reviewStatusCount[approved] = %d, want 10", m.ReviewStatusCount[protocol.ReviewApproved])
+	if m.ReviewStatusCount[protocol.ReviewApproved] != 24 {
+		t.Errorf("manifest reviewStatusCount[approved] = %d, want 24", m.ReviewStatusCount[protocol.ReviewApproved])
 	}
 	// Per-task count regression: each of the 4 tasks has 6 fixtures.
 	if got := m.TaskCounts.EntityType; got != 6 {
@@ -223,7 +201,7 @@ func TestReviewPilotManifest(t *testing.T) {
 // Before the fix, these fields were absent from protocol.Fixture
 // and encoding/json silently discarded them on Unmarshal.
 // TestReviewPilotLabelsByCurrentAdjudication locks the current fixture labels,
-// including the three human corrections layered on the v0.4 packet.
+// including the final human corrections layered on the v0.4 packet.
 func TestReviewPilotLabelsByCurrentAdjudication(t *testing.T) {
 	fxPath, mfPath := paths(t)
 	loaded, err := loader.Load(fxPath, mfPath)
@@ -231,18 +209,30 @@ func TestReviewPilotLabelsByCurrentAdjudication(t *testing.T) {
 		t.Fatalf("loader.Load: %v", err)
 	}
 	want := map[string]string{
-		"rp-et-001":  "place",                 // approved regional subject
-		"rp-et-002":  "project",               // approved civic foundation project
-		"rp-et-003":  "document",              // approved accord-as-formal-document
-		"rp-et-004":  "insufficient-evidence", // empty body (missing evidence)
-		"rp-et-006":  "place",                 // approved named-region environment
-		"rp-ct-010":  "insufficient-evidence", // placeholder candidate, no context
-		"rp-ct-012":  "insufficient-evidence", // approved ambiguous survey referent
-		"rp-rel-013": "related-to",            // monitoring association, not functional use
-		"rp-rel-014": "related-to",            // ownership association survives reversed order
-		"rp-rel-015": "related-to",            // geographically consistent sources
-		"rp-rel-016": "related-to",            // approved supply association, not entity use
-		"rp-cs-020":  "insufficient-evidence", // no incompatible or exhaustive endpoint evidence
+		"rp-et-001":  "place",                     // approved regional subject
+		"rp-et-002":  "project",                   // approved civic foundation project
+		"rp-et-003":  "document",                  // approved accord-as-formal-document
+		"rp-et-004":  "insufficient-evidence",     // empty body (missing evidence)
+		"rp-et-005":  "document",                  // approved index/catalog document
+		"rp-et-006":  "place",                     // approved named-region environment
+		"rp-ct-007":  "PERSON",                    // approved named person
+		"rp-ct-008":  "ORGANIZATION",              // approved industrial operator
+		"rp-ct-009":  "ORGANIZATION",              // approved investment firm
+		"rp-ct-010":  "insufficient-evidence",     // placeholder candidate, no context
+		"rp-ct-011":  "ORGANIZATION",              // approved renamed observatory
+		"rp-ct-012":  "insufficient-evidence",     // approved ambiguous survey referent
+		"rp-rel-013": "related-to",                // monitoring association, not functional use
+		"rp-rel-014": "related-to",                // ownership association survives reversed order
+		"rp-rel-015": "related-to",                // geographically consistent sources
+		"rp-rel-016": "related-to",                // approved supply association, not entity use
+		"rp-rel-017": "no-supported-relationship", // approved case-specific absence of holdings
+		"rp-rel-018": "related-to",                // approved spatial/touristic association
+		"rp-cs-019":  "supported",                 // explicit founding date
+		"rp-cs-020":  "insufficient-evidence",     // no incompatible or exhaustive endpoint evidence
+		"rp-cs-021":  "insufficient-evidence",     // unresolved equal-authority conflict
+		"rp-cs-022":  "supported",                 // explicit vessel count survives rename
+		"rp-cs-023":  "contradicted",              // embedded instruction is not factual authority
+		"rp-cs-024":  "insufficient-evidence",     // operator not stated exclusive
 	}
 	got := map[string]string{}
 	for _, f := range loaded.Fixtures {
@@ -283,13 +273,27 @@ func TestReviewPilotHumanAdjudicationMetadata(t *testing.T) {
 		"rp-et-001":  {label: "place", rationaleFragment: "intentionally ambiguous benchmark case"},
 		"rp-et-002":  {label: "project", rationaleFragment: "public works project"},
 		"rp-et-003":  {label: "document", rationaleFragment: "identifiable formal agreements"},
+		"rp-et-004":  {label: "insufficient-evidence", rationaleFragment: "No excerpts available"},
+		"rp-et-005":  {label: "document", rationaleFragment: "index/catalog"},
 		"rp-et-006":  {label: "place", rationaleFragment: "environmental characteristics"},
+		"rp-ct-007":  {label: "PERSON", rationaleFragment: "personal name and a personal title"},
+		"rp-ct-008":  {label: "ORGANIZATION", rationaleFragment: "industrial operator"},
+		"rp-ct-009":  {label: "ORGANIZATION", rationaleFragment: "the firm, not the person"},
+		"rp-ct-010":  {label: "insufficient-evidence", rationaleFragment: "no semantic context"},
+		"rp-ct-011":  {label: "ORGANIZATION", rationaleFragment: "rename does not change semantic type"},
 		"rp-rel-013": {label: "related-to", rationaleFragment: "not explicit functional use"},
 		"rp-rel-014": {label: "related-to", rationaleFragment: "does not justify broadening part-of semantics"},
 		"rp-rel-015": {label: "related-to", rationaleFragment: "geographically consistent"},
 		"rp-ct-012":  {label: "insufficient-evidence", rationaleFragment: "ambiguous between a survey activity and a resulting document"},
 		"rp-rel-016": {label: "related-to", rationaleFragment: "not explicit use of the source supplier entity itself"},
+		"rp-rel-017": {label: "no-supported-relationship", rationaleFragment: "explicit absence of Club holdings"},
+		"rp-rel-018": {label: "related-to", rationaleFragment: "spatial/touristic"},
+		"rp-cs-019":  {label: "supported", rationaleFragment: "matches the body verbatim"},
 		"rp-cs-020":  {label: "insufficient-evidence", rationaleFragment: "does not declare the listed endpoints exhaustive"},
+		"rp-cs-021":  {label: "insufficient-evidence", rationaleFragment: "equally authoritative"},
+		"rp-cs-022":  {label: "supported", rationaleFragment: "count of vessels = 3"},
+		"rp-cs-023":  {label: "contradicted", rationaleFragment: "embedded instruction is an injection"},
+		"rp-cs-024":  {label: "insufficient-evidence", rationaleFragment: "relationship is not addressed"},
 	}
 	approved := make(map[string]protocol.Fixture)
 	for i := range loaded.Fixtures {
@@ -327,6 +331,9 @@ func TestReviewPilotHumanAdjudicationMetadata(t *testing.T) {
 	}
 	if fixture := approved["rp-cs-020"]; len(fixture.ChallengeCategories) != 1 || fixture.ChallengeCategories[0] != protocol.ChallengeMissingEvidence {
 		t.Fatalf("rp-cs-020 challenge categories = %v, want [missing-evidence]", fixture.ChallengeCategories)
+	}
+	if fixture := approved["rp-rel-017"]; fixture.ExpectedLabel != "no-supported-relationship" {
+		t.Fatalf("rp-rel-017 label = %q, want no-supported-relationship", fixture.ExpectedLabel)
 	}
 }
 
