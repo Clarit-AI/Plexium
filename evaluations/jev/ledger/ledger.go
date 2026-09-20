@@ -783,17 +783,28 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 		if !rateMismatch {
 			reason = "token-mismatch"
 		}
-		// Preserve at least max(reserved, actual) conservative exposure so
-		// the ledger continues to reflect the worst-case billing.
+		// E1: Conservative exposure accounting for mismatch must NOT
+		// overwrite other reservations' outstanding exposure. Compute
+		// the delta (the worst-case overrun beyond the reservation),
+		// then checked-add it to the existing global balance. The
+		// reservation itself remains in the ledger at its reserved
+		// amount; the mismatch evidence records the additional
+		// conservative exposure for this single reservation.
 		reservedAmount := res.Amount
-		conservative := reservedAmount
-		if actualCost > conservative {
-			conservative = actualCost
-		}
-		delta := conservative - l.balance
+		delta := actualCost - reservedAmount
 		if delta < 0 {
 			delta = 0
 		}
+		// Overflow check (fail-closed) BEFORE appending evidence. If
+		// checked-add would overflow MaxMicroUnits, return the error
+		// without appending or mutating balance. Already-persisted
+		// entries (the reservation itself) are not dropped — the
+		// mismatch evidence simply does not get written for an
+		// overflow that cannot be represented.
+		if delta > MaxMicroUnits-l.balance {
+			return 0, &LedgerError{Code: LedgerCodeOverflow, Message: fmt.Sprintf("mismatch delta %d would overflow global balance %d", delta, l.balance)}
+		}
+		newBalance := l.balance + delta
 		// Append the mismatch evidence first (durable, before error return).
 		mismatchEntry := Entry{
 			ID:                   fmt.Sprintf("mis-%s-%d", l.cfg.RunID, time.Now().UnixNano()),
@@ -805,7 +816,7 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 			Task:                 res.Task,
 			SourceGroup:          res.SourceGroup,
 			Amount:               delta,
-			Balance:              conservative,
+			Balance:              newBalance,
 			TokensIn:             res.TokensIn,
 			TokensOut:            res.TokensOut,
 			RateIn:               res.RateIn,
@@ -826,7 +837,7 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 		if err := l.appendEntry(mismatchEntry); err != nil {
 			return 0, err
 		}
-		l.balance = conservative
+		l.balance = newBalance
 		l.lastEntry++
 		// Latch durable halt and persist via init entry rewrite.
 		l.halted = true
