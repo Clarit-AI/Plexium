@@ -17,6 +17,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Clarit-AI/Plexium/evaluations/jev/discovery"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/loader"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/protocol"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/runner"
@@ -54,13 +55,18 @@ func main() {
 	baselinePreds := runner.RunBaseline(loaded.Fixtures)
 	baselineReport := scoring.Score(loaded.Manifest.ProtocolVersion, scoring.SourceBaseline, baselinePreds)
 
+	// Discovery baseline: evidence-only deterministic extraction from raw
+	// source text. This never reads fixture Candidates/ExpectedLabel/GoldEntities.
+	discoveryReport := runDiscoveryBaseline(loaded.Fixtures)
+
 	envelope := struct {
-		ManifestSummary ManifestSummary       `json:"manifestSummary"`
-		Drift           *loader.DriftReport   `json:"drift"`
-		Baseline        scoring.Report        `json:"baseline"`
-		Replay          *scoring.Report       `json:"replay,omitempty"`
+		ManifestSummary ManifestSummary        `json:"manifestSummary"`
+		Drift           *loader.DriftReport    `json:"drift"`
+		Baseline        scoring.Report         `json:"baseline"`
+		Discovery       *discovery.Report      `json:"discovery,omitempty"`
+		Replay          *scoring.Report        `json:"replay,omitempty"`
 		ReplayCoverage  *runner.CoverageReport `json:"replayCoverage,omitempty"`
-	}{ManifestSummary: summarizeManifest(loaded.Manifest), Drift: loaded.Drift, Baseline: baselineReport}
+	}{ManifestSummary: summarizeManifest(loaded.Manifest), Drift: loaded.Drift, Baseline: baselineReport, Discovery: discoveryReport}
 
 	if *replayPath != "" {
 		entries, err := readReplay(*replayPath)
@@ -95,6 +101,59 @@ func main() {
 	// Drift is always present in JSON so consumers can see drift=null
 	// explicitly rather than absence.
 	_ = envelope.Drift
+}
+
+// runDiscoveryBaseline builds discovery.Source entries from the fixtures'
+// SourceGroup Body (if present in sourceRevision.Note or a similar field)
+// and runs the evidence-only baseline. Since our synthetic corpus doesn't
+// store the raw markdown body in the fixture, we reconstruct Sources from
+// the first fixture per source group's Excerpts (which contain the body).
+// Gold entities/edges are looked up from the fixture's ExpectedLabel and
+// Candidates fields.
+func runDiscoveryBaseline(fixtures []protocol.Fixture) *discovery.Report {
+	// Group fixtures by source group
+	groupBody := map[string]string{}
+	groupGoldEntities := map[string][]string{}
+
+	for _, f := range fixtures {
+		if _, ok := groupBody[f.SourceGroup]; !ok {
+			// Use the first excerpt's text as the body
+			if len(f.Excerpts) > 0 {
+				groupBody[f.SourceGroup] = f.Excerpts[0].Text
+			}
+		}
+		// For candidate-type and entity-type fixtures, the expected label
+		// is an entity type; for relationship/claim-support, we collect
+		// gold entities from the candidates list.
+		// The gold entities for discovery are the candidate titles.
+		for _, c := range f.Candidates {
+			groupGoldEntities[f.SourceGroup] = append(groupGoldEntities[f.SourceGroup], c.Title)
+		}
+	}
+	// Deduplicate gold entities per group
+	for g, ents := range groupGoldEntities {
+		seen := map[string]bool{}
+		uniq := []string{}
+		for _, e := range ents {
+			if !seen[e] {
+				seen[e] = true
+				uniq = append(uniq, e)
+			}
+		}
+		groupGoldEntities[g] = uniq
+	}
+
+	var sources []discovery.Source
+	var allGroups []string
+	for g, body := range groupBody {
+		sources = append(sources, discovery.Source{Group: g, Body: body})
+		allGroups = append(allGroups, g)
+	}
+
+	goldFn := func(group string) []string {
+		return groupGoldEntities[group]
+	}
+	return discovery.Run(sources, goldFn, nil, allGroups)
 }
 
 // ManifestSummary is a compact view of the manifest. The full fixture list

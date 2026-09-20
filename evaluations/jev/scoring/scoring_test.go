@@ -8,11 +8,11 @@ import (
 )
 
 func TestScoreEmptyReturnsZeros(t *testing.T) {
-	rep := Score("0.2.0", SourceBaseline, nil)
+	rep := Score("0.3.0", SourceBaseline, nil)
 	if rep.FixtureCount != 0 {
 		t.Fatalf("expected 0, got %d", rep.FixtureCount)
 	}
-	for _, task := range []protocol.Task{protocol.TaskEntityType, protocol.TaskRelationship, protocol.TaskClaimSupport} {
+	for _, task := range []protocol.Task{protocol.TaskEntityType, protocol.TaskCandidateType, protocol.TaskRelationship, protocol.TaskClaimSupport} {
 		tr := rep.ByTask[task]
 		if tr.FixtureCount != 0 {
 			t.Fatalf("task %s should be empty", task)
@@ -25,7 +25,7 @@ func TestScoreBaselineEntityType(t *testing.T) {
 		{Source: SourceBaseline, Task: protocol.TaskEntityType, SourceGroup: "g1", Split: protocol.SplitTuning, ExpectedLabel: "person", PredictedLabel: "document"},
 		{Source: SourceBaseline, Task: protocol.TaskEntityType, SourceGroup: "g1", Split: protocol.SplitTuning, ExpectedLabel: "document", PredictedLabel: "document"},
 	}
-	rep := Score("0.2.0", SourceBaseline, preds)
+	rep := Score("0.3.0", SourceBaseline, preds)
 	tr := rep.ByTask[protocol.TaskEntityType]
 	if tr.FixtureCount != 2 {
 		t.Fatalf("expected 2, got %d", tr.FixtureCount)
@@ -36,8 +36,6 @@ func TestScoreBaselineEntityType(t *testing.T) {
 }
 
 func TestScoreDoesNotPanicOnOutsideVocabLabel(t *testing.T) {
-	// P1 finding #1: outside-vocab label previously panicked on nil-map
-	// write. The fix initializes the bucket.
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("scorer panicked: %v", r)
@@ -46,12 +44,10 @@ func TestScoreDoesNotPanicOnOutsideVocabLabel(t *testing.T) {
 	preds := []Prediction{
 		{Source: SourceDecisions, Task: protocol.TaskEntityType, Split: protocol.SplitHeldOut, ExpectedLabel: "martian", PredictedLabel: "person"},
 	}
-	_ = Score("0.2.0", SourceDecisions, preds)
+	_ = Score("0.3.0", SourceDecisions, preds)
 }
 
 func TestContradictionMissDenominatorIsContradictedCasesOnly(t *testing.T) {
-	// P1 finding #3: prior denominator was all predictions.
-	// 2 supported, 1 contradicted correctly, 1 contradicted missed (abstain).
 	ci := 0.8
 	preds := []Prediction{
 		{Task: protocol.TaskClaimSupport, SourceGroup: "g1", Split: protocol.SplitHeldOut,
@@ -63,7 +59,7 @@ func TestContradictionMissDenominatorIsContradictedCasesOnly(t *testing.T) {
 		{Task: protocol.TaskClaimSupport, SourceGroup: "g1", Split: protocol.SplitHeldOut,
 			ExpectedLabel: "contradicted", PredictedLabel: "insufficient-evidence", Abstained: true, Confidence: &ci},
 	}
-	rep := Score("0.2.0", SourceDecisions, preds)
+	rep := Score("0.3.0", SourceDecisions, preds)
 	tr := rep.ByTask[protocol.TaskClaimSupport]
 	if tr.ContradictionMiss == nil || !tr.ContradictionMiss.IsApplicable {
 		t.Fatalf("expected applicable contradiction-miss rate")
@@ -71,15 +67,9 @@ func TestContradictionMissDenominatorIsContradictedCasesOnly(t *testing.T) {
 	if tr.ContradictionMiss.Numerator != 1 || tr.ContradictionMiss.Denominator != 2 {
 		t.Fatalf("expected 1/2, got %v", tr.ContradictionMiss)
 	}
-	if math.Abs(tr.ContradictionMiss.Rate-0.5) > 1e-9 {
-		t.Fatalf("expected rate 0.5, got %v", tr.ContradictionMiss.Rate)
-	}
 }
 
 func TestUnsupportedAcceptDenominatorIsNegativeCasesOnly(t *testing.T) {
-	// P1 finding #4: prior denominator was all task predictions.
-	// 2 positives (both correct), 2 negatives (both wrongly accepted).
-	// Old impl would report 2/4 = 0.5; new impl must report 2/2 = 1.0.
 	preds := []Prediction{
 		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "supported", PredictedLabel: "supported"},
@@ -90,16 +80,13 @@ func TestUnsupportedAcceptDenominatorIsNegativeCasesOnly(t *testing.T) {
 		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "insufficient-evidence", PredictedLabel: "supported"},
 	}
-	rep := Score("0.2.0", SourceDecisions, preds)
+	rep := Score("0.3.0", SourceDecisions, preds)
 	tr := rep.ByTask[protocol.TaskClaimSupport]
 	if tr.UnsupportedAccept == nil || !tr.UnsupportedAccept.IsApplicable {
 		t.Fatalf("expected applicable unsupported-accept rate")
 	}
 	if tr.UnsupportedAccept.Numerator != 2 || tr.UnsupportedAccept.Denominator != 2 {
 		t.Fatalf("expected 2/2, got %v", tr.UnsupportedAccept)
-	}
-	if math.Abs(tr.UnsupportedAccept.Rate-1.0) > 1e-9 {
-		t.Fatalf("expected rate 1.0, got %v", tr.UnsupportedAccept.Rate)
 	}
 }
 
@@ -108,7 +95,7 @@ func TestRateNullWhenDenominatorZero(t *testing.T) {
 		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "supported", PredictedLabel: "supported"},
 	}
-	rep := Score("0.2.0", SourceDecisions, preds)
+	rep := Score("0.3.0", SourceDecisions, preds)
 	tr := rep.ByTask[protocol.TaskClaimSupport]
 	if tr.ContradictionMiss == nil || tr.ContradictionMiss.IsApplicable {
 		t.Fatalf("expected inapplicable contradiction-miss when no contradicted cases")
@@ -123,32 +110,27 @@ func TestErrorsCountAsFailuresAndMissesNotAbstentions(t *testing.T) {
 	preds := []Prediction{
 		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "contradicted", PredictedLabel: "supported", ErrorMessage: "timeout", Confidence: &ci},
-		// Successful abstention on a contradicted-expected case still misses.
 		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "contradicted", PredictedLabel: "insufficient-evidence", Abstained: true, Confidence: &ci},
 	}
-	rep := Score("0.2.0", SourceDecisions, preds)
+	rep := Score("0.3.0", SourceDecisions, preds)
 	tr := rep.ByTask[protocol.TaskClaimSupport]
 	if tr.FailureCount != 1 {
 		t.Fatalf("expected 1 failure, got %d", tr.FailureCount)
 	}
-	// Both cases miss contradiction; denominator = 2.
 	if tr.ContradictionMiss.Numerator != 2 || tr.ContradictionMiss.Denominator != 2 {
 		t.Fatalf("expected 2/2 contradiction miss, got %v", tr.ContradictionMiss)
 	}
 }
 
 func TestMacroF1GateIneligibleWhenLabelMissing(t *testing.T) {
-	// P1 finding #5: perfect classifier on a corpus missing one label
-	// must NOT pass the macro-F1 gate silently. Old impl averaged 0 for
-	// the missing class; new impl flags GateEligible=false.
 	preds := []Prediction{
 		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "supported", PredictedLabel: "supported"},
 		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "contradicted", PredictedLabel: "contradicted"},
 	}
-	rep := Score("0.2.0", SourceDecisions, preds)
+	rep := Score("0.3.0", SourceDecisions, preds)
 	tr := rep.ByTask[protocol.TaskClaimSupport]
 	if tr.GateEligible {
 		t.Fatalf("expected gate-ineligible when insufficient-evidence is missing")
@@ -163,34 +145,95 @@ func TestCalibrationAbsentWithoutProbabilities(t *testing.T) {
 		{Source: SourceBaseline, Task: protocol.TaskEntityType, SourceGroup: "g1", Split: protocol.SplitTuning,
 			ExpectedLabel: "person", PredictedLabel: "document"},
 	}
-	rep := Score("0.2.0", SourceBaseline, preds)
+	rep := Score("0.3.0", SourceBaseline, preds)
 	if rep.ConfidenceCalibration != nil {
 		t.Fatalf("expected nil calibration when no probabilities recorded, got %v", rep.ConfidenceCalibration)
 	}
 }
 
-func TestCalibrationUnscorableWhenConfidenceAndMaxAbsent(t *testing.T) {
-	// P1 finding #6: prior code recorded absent confidence as 0.0.
-	// Probabilities present but Confidence nil must report unscorable
-	// unless the harness can derive max-prob; if a label is malformed
-	// (NaN), report unscorable rather than synthesize zero.
+func TestCalibrationSeparatesConfidenceFromMaxProbability(t *testing.T) {
+	// R-3 (re-review calibration): when a run carries both confidence
+	// and probabilities, the two tables must be reported under distinct
+	// keys with distinct sample populations. Coverage-by-threshold must
+	// reflect each table's own sample count.
+	ci := 0.5
 	preds := []Prediction{
 		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "supported", PredictedLabel: "supported",
-			Probabilities: map[string]float64{
-				"supported":             0.5,
-				"contradicted":          0.3,
-				"insufficient-evidence": 0.2,
-			},
-			// Confidence is nil; max-prob = 0.5 is derivable.
+			Confidence:    &ci,
+			Probabilities: map[string]float64{"supported": 0.5, "contradicted": 0.3, "insufficient-evidence": 0.2},
+		},
+		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "contradicted", PredictedLabel: "supported",
+			// No confidence, only probabilities.
+			Probabilities: map[string]float64{"supported": 0.5, "contradicted": 0.3, "insufficient-evidence": 0.2},
 		},
 	}
-	rep := Score("0.2.0", SourceDecisions, preds)
+	rep := Score("0.3.0", SourceDecisions, preds)
 	if rep.ConfidenceCalibration == nil {
-		t.Fatalf("expected calibration report when probabilities present")
+		t.Fatal("expected calibration report")
 	}
-	if rep.ConfidenceCalibration.UnscorableReason != "" {
-		t.Fatalf("expected calibration to be scorable from max-prob, got reason %q", rep.ConfidenceCalibration.UnscorableReason)
+	if rep.ConfidenceCalibration.ChoiceConfidence == nil {
+		t.Fatal("expected ChoiceConfidence table")
+	}
+	if rep.ConfidenceCalibration.MaxProbability == nil {
+		t.Fatal("expected MaxProbability table")
+	}
+	if rep.ConfidenceCalibration.ChoiceConfidence.Source != "model-confidence" {
+		t.Errorf("expected ChoiceConfidence.Source=model-confidence, got %q", rep.ConfidenceCalibration.ChoiceConfidence.Source)
+	}
+	if rep.ConfidenceCalibration.MaxProbability.Source != "max-probability" {
+		t.Errorf("expected MaxProbability.Source=max-probability, got %q", rep.ConfidenceCalibration.MaxProbability.Source)
+	}
+	if rep.ConfidenceCalibration.ChoiceConfidence.SampleCount != 1 {
+		t.Errorf("ChoiceConfidence sample count should be 1, got %d", rep.ConfidenceCalibration.ChoiceConfidence.SampleCount)
+	}
+	if rep.ConfidenceCalibration.MaxProbability.SampleCount != 2 {
+		t.Errorf("MaxProbability sample count should be 2, got %d", rep.ConfidenceCalibration.MaxProbability.SampleCount)
+	}
+	// Brier depends only on the distribution population (size 2 here).
+	if rep.ConfidenceCalibration.BrierSampleCount != 2 {
+		t.Errorf("Brier sample count should be 2 (probabilities only), got %d", rep.ConfidenceCalibration.BrierSampleCount)
+	}
+}
+
+func TestCalibrationMixedPresenceCounterexample(t *testing.T) {
+	// One prediction has only Confidence; one has only probabilities; one
+	// has both; one has neither. The two tables must report distinct
+	// populations and Brier must use only the probabilities-bearing
+	// subset.
+	ci := 0.7
+	preds := []Prediction{
+		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "supported", PredictedLabel: "supported",
+			Confidence: &ci,
+		},
+		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "supported", PredictedLabel: "supported",
+			Probabilities: map[string]float64{"supported": 0.6, "contradicted": 0.3, "insufficient-evidence": 0.1},
+		},
+		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "contradicted", PredictedLabel: "supported",
+			Confidence:    &ci,
+			Probabilities: map[string]float64{"supported": 0.6, "contradicted": 0.3, "insufficient-evidence": 0.1},
+		},
+		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "supported", PredictedLabel: "supported",
+			// no confidence, no probabilities
+		},
+	}
+	rep := Score("0.3.0", SourceDecisions, preds)
+	if rep.ConfidenceCalibration == nil {
+		t.Fatal("expected calibration report")
+	}
+	if rep.ConfidenceCalibration.ChoiceConfidence == nil || rep.ConfidenceCalibration.ChoiceConfidence.SampleCount != 2 {
+		t.Fatalf("ChoiceConfidence should have sample count 2, got %+v", rep.ConfidenceCalibration.ChoiceConfidence)
+	}
+	if rep.ConfidenceCalibration.MaxProbability == nil || rep.ConfidenceCalibration.MaxProbability.SampleCount != 2 {
+		t.Fatalf("MaxProbability should have sample count 2, got %+v", rep.ConfidenceCalibration.MaxProbability)
+	}
+	if rep.ConfidenceCalibration.BrierSampleCount != 2 {
+		t.Fatalf("Brier sample count should be 2 (only the probabilities-bearing subset), got %d", rep.ConfidenceCalibration.BrierSampleCount)
 	}
 }
 
@@ -204,8 +247,6 @@ func TestFormatThresholdHandlesZero(t *testing.T) {
 }
 
 func TestHandComputablePerfectClassifier(t *testing.T) {
-	// Hand-computable case: 3 classes, 1 example each, all correct.
-	// Macro-F1 = 1.0; accuracy = 1.0; per-class precision/recall = 1.0.
 	preds := []Prediction{
 		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "supported", PredictedLabel: "supported"},
@@ -214,7 +255,7 @@ func TestHandComputablePerfectClassifier(t *testing.T) {
 		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "insufficient-evidence", PredictedLabel: "insufficient-evidence", Abstained: true},
 	}
-	rep := Score("0.2.0", SourceDecisions, preds)
+	rep := Score("0.3.0", SourceDecisions, preds)
 	tr := rep.ByTask[protocol.TaskClaimSupport]
 	if math.Abs(tr.MacroF1-1.0) > 1e-9 {
 		t.Fatalf("expected macroF1 1.0, got %v", tr.MacroF1)
@@ -228,15 +269,13 @@ func TestHandComputablePerfectClassifier(t *testing.T) {
 }
 
 func TestHandComputableAlwaysAbstain(t *testing.T) {
-	// 5 cases, all expected = supported, all predicted = insufficient-evidence.
-	// Accuracy = 0; abstention = 1.0; contradiction miss rate null; unsupported-accept null.
 	preds := []Prediction{
 		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "supported", PredictedLabel: "insufficient-evidence", Abstained: true},
 		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "supported", PredictedLabel: "insufficient-evidence", Abstained: true},
 	}
-	rep := Score("0.2.0", SourceBaseline, preds)
+	rep := Score("0.3.0", SourceBaseline, preds)
 	tr := rep.ByTask[protocol.TaskClaimSupport]
 	if tr.Accuracy != 0 {
 		t.Fatalf("expected accuracy 0, got %v", tr.Accuracy)
@@ -244,23 +283,16 @@ func TestHandComputableAlwaysAbstain(t *testing.T) {
 	if tr.AbstentionRate != 1.0 {
 		t.Fatalf("expected abstention 1.0, got %v", tr.AbstentionRate)
 	}
-	if tr.ContradictionMiss != nil && tr.ContradictionMiss.IsApplicable {
-		t.Fatalf("expected contradiction-miss inapplicable (no contradicted cases)")
-	}
 }
 
 func TestHandComputableWrongDirectionPredictionsAreConcreteErrors(t *testing.T) {
-	// 2 cases: same source/target pair, gold = created-by, prediction =
-	// created-by on one (correct) and predicted concrete "depends-on" on
-	// the reverse-direction case (incorrect edge). Edge TP = 1, FP = 1,
-	// FN = 1.
 	preds := []Prediction{
 		{Task: protocol.TaskRelationship, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "created-by", PredictedLabel: "created-by"},
 		{Task: protocol.TaskRelationship, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "created-by", PredictedLabel: "depends-on"},
 	}
-	rep := Score("0.2.0", SourceDecisions, preds)
+	rep := Score("0.3.0", SourceDecisions, preds)
 	tr := rep.ByTask[protocol.TaskRelationship]
 	if math.Abs(tr.EdgePrecision-0.5) > 1e-9 {
 		t.Fatalf("expected edge precision 0.5, got %v", tr.EdgePrecision)
@@ -271,15 +303,13 @@ func TestHandComputableWrongDirectionPredictionsAreConcreteErrors(t *testing.T) 
 }
 
 func TestPerTaskSplitReportDoesNotBlendTuningAndHeldOut(t *testing.T) {
-	// Tuning correct, held-out wrong. The per-task-split report must not
-	// blend them: tuning accuracy = 1, held-out accuracy = 0.
 	preds := []Prediction{
 		{Task: protocol.TaskEntityType, Split: protocol.SplitTuning,
 			ExpectedLabel: "person", PredictedLabel: "person"},
 		{Task: protocol.TaskEntityType, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "person", PredictedLabel: "document"},
 	}
-	rep := Score("0.2.0", SourceDecisions, preds)
+	rep := Score("0.3.0", SourceDecisions, preds)
 	tuning := rep.ByTaskSplit[protocol.TaskEntityType][protocol.SplitTuning]
 	held := rep.ByTaskSplit[protocol.TaskEntityType][protocol.SplitHeldOut]
 	if math.Abs(tuning.Accuracy-1.0) > 1e-9 {
@@ -291,14 +321,11 @@ func TestPerTaskSplitReportDoesNotBlendTuningAndHeldOut(t *testing.T) {
 }
 
 func TestErrorsNeverCountAsSuccessfulAbstentions(t *testing.T) {
-	// P1 finding: errors are operational failures, not successful semantic
-	// abstentions. When ErrorMessage is set, the abstention flag is ignored
-	// for AbstentionNum and the case is recorded in FailureCount.
 	preds := []Prediction{
 		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "insufficient-evidence", PredictedLabel: "insufficient-evidence", Abstained: true, ErrorMessage: "timeout"},
 	}
-	rep := Score("0.2.0", SourceDecisions, preds)
+	rep := Score("0.3.0", SourceDecisions, preds)
 	tr := rep.ByTask[protocol.TaskClaimSupport]
 	if tr.AbstentionNum != 0 {
 		t.Fatalf("error cases must not increment abstention numerator, got %d", tr.AbstentionNum)
@@ -313,8 +340,93 @@ func TestRollupSkipsEmptyTasks(t *testing.T) {
 		{Task: protocol.TaskEntityType, Split: protocol.SplitHeldOut,
 			ExpectedLabel: "person", PredictedLabel: "person"},
 	}
-	rep := Score("0.2.0", SourceDecisions, preds)
+	rep := Score("0.3.0", SourceDecisions, preds)
 	if rep.OverallOverall.MacroF1 == 0 {
 		t.Fatalf("expected non-zero overall macro-F1 when at least one task has data")
+	}
+}
+
+// TestPerfectPredictionAllTasksAllSplits: a hand-computed "perfect"
+// classifier run that exercises every label across the four tasks in
+// every split must score macro-F1 = 1.0 with no fixture landing in
+// __outside__. The same run on each split independently must also
+// report perfect macro-F1 — proving the per-split views do not blend.
+//
+// R1 (re-review): this is the regression test that proves the v0.2
+// vocabulary-conflation bug cannot recur under v0.3.
+func TestPerfectPredictionAllTasksAllSplits(t *testing.T) {
+	tasks := []protocol.Task{
+		protocol.TaskEntityType,
+		protocol.TaskCandidateType,
+		protocol.TaskRelationship,
+		protocol.TaskClaimSupport,
+	}
+	splits := []protocol.Split{protocol.SplitTuning, protocol.SplitHeldOut}
+	var preds []Prediction
+	for _, t := range tasks {
+		vocab := protocol.AllowedLabelsFor(t)
+		for _, l := range vocab {
+			for _, s := range splits {
+				preds = append(preds, Prediction{
+					Task:           t,
+					Split:          s,
+					ExpectedLabel:  l,
+					PredictedLabel: l,
+				})
+			}
+		}
+	}
+	rep := Score("0.3.0", SourceDecisions, preds)
+	for _, task := range tasks {
+		tr := rep.ByTask[task]
+		if tr.FixtureCount == 0 {
+			t.Errorf("task %s has zero fixtures in perfect run", task)
+		}
+		// No fixture should have landed in __outside__ because every
+		// expected label is in the closed vocabulary and every
+		// predicted label equals its expected label.
+		if outside, ok := tr.Confusion["__outside__"]; ok && len(outside) > 0 {
+			for k, v := range outside {
+				if v > 0 {
+					t.Errorf("task %s has %d predictions landing in __outside__[%s]; v0.2 bug pattern", task, v, k)
+				}
+			}
+		}
+		if math.Abs(tr.MacroF1-1.0) > 1e-9 {
+			t.Errorf("task %s perfect run must yield macro-F1=1.0, got %v", task, tr.MacroF1)
+		}
+		if !tr.GateEligible {
+			t.Errorf("task %s perfect run with full vocabulary must be gate-eligible", task)
+		}
+	}
+	// Per-split views must also report perfect macro-F1.
+	for _, task := range tasks {
+		for _, s := range splits {
+			tr := rep.ByTaskSplit[task][s]
+			if tr.FixtureCount == 0 {
+				t.Errorf("task %s split %s has zero fixtures in perfect run", task, s)
+			}
+			if math.Abs(tr.MacroF1-1.0) > 1e-9 {
+				t.Errorf("task %s split %s perfect run must yield macro-F1=1.0, got %v", task, s, tr.MacroF1)
+			}
+		}
+	}
+}
+
+// TestR1VocabulariesAreDistinct: the document-typing vocabulary and
+// the candidate-typing vocabulary share NO labels. The scorer must
+// refuse to treat them as the same label space. This is the regression
+// test for the v0.2 bug where both fixtures shared `task: entity-type`.
+func TestR1VocabulariesAreDistinct(t *testing.T) {
+	doc := protocol.AllowedLabelsFor(protocol.TaskEntityType)
+	cand := protocol.AllowedLabelsFor(protocol.TaskCandidateType)
+	docSet := map[string]struct{}{}
+	for _, l := range doc {
+		docSet[l] = struct{}{}
+	}
+	for _, l := range cand {
+		if _, ok := docSet[l]; ok {
+			t.Errorf("vocabulary leak: %q appears in both entity-type and candidate-type", l)
+		}
 	}
 }

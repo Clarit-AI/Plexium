@@ -155,9 +155,27 @@ func Label(label string, vocabulary []string) error {
 }
 
 // VocabularyFor returns the protocol vocabulary for a task. It is a thin
-// wrapper so callers do not need to import the protocol package.
+// wrapper so callers do not need to import the protocol package. Pass
+// nil to fetch the closed vocabulary for any supported task.
 func VocabularyFor(t protocol.Task) []string {
 	return protocol.AllowedLabelsFor(t)
+}
+
+// DecisionObservationFor returns the validation rules that apply to a
+// decision-style observation per task. Submission adapters and replay
+// runners share these rules.
+func DecisionObservationFor(t protocol.Task) (vocab []string, abstentionLabel string, abstainIsValid bool) {
+	switch t {
+	case protocol.TaskRelationship:
+		return protocol.AllowedLabelsFor(t), "insufficient-evidence", true
+	case protocol.TaskClaimSupport:
+		return protocol.AllowedLabelsFor(t), "insufficient-evidence", true
+	case protocol.TaskEntityType:
+		return protocol.AllowedLabelsFor(t), "document", true
+	case protocol.TaskCandidateType:
+		return protocol.AllowedLabelsFor(t), "", false
+	}
+	return nil, "", false
 }
 
 func isFinite(f float64) bool {

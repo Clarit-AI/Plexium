@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Clarit-AI/Plexium/evaluations/jev/protocol"
@@ -186,30 +187,62 @@ func ValidateFixtures(fixtures []protocol.Fixture) error {
 	return nil
 }
 
-// VerifySplitIndependence runs the protocol's independence rule: no source
-// group, and no template family, may appear in more than one split. The
-// independence report lists per-split counts and any violation note; a
-// violation returns an error so callers fail closed.
+// VerifySplitIndependence runs the protocol's independence rule. The
+// harness does NOT claim statistical independence; it verifies three
+// structural properties:
+//
+//  1. No source group appears in more than one split (group-ID
+//     disjointness).
+//  2. No template family appears in more than one split (template-family
+//     disjointness).
+//  3. No normalized entity name or alias appears in more than one split
+//     (entity-disjointness). The loader collects every entity title and
+//     alias across all of a fixture's candidates and excerpts, then
+//     demands each normalized token appears in exactly one split.
+//
+// Repeated perturbations from the same family are not independent
+// samples. The protocol's required 150-independent-negative bound is not
+// met by the pilot corpus and is reported separately as a sample-size
+// gap.
 func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroupIndependence, error) {
 	splits := []protocol.Split{protocol.SplitTuning, protocol.SplitHeldOut, protocol.SplitReserved}
 	groups := map[protocol.Split]map[string]struct{}{}
 	templates := map[protocol.Split]map[string]struct{}{}
+	entities := map[protocol.Split]map[string]struct{}{}
 	for _, s := range splits {
 		groups[s] = map[string]struct{}{}
 		templates[s] = map[string]struct{}{}
+		entities[s] = map[string]struct{}{}
 	}
 	for _, f := range fixtures {
 		groups[f.Split][f.SourceGroup] = struct{}{}
 		if f.TemplateFamily != "" {
 			templates[f.Split][f.TemplateFamily] = struct{}{}
 		}
+		// Entity title / alias extraction. The loader is the only place
+		// that touches raw body text for normalization; the corpus
+		// generator pre-normalizes by salt-suffixing every entity, so the
+		// fixtures' Candidates fields are the source of truth.
+		for _, c := range f.Candidates {
+			if t := normalizeEntityToken(c.Title); t != "" {
+				entities[f.Split][t] = struct{}{}
+			}
+			if t := normalizeEntityToken(c.Alias); t != "" {
+				entities[f.Split][t] = struct{}{}
+			}
+		}
 	}
 	var out []protocol.SplitGroupIndependence
 	seenGroup := map[string]string{}
 	seenFamily := map[string]string{}
+	seenEntity := map[string]string{}
 	for _, s := range splits {
 		ind := true
 		var note string
+		entityDisjoint := true
+		var entityNote string
+		templateDisjoint := true
+		var templateNote string
 		for g := range groups[s] {
 			if prev, ok := seenGroup[g]; ok {
 				ind = false
@@ -222,25 +255,73 @@ func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroup
 			for tf := range templates[s] {
 				if prev, ok := seenFamily[tf]; ok {
 					ind = false
-					note = fmt.Sprintf("template family %q appears in %s and %s", tf, prev, s)
+					templateDisjoint = false
+					templateNote = fmt.Sprintf("template family %q appears in %s and %s", tf, prev, s)
 					break
 				}
 				seenFamily[tf] = string(s)
 			}
 		}
+		if ind {
+			for e := range entities[s] {
+				if prev, ok := seenEntity[e]; ok {
+					ind = false
+					entityDisjoint = false
+					entityNote = fmt.Sprintf("entity %q appears in %s and %s", e, prev, s)
+					break
+				}
+				seenEntity[e] = string(s)
+			}
+		}
 		out = append(out, protocol.SplitGroupIndependence{
-			Split:         s,
-			GroupCount:    len(groups[s]),
-			Independent:   ind,
-			ViolationNote: note,
+			Split:                  s,
+			GroupCount:             len(groups[s]),
+			Independent:            ind,
+			ViolationNote:          note,
+			EntityDisjoint:         entityDisjoint,
+			EntityViolationNote:    entityNote,
+			TemplateFamilyDisjoint: templateDisjoint,
+			TemplateViolationNote:  templateNote,
 		})
 	}
 	for _, item := range out {
 		if !item.Independent {
-			return out, errors.New(item.ViolationNote)
+			return out, errors.New(firstViolationNote(item))
 		}
 	}
 	return out, nil
+}
+
+// firstViolationNote returns the most informative note on a single
+// independence record. The record may carry multiple violations; the
+// function picks the most concrete one.
+func firstViolationNote(item protocol.SplitGroupIndependence) string {
+	if item.EntityViolationNote != "" {
+		return item.EntityViolationNote
+	}
+	if item.TemplateViolationNote != "" {
+		return item.TemplateViolationNote
+	}
+	return item.ViolationNote
+}
+
+// normalizeEntityToken lower-cases and trims whitespace so trivial
+// surface differences (case, trailing punctuation) do not mask a real
+// entity collision. The token is empty if the input has no alphanumeric
+// content.
+func normalizeEntityToken(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.ToLower(s)
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // BuildManifest constructs a protocol.Manifest from the supplied fixture

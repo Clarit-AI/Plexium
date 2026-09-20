@@ -142,6 +142,46 @@ func TestVerifySplitIndependenceAcceptsDistinctGroups(t *testing.T) {
 	}
 }
 
+func TestVerifySplitIndependenceDetectsCrossSplitEntityLeak(t *testing.T) {
+	// R2: "Heldar Range" appearing in both tuning and held-out must
+	// fail independence even if the group IDs and template families
+	// are disjoint. This test reproduces the v0.2 leak the re-review
+	// flagged.
+	fs := []protocol.Fixture{
+		{ID: "f1", Task: protocol.TaskClaimSupport, SourceGroup: "g1", Split: protocol.SplitTuning, Author: "a", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "g1-e1", Title: "Heldar Range", Alias: "Heldar"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "x"}}},
+		{ID: "f2", Task: protocol.TaskClaimSupport, SourceGroup: "g2", Split: protocol.SplitHeldOut, Author: "a", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "g2-e1", Title: "Heldar Range", Alias: "Heldar Mountains"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "x"}}},
+	}
+	_, err := VerifySplitIndependence(fs)
+	if err == nil {
+		t.Fatal("expected cross-split entity leak to be flagged")
+	}
+}
+
+func TestVerifySplitIndependenceAcceptsNormalizedDistinctEntities(t *testing.T) {
+	// Same surface form but case differs; the loader must not flag a
+	// case-difference as an entity collision. The fixture-supplied
+	// distinct entities must pass.
+	fs := []protocol.Fixture{
+		{ID: "f1", Task: protocol.TaskClaimSupport, SourceGroup: "g1", Split: protocol.SplitTuning, Author: "a", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "g1-e1", Title: "ALPHA Range", Alias: "alpha"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "x"}}},
+		{ID: "f2", Task: protocol.TaskClaimSupport, SourceGroup: "g2", Split: protocol.SplitHeldOut, Author: "a", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "g2-e1", Title: "BETA Range", Alias: "beta"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "x"}}},
+	}
+	if _, err := VerifySplitIndependence(fs); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateFixturesRejectsDuplicateIDs(t *testing.T) {
 	fs := sampleFixtures()
 	fs[1].ID = fs[0].ID

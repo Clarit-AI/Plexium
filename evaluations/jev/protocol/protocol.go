@@ -15,14 +15,16 @@ import (
 )
 
 // ProtocolVersion identifies the frozen state of the offline protocol.
-// v0.2 supersedes v0.1: the corpus generator was replaced with a smaller
-// genuinely synthetic evidence-driven pilot; scoring was rewritten to
-// remove measurement-corrupting defects; replay validation now joins
-// fixtureId to the authoritative corpus; template-family independence
-// is enforced; per-attempt latency and total wall time replace single
-// latency; confidence is a pointer to distinguish absent from zero;
-// fixture IDs are opaque to ranker role tags.
-const ProtocolVersion = "0.2.0"
+// v0.3 supersedes v0.2:
+//   - candidate-typing is its own task (TaskCandidateType) with a
+//     homogeneous canonical vocabulary distinct from document-type
+//   - entity-name / alias disjointness across splits is enforced
+//   - candidate exercise is labelled supplied-pool stress test only
+//   - calibration separates Choice confidence tables from max-prob
+//     tables; Brier uses distributions independently of confidence
+//   - gofmt clean
+//   - smaller honest corpus preferred to 425 inflated rows
+const ProtocolVersion = "0.3.0"
 
 // SourceCommit records the inspected source revision for a fixture or
 // baseline. An empty value indicates a synthetic source group that does not
@@ -33,27 +35,29 @@ type SourceCommit struct {
 	Note       string `json:"note,omitempty"`
 }
 
-// Task identifies one of the three classification tasks the harness scores.
+// Task identifies one of the four classification tasks the harness scores.
 type Task string
 
 const (
-	TaskEntityType   Task = "entity-type"   // candidate document/entity typing
-	TaskRelationship Task = "relationship"  // directed edge predicate classification
-	TaskClaimSupport Task = "claim-support" // supported / contradicted / insufficient
+	TaskEntityType    Task = "entity-type"    // document-level typing
+	TaskCandidateType Task = "candidate-type" // semantic type of a single candidate entity
+	TaskRelationship  Task = "relationship"   // directed edge predicate classification
+	TaskClaimSupport  Task = "claim-support"  // supported / contradicted / insufficient
 )
 
 func (t Task) Valid() bool {
 	switch t {
-	case TaskEntityType, TaskRelationship, TaskClaimSupport:
+	case TaskEntityType, TaskCandidateType, TaskRelationship, TaskClaimSupport:
 		return true
 	}
 	return false
 }
 
-// DocumentTypeLabel is the canonical whitelist for entity/document typing,
-// kept separate from MarkedUp's `Entity.Role` which is the per-entity role
-// assigned inside NER (e.g. PERSON, ORGANIZATION). The protocol document
-// classification is a property of the page, not of an extracted entity.
+// DocumentTypeLabels is the canonical whitelist for document-level typing,
+// kept separate from CandidateTypeLabels (which describe a single extracted
+// entity) and from MarkedUp's `Entity.Role` (the per-entity role assigned
+// inside NER). The document classification is a property of the page, not
+// of an extracted entity.
 //
 // The first value ("document") is the default fallback and the only label
 // the deterministic abstaining baseline emits.
@@ -68,6 +72,21 @@ var DocumentTypeLabels = []string{
 	"place",
 	"tool",
 	"paper",
+}
+
+// CandidateTypeLabels is the homogeneous canonical vocabulary for the
+// candidate-typing task. Labels describe the semantic type of an
+// extracted entity (PERSON, ORGANIZATION, CONCEPT, etc) and are kept
+// distinct from DocumentTypeLabels so the scorer does not mix two
+// disjoint label spaces under one task.
+var CandidateTypeLabels = []string{
+	"PERSON",
+	"ORGANIZATION",
+	"CONCEPT",
+	"TOOL",
+	"EVENT",
+	"LOCATION",
+	"DOCUMENT",
 }
 
 // PredicateLabels is the seven generic relationship predicates plus the two
@@ -101,6 +120,8 @@ func AllowedLabelsFor(t Task) []string {
 	switch t {
 	case TaskEntityType:
 		return append([]string{}, DocumentTypeLabels...)
+	case TaskCandidateType:
+		return append([]string{}, CandidateTypeLabels...)
 	case TaskRelationship:
 		return append([]string{}, PredicateLabels...)
 	case TaskClaimSupport:
@@ -266,10 +287,11 @@ type SplitCount struct {
 
 // TaskCount is a per-task total across splits.
 type TaskCount struct {
-	EntityType   int `json:"entityType"`
-	Relationship int `json:"relationship"`
-	ClaimSupport int `json:"claimSupport"`
-	Total        int `json:"total"`
+	EntityType    int `json:"entityType"`
+	CandidateType int `json:"candidateType"`
+	Relationship  int `json:"relationship"`
+	ClaimSupport  int `json:"claimSupport"`
+	Total         int `json:"total"`
 }
 
 // FixtureHash records the SHA-256 over the canonical fixture record so a
@@ -280,14 +302,25 @@ type FixtureHash struct {
 	Split Split  `json:"split"`
 }
 
-// SplitGroupIndependence proves a split partition does not leak source
-// groups across partitions. A Split name is independent iff no source group
-// appears in more than one partition and the total is the union.
+// SplitGroupIndependence records what the split-independence check
+// actually establishes. The harness does NOT claim statistical
+// independence:
+//   - Independent=true means group-IDs, template-family IDs, and the
+//     normalized entity-name/alias set are each disjoint across splits.
+//   - Repeated perturbations from the same family are not independent
+//     samples.
+//   - The protocol's required 150-independent-negative bound is not met
+//     by the pilot corpus and is reported separately as a sample-size
+//     gap.
 type SplitGroupIndependence struct {
-	Split         Split  `json:"split"`
-	GroupCount    int    `json:"sourceGroupCount"`
-	Independent   bool   `json:"independent"`
-	ViolationNote string `json:"violationNote,omitempty"`
+	Split                  Split  `json:"split"`
+	GroupCount             int    `json:"sourceGroupCount"`
+	Independent            bool   `json:"independent"`
+	ViolationNote          string `json:"violationNote,omitempty"`
+	EntityDisjoint         bool   `json:"entityDisjoint"`
+	EntityViolationNote    string `json:"entityViolationNote,omitempty"`
+	TemplateFamilyDisjoint bool   `json:"templateFamilyDisjoint"`
+	TemplateViolationNote  string `json:"templateViolationNote,omitempty"`
 }
 
 // Validate enforces structural rules on a fixture. It does not check label
@@ -344,7 +377,13 @@ func (f *Fixture) Validate() error {
 	if len(f.Excerpts) == 0 && !containsCategory(f.ChallengeCategories, ChallengeMissingEvidence) {
 		return fmt.Errorf("fixture %s: missing excerpts and not tagged missing-evidence", f.ID)
 	}
-	// Relationship and claim-support fixtures must reference candidates by ID.
+	// Relationship and claim-support fixtures must reference candidates by
+	// ID. Candidate-typing fixtures must reference exactly one candidate
+	// by ID (the entity being typed). Document-typing fixtures have no
+	// candidate list (the document itself is the unit of classification).
+	if f.Task == TaskCandidateType && len(f.Candidates) != 1 {
+		return fmt.Errorf("fixture %s: candidate-typing fixture requires exactly one candidate", f.ID)
+	}
 	if f.Task != TaskEntityType && len(f.Candidates) == 0 {
 		return fmt.Errorf("fixture %s: task %s requires candidates", f.ID, f.Task)
 	}

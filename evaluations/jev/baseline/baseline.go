@@ -17,19 +17,21 @@ type Shortlist interface {
 // Predict returns the deterministic abstaining baseline label for a fixture.
 // The baseline never invents confidence.
 //
-//   - entity-type:   "document" (the default fallback vocabulary entry)
-//   - relationship:  "insufficient-evidence" — the protocol requires
+//   - entity-type:    "document" (the default fallback vocabulary entry)
+//   - candidate-type: "CONCEPT" (deterministic abstaining fallback; the
+//     most generic candidate role tag, deliberately chosen so the
+//     baseline is provably wrong on PERSON/ORGANIZATION/TOOL/EVENT/
+//     LOCATION/DOCUMENT cases — those are the labels any real model
+//     should outperform the baseline on).
+//   - relationship:   "insufficient-evidence" — the protocol requires
 //     "absent evidence is insufficient" rather than guessing a predicate.
-//     The label is reported as an abstention.
-//   - claim-support: "insufficient-evidence"
-//
-// The relationship case special-cases an empty shortlist: when no candidates
-// were produced the baseline abstains explicitly; otherwise it abstains via
-// the same label because deterministic code cannot infer a predicate.
+//   - claim-support:  "insufficient-evidence"
 func Predict(task protocol.Task, list Shortlist) (label string, abstained bool) {
 	switch task {
 	case protocol.TaskEntityType:
 		return "document", false
+	case protocol.TaskCandidateType:
+		return "CONCEPT", false
 	case protocol.TaskRelationship:
 		return "insufficient-evidence", true
 	case protocol.TaskClaimSupport:

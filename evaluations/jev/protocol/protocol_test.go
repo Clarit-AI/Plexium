@@ -11,6 +11,7 @@ func TestTaskValid(t *testing.T) {
 		want bool
 	}{
 		{TaskEntityType, true},
+		{TaskCandidateType, true},
 		{TaskRelationship, true},
 		{TaskClaimSupport, true},
 		{Task("mystery"), false},

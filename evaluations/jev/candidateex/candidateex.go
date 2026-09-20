@@ -1,8 +1,18 @@
 // Package candidateex runs the candidate-generation exercise required by
-// KHA-579 protocol v0.2. It builds a candidate pool from a corpus's
-// entities, invokes candidate.Generate against the fixture excerpts, and
-// reports recall against the gold pool. It also exercises three
-// diagnostics:
+// KHA-579 protocol v0.3.
+//
+// IMPORTANT — this package measures SUPPLIED-POOL stress test recall,
+// not realistic discovery recall. The pool passed to Run() is built by
+// the caller; in the pilot harness the pool is the union of the
+// fixture's own Candidates lists, which is gold-derived. The exercise
+// is useful as a stress test (does candidate.Generate handle the
+// supplied pool? does deliberate gold omission correctly crater recall
+// for the omitted group?) and the deliberate-omission counterexample
+// proves the measurement is honest, but the headline recall numbers
+// do not generalize to discovery. Real discovery recall lives in
+// the discovery package; see discovery.Report.
+//
+// Diagnostics the exercise supports:
 //
 //   - Gold omission: a fixture deliberately removes the gold entity from
 //     the pool; the recall measurement must reflect the miss.
@@ -10,17 +20,12 @@
 //     truncation flag must be set on the shortlist.
 //   - Per-source-group independence: each group runs its own generation
 //     against its own excerpts; no global pool is shared.
-//
-// The exercise distinguishes supplied-candidate classifier fixtures
-// from "free" candidate-generation fixtures. Classifier fixtures record
-// their candidate list in the fixture; the free fixture asks the harness
-// to generate the candidate list from a separate pool.
 package candidateex
 
 import (
 	"errors"
-	"fmt"
 	"sort"
+	"time"
 
 	"github.com/Clarit-AI/Plexium/evaluations/jev/candidate"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/protocol"
@@ -41,11 +46,18 @@ type Result struct {
 	EdgeRecall       float64       `json:"edgeRecall"`
 	PoolSize         int           `json:"poolSize"`
 	TruncationNote   string        `json:"truncationNote,omitempty"`
-	GenerationMs     int64         `json:"generationMs"`
+	GenerationNs     int64         `json:"generationNs"`
 }
 
 // Report aggregates all candidate-generation results.
+//
+// NOTE: this report measures supplied-pool stress-test recall, not
+// realistic discovery recall. The Provenance and Notes fields make
+// that distinction explicit in the JSON output.
 type Report struct {
+	Kind                string                     `json:"kind"` // "supplied-pool-stress-test"
+	Provenance          string                     `json:"provenance"`
+	Notes               string                     `json:"notes"`
 	FixtureCount        int                        `json:"fixtureCount"`
 	BySourceGroup       map[string]SourceGroupStat `json:"bySourceGroup"`
 	Overall             OverallStat                `json:"overall"`
@@ -114,6 +126,9 @@ func Run(fixtures []protocol.Fixture, opts RunOptions) (*Report, error) {
 		return nil, errors.New("candidateex: GoldEntities function is required")
 	}
 	rep := &Report{
+		Kind:          "supplied-pool-stress-test",
+		Provenance:    "pool built from caller-supplied poolFn; in the pilot harness the pool is the union of the fixture's Candidates list (gold-derived). This report measures SUPPLIED-POOL STRESS-TEST recall only, not realistic discovery recall.",
+		Notes:         "realistic discovery recall lives in the discovery package; see discovery.Report for the evidence-only deterministic baseline.",
 		FixtureCount:  len(fixtures),
 		BySourceGroup: map[string]SourceGroupStat{},
 	}
@@ -146,8 +161,10 @@ func Run(fixtures []protocol.Fixture, opts RunOptions) (*Report, error) {
 		}
 		// Run candidate.Generate per task.
 		switch f.Task {
-		case protocol.TaskEntityType, protocol.TaskClaimSupport, protocol.TaskRelationship:
+		case protocol.TaskEntityType, protocol.TaskCandidateType, protocol.TaskClaimSupport, protocol.TaskRelationship:
+			start := time.Now()
 			list := candidate.Generate(f.Task, pool, f.Excerpts)
+			res.GenerationNs = time.Since(start).Nanoseconds()
 			res.GeneratedCount = len(list.Candidates)
 			res.Truncated = list.Truncated
 			res.TruncationNote = list.TruncationNote
@@ -195,7 +212,6 @@ func Run(fixtures []protocol.Fixture, opts RunOptions) (*Report, error) {
 		if res.Truncated {
 			rep.TruncatedFixtures = append(rep.TruncatedFixtures, f.ID)
 		}
-		_ = fmt.Sprintf
 	}
 	// Finalize per-group averages.
 	for k, sg := range rep.BySourceGroup {

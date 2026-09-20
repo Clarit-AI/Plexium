@@ -137,16 +137,34 @@ type OverallReport struct {
 	AbstentionRate float64 `json:"abstentionRate"`
 }
 
-// CalibrationReport holds reliability data over 5 equal-width bins. The
-// scorer only fills it in when Probabilities are present. Absence is
-// reported as "unscorable calibration" in the report metadata; the
-// scorer never synthesizes a zero confidence to fill the bin.
+// CalibrationReport holds two independent calibration tables plus a Brier
+// summary. The two tables are kept separate because they describe
+// different score sources:
+//
+//   - ChoiceConfidence: model-reported Confidence values. The model
+//     asserts its own certainty. Population: predictions where
+//     Prediction.Confidence != nil.
+//   - MaxProbability:    derived from the model's probability distribution
+//     as the maximum class probability. Population: predictions where
+//     Prediction.Probabilities is non-empty.
+//
+// The two tables are NEVER blended under one threshold. Brier uses the
+// distributions only and is independent of confidence presence.
 type CalibrationReport struct {
-	Bins             []CalibrationBin   `json:"bins"`
-	BrierScore       float64            `json:"brierScore"`
-	SampleCount      int                `json:"sampleCount"`
-	CoverageByTh     map[string]float64 `json:"coverageByThreshold"`
-	UnscorableReason string             `json:"unscorableReason,omitempty"`
+	BrierScore       float64                     `json:"brierScore"`
+	BrierSampleCount int                         `json:"brierSampleCount"`
+	ChoiceConfidence *ConfidenceCalibrationTable `json:"choiceConfidence,omitempty"`
+	MaxProbability   *ConfidenceCalibrationTable `json:"maxProbability,omitempty"`
+	UnscorableReason string                      `json:"unscorableReason,omitempty"`
+}
+
+// ConfidenceCalibrationTable is the output of one binning pass over one
+// score source. SampleCount distinguishes "no data" from "all zero".
+type ConfidenceCalibrationTable struct {
+	Source       string             `json:"source"` // "model-confidence" or "max-probability"
+	SampleCount  int                `json:"sampleCount"`
+	Bins         []CalibrationBin   `json:"bins"`
+	CoverageByTh map[string]float64 `json:"coverageByThreshold"`
 }
 
 // CalibrationBin is one bin of the reliability histogram.
@@ -171,7 +189,12 @@ func Score(protocolVersion string, source Source, preds []Prediction) Report {
 		ByTask:          map[protocol.Task]TaskReport{},
 		ByTaskSplit:     map[protocol.Task]map[protocol.Split]TaskReport{},
 	}
-	tasks := []protocol.Task{protocol.TaskEntityType, protocol.TaskRelationship, protocol.TaskClaimSupport}
+	tasks := []protocol.Task{
+		protocol.TaskEntityType,
+		protocol.TaskCandidateType,
+		protocol.TaskRelationship,
+		protocol.TaskClaimSupport,
+	}
 	splits := []protocol.Split{protocol.SplitTuning, protocol.SplitHeldOut, protocol.SplitReserved}
 	for _, t := range tasks {
 		rep.ByTask[t] = scoreTask(protocolVersion, source, filterTask(preds, t), allowedLabelsForTask(t))
@@ -418,7 +441,12 @@ func buildRate(num, den int) *Rate {
 func rollup(byTask map[protocol.Task]TaskReport) OverallReport {
 	var sumF1, sumAcc, sumAbst float64
 	n := 0
-	for _, t := range []protocol.Task{protocol.TaskEntityType, protocol.TaskRelationship, protocol.TaskClaimSupport} {
+	for _, t := range []protocol.Task{
+		protocol.TaskEntityType,
+		protocol.TaskCandidateType,
+		protocol.TaskRelationship,
+		protocol.TaskClaimSupport,
+	} {
 		tr := byTask[t]
 		if tr.FixtureCount == 0 {
 			continue
@@ -504,6 +532,8 @@ func allowedLabelsForTask(t protocol.Task) []string {
 	switch t {
 	case protocol.TaskEntityType:
 		return protocol.AllowedLabelsFor(t)
+	case protocol.TaskCandidateType:
+		return protocol.AllowedLabelsFor(t)
 	case protocol.TaskRelationship:
 		return append([]string{}, protocol.AllowedLabelsFor(t)...)
 	case protocol.TaskClaimSupport:
@@ -542,75 +572,128 @@ func contains(s []string, x string) bool {
 	return false
 }
 
-// computeCalibration returns a calibration report only when Probabilities
-// (or Confidence) are recorded. When the corpus has *no* probabilities
-// recorded (the typical baseline case), the report is nil — the JSON
-// layer emits a "calibration: null" and a metadata note that calibration
-// is unscorable, not absent. The scorer never synthesizes zero confidence.
+// computeCalibration returns a calibration report when at least one
+// prediction carries probabilities, model-reported confidence, or both.
+// When the corpus has neither, the report is nil. The report carries
+// two independent tables plus a Brier summary:
+//
+//   - ChoiceConfidence table: populated only from Prediction.Confidence.
+//   - MaxProbability table:   populated only from max(Probabilities).
+//
+// The two tables are NEVER blended; coverage-by-threshold for each is
+// computed against its own sample population. Brier is computed from
+// the distributions only and is independent of confidence presence.
 func computeCalibration(preds []Prediction) *CalibrationReport {
-	scored := make([]Prediction, 0, len(preds))
+	hasAnyProb := false
+	hasAnyConf := false
 	for _, p := range preds {
-		if p.Confidence != nil || len(p.Probabilities) > 0 {
-			scored = append(scored, p)
+		if len(p.Probabilities) > 0 {
+			hasAnyProb = true
+		}
+		if p.Confidence != nil {
+			hasAnyConf = true
 		}
 	}
-	if len(scored) == 0 {
+	if !hasAnyProb && !hasAnyConf {
 		return nil
 	}
-	rep := &CalibrationReport{
-		Bins: []CalibrationBin{
-			{Lower: 0.0, Upper: 0.2},
-			{Lower: 0.2, Upper: 0.4},
-			{Lower: 0.4, Upper: 0.6},
-			{Lower: 0.6, Upper: 0.8},
-			{Lower: 0.8, Upper: 1.0 + 1e-9},
-		},
-		CoverageByTh: map[string]float64{},
-	}
-	sumSquared := 0.0
-	for _, p := range scored {
-		expected := p.ExpectedLabel
-		for label, prob := range p.Probabilities {
-			actual := 0.0
-			if label == expected {
-				actual = 1.0
-			}
-			diff := prob - actual
-			sumSquared += diff * diff
+	rep := &CalibrationReport{}
+
+	// Brier: computed from distributions on the prediction population
+	// that has Probabilities. Independence from confidence presence is
+	// structural: Brier does not look at Prediction.Confidence.
+	brierPopulation := make([]Prediction, 0, len(preds))
+	for _, p := range preds {
+		if len(p.Probabilities) > 0 {
+			brierPopulation = append(brierPopulation, p)
 		}
 	}
-	rep.BrierScore = sumSquared / float64(len(scored))
-	for _, p := range scored {
-		// Probability-based confidence when Confidence is nil but the
-		// distribution exists.
-		conf := 0.0
-		if p.Confidence != nil {
-			conf = *p.Confidence
-		} else if maxProb, ok := maxProb(p.Probabilities); ok {
-			conf = maxProb
-		} else {
-			// Calibration is unscorable: missing confidence AND missing
-			// probability map cannot be synthesized; report a strict reason.
-			rep.UnscorableReason = "missing confidence; probabilities present without max"
+	if len(brierPopulation) > 0 {
+		sumSquared := 0.0
+		for _, p := range brierPopulation {
+			expected := p.ExpectedLabel
+			for label, prob := range p.Probabilities {
+				actual := 0.0
+				if label == expected {
+					actual = 1.0
+				}
+				diff := prob - actual
+				sumSquared += diff * diff
+			}
+		}
+		rep.BrierScore = sumSquared / float64(len(brierPopulation))
+		rep.BrierSampleCount = len(brierPopulation)
+	}
+
+	if hasAnyConf {
+		rep.ChoiceConfidence = buildConfidenceTable(preds, "model-confidence", func(p Prediction) (float64, bool) {
+			if p.Confidence == nil {
+				return 0, false
+			}
+			return *p.Confidence, true
+		})
+	}
+	if hasAnyProb {
+		rep.MaxProbability = buildConfidenceTable(preds, "max-probability", func(p Prediction) (float64, bool) {
+			m, ok := maxProb(p.Probabilities)
+			return m, ok
+		})
+	}
+
+	// Mark unscorable when neither population was usable. The
+	// buildConfidenceTable helper returns nil for an empty population,
+	// so this branch should not fire when hasAnyConf/hasAnyProb are
+	// true, but we keep the reason for defensive completeness.
+	if rep.BrierSampleCount == 0 && rep.ChoiceConfidence == nil && rep.MaxProbability == nil {
+		rep.UnscorableReason = "no probability or confidence data"
+	}
+	return rep
+}
+
+// buildConfidenceTable produces a ConfidenceCalibrationTable over the
+// predictions that yield a score via the supplied extractor. The
+// extractor's bool signals "score available"; predictions without a
+// score are excluded from this table's sample population but may
+// appear in the other table.
+func buildConfidenceTable(preds []Prediction, source string, extract func(Prediction) (float64, bool)) *ConfidenceCalibrationTable {
+	bins := []CalibrationBin{
+		{Lower: 0.0, Upper: 0.2},
+		{Lower: 0.2, Upper: 0.4},
+		{Lower: 0.4, Upper: 0.6},
+		{Lower: 0.6, Upper: 0.8},
+		{Lower: 0.8, Upper: 1.0 + 1e-9},
+	}
+	tbl := &ConfidenceCalibrationTable{Source: source, Bins: bins, CoverageByTh: map[string]float64{}}
+	scores := make([]float64, 0, len(preds))
+	type scored struct {
+		conf    float64
+		correct int
+	}
+	rows := make([]scored, 0, len(preds))
+	for _, p := range preds {
+		c, ok := extract(p)
+		if !ok {
 			continue
 		}
-		conf = clamp(conf, 0, 1)
+		c = clamp(c, 0, 1)
 		correct := 0
 		if p.PredictedLabel == p.ExpectedLabel {
 			correct = 1
 		}
-		for i := range rep.Bins {
-			b := &rep.Bins[i]
-			if conf >= b.Lower && conf < b.Upper {
+		rows = append(rows, scored{conf: c, correct: correct})
+		scores = append(scores, c)
+		for i := range tbl.Bins {
+			b := &tbl.Bins[i]
+			if c >= b.Lower && c < b.Upper {
 				b.Count++
-				b.AvgConfidence += conf
+				b.AvgConfidence += c
 				b.Accuracy += float64(correct)
 				break
 			}
 		}
 	}
-	for i := range rep.Bins {
-		b := &rep.Bins[i]
+	for i := range tbl.Bins {
+		b := &tbl.Bins[i]
 		if b.Count == 0 {
 			continue
 		}
@@ -620,23 +703,18 @@ func computeCalibration(preds []Prediction) *CalibrationReport {
 	thresholds := []float64{0, 0.5, 0.7, 0.85, 0.95}
 	for _, th := range thresholds {
 		covered := 0
-		for _, p := range scored {
-			conf := 0.0
-			if p.Confidence != nil {
-				conf = *p.Confidence
-			} else if maxProb, ok := maxProb(p.Probabilities); ok {
-				conf = maxProb
-			} else {
-				continue
-			}
-			if conf >= th {
+		for _, c := range scores {
+			if c >= th {
 				covered++
 			}
 		}
-		rep.CoverageByTh[formatThreshold(th)] = float64(covered) / float64(len(scored))
+		tbl.CoverageByTh[formatThreshold(th)] = float64(covered) / float64(len(scores))
 	}
-	rep.SampleCount = len(scored)
-	return rep
+	tbl.SampleCount = len(scores)
+	if tbl.SampleCount == 0 {
+		return nil
+	}
+	return tbl
 }
 
 func maxProb(p map[string]float64) (float64, bool) {

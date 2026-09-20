@@ -1,0 +1,157 @@
+{
+  "kind": "supplied-pool-stress-test",
+  "provenance": "pool built from caller-supplied poolFn; in the pilot harness the pool is the union of the fixture's Candidates list (gold-derived). This report measures SUPPLIED-POOL STRESS-TEST recall only, not realistic discovery recall.",
+  "notes": "realistic discovery recall lives in the discovery package; see discovery.Report for the evidence-only deterministic baseline.",
+  "fixtureCount": 141,
+  "bySourceGroup": {
+    "sg-001": {
+      "fixtureCount": 6,
+      "entityRecall": 0.16666666666666666,
+      "edgeRecall": 0
+    },
+    "sg-002": {
+      "fixtureCount": 6,
+      "entityRecall": 0.16666666666666666,
+      "edgeRecall": 0
+    },
+    "sg-003": {
+      "fixtureCount": 6,
+      "entityRecall": 0.16666666666666666,
+      "edgeRecall": 0
+    },
+    "sg-004": {
+      "fixtureCount": 6,
+      "entityRecall": 0.16666666666666666,
+      "edgeRecall": 0.16666666666666666
+    },
+    "sg-005": {
+      "fixtureCount": 6,
+      "entityRecall": 0.16666666666666666,
+      "edgeRecall": 0
+    },
+    "sg-006": {
+      "fixtureCount": 6,
+      "entityRecall": 0.16666666666666666,
+      "edgeRecall": 0
+    },
+    "sg-007": {
+      "fixtureCount": 6,
+      "entityRecall": 0.3333333333333333,
+      "edgeRecall": 0
+    },
+    "sg-008": {
+      "fixtureCount": 6,
+      "entityRecall": 0.3333333333333333,
+      "edgeRecall": 0
+    },
+    "sg-009": {
+      "fixtureCount": 6,
+      "entityRecall": 0.3333333333333333,
+      "edgeRecall": 0
+    },
+    "sg-010": {
+      "fixtureCount": 6,
+      "entityRecall": 0.16666666666666666,
+      "edgeRecall": 0
+    },
+    "sg-011": {
+      "fixtureCount": 6,
+      "entityRecall": 0.16666666666666666,
+      "edgeRecall": 0
+    },
+    "sg-012": {
+      "fixtureCount": 6,
+      "entityRecall": 0.16666666666666666,
+      "edgeRecall": 0
+    },
+    "sg-013": {
+      "fixtureCount": 6,
+      "entityRecall": 0.3333333333333333,
+      "edgeRecall": 0
+    },
+    "sg-014": {
+      "fixtureCount": 6,
+      "entityRecall": 0.16666666666666666,
+      "edgeRecall": 0
+    },
+    "sg-015": {
+      "fixtureCount": 6,
+      "entityRecall": 0.3333333333333333,
+      "edgeRecall": 0
+    },
+    "sg-016": {
+      "fixtureCount": 6,
+      "entityRecall": 0.3333333333333333,
+      "edgeRecall": 0
+    },
+    "sg-017": {
+      "fixtureCount": 6,
+      "entityRecall": 0.3333333333333333,
+      "edgeRecall": 0.16666666666666666
+    },
+    "sg-018": {
+      "fixtureCount": 6,
+      "entityRecall": 0.16666666666666666,
+      "edgeRecall": 0
+    },
+    "sg-019": {
+      "fixtureCount": 6,
+      "entityRecall": 0.3333333333333333,
+      "edgeRecall": 0
+    },
+    "sg-020": {
+      "fixtureCount": 6,
+      "entityRecall": 0.16666666666666666,
+      "edgeRecall": 0
+    },
+    "sg-cov-claim-contradicted": {
+      "fixtureCount": 4,
+      "entityRecall": 0.5,
+      "edgeRecall": 0
+    },
+    "sg-cov-entity-event": {
+      "fixtureCount": 1,
+      "entityRecall": 1,
+      "edgeRecall": 0
+    },
+    "sg-cov-entity-paper": {
+      "fixtureCount": 1,
+      "entityRecall": 1,
+      "edgeRecall": 0
+    },
+    "sg-cov-entity-person": {
+      "fixtureCount": 1,
+      "entityRecall": 1,
+      "edgeRecall": 0
+    },
+    "sg-cov-entity-project": {
+      "fixtureCount": 1,
+      "entityRecall": 1,
+      "edgeRecall": 0
+    },
+    "sg-cov-entity-software": {
+      "fixtureCount": 1,
+      "entityRecall": 1,
+      "edgeRecall": 0
+    },
+    "sg-cov-rel-depends": {
+      "fixtureCount": 4,
+      "entityRecall": 0.25,
+      "edgeRecall": 0
+    },
+    "sg-cov-rel-derived": {
+      "fixtureCount": 4,
+      "entityRecall": 0.25,
+      "edgeRecall": 0
+    },
+    "sg-cov-rel-implements": {
+      "fixtureCount": 4,
+      "entityRecall": 0.25,
+      "edgeRecall": 0
+    }
+  },
+  "overall": {
+    "entityRecall": 0.2695035460992908,
+    "edgeRecall": 0.015151515151515152
+  }
+}
