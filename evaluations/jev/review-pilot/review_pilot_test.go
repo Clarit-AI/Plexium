@@ -194,6 +194,55 @@ func TestReviewPilotManifest(t *testing.T) {
 // loader roundtrip (raw read -> Unmarshal -> Marshal -> re-read).
 // Before the fix, these fields were absent from protocol.Fixture
 // and encoding/json silently discarded them on Unmarshal.
+// TestReviewPilotV0D4LabelsByConvention is the behavioural regression
+// for the v0.4 corrections: 4 fixtures must use insufficient-evidence
+// gold per the explicit-abstention convention; 1 must use paper per
+// the primary-subject typing convention. At v0.3, these 4 cases used
+// the legacy default-fallback (document / PERSON) and rp-et-006 used
+// document.
+func TestReviewPilotV0D4LabelsByConvention(t *testing.T) {
+	fxPath, mfPath := paths(t)
+	loaded, err := loader.Load(fxPath, mfPath)
+	if err != nil {
+		t.Fatalf("loader.Load: %v", err)
+	}
+	want := map[string]string{
+		"rp-et-002": "insufficient-evidence", // mixed subjects, no clear primary
+		"rp-et-004": "insufficient-evidence", // empty body (missing evidence)
+		"rp-et-006": "paper",                 // primary subject = climate analysis
+		"rp-ct-010": "insufficient-evidence", // placeholder candidate, no context
+	}
+	got := map[string]string{}
+	for _, f := range loaded.Fixtures {
+		if _, ok := want[f.ID]; ok {
+			got[f.ID] = f.ExpectedLabel
+		}
+	}
+	for id, exp := range want {
+		if got[id] != exp {
+			t.Errorf("fixture %s: v0.4 expected gold %q, got %q", id, exp, got[id])
+		}
+	}
+	// Manifest protocolVersion must be 0.4.0.
+	data, err := os.ReadFile(filepath.Join(wd(t), "fixtures.manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var m protocol.Manifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m.ProtocolVersion != "0.4.0" {
+		t.Errorf("manifest ProtocolVersion = %q, want 0.4.0", m.ProtocolVersion)
+	}
+}
+
+func wd(t *testing.T) string {
+	t.Helper()
+	wd, _ := os.Getwd()
+	return wd
+}
+
 func TestReviewPilotMetadataRoundtrip(t *testing.T) {
 	fxPath, mfPath := paths(t)
 	rawBytes, err := os.ReadFile(fxPath)

@@ -415,17 +415,29 @@ func TestPerfectPredictionAllTasksAllSplits(t *testing.T) {
 }
 
 // TestR1VocabulariesAreDistinct: the document-typing vocabulary and
-// the candidate-typing vocabulary share NO labels. The scorer must
-// refuse to treat them as the same label space. This is the regression
-// test for the v0.2 bug where both fixtures shared `task: entity-type`.
+// the candidate-typing vocabulary share NO CONTENT labels (i.e. no
+// label that asserts a real-world typing). Abstention labels
+// (insufficient-evidence) intentionally overlap across both typing
+// tasks per v0.4 user convention — they are explicit abstention,
+// not a content assertion. The scorer must still refuse to treat
+// content labels from one task as the same label space; abstention
+// labels are stored separately in task-level reporting.
 func TestR1VocabulariesAreDistinct(t *testing.T) {
 	doc := protocol.AllowedLabelsFor(protocol.TaskEntityType)
 	cand := protocol.AllowedLabelsFor(protocol.TaskCandidateType)
+	// Abstention labels that intentionally overlap across typing tasks.
+	abstain := map[string]struct{}{"insufficient-evidence": {}}
 	docSet := map[string]struct{}{}
 	for _, l := range doc {
+		if _, ok := abstain[l]; ok {
+			continue
+		}
 		docSet[l] = struct{}{}
 	}
 	for _, l := range cand {
+		if _, ok := abstain[l]; ok {
+			continue
+		}
 		if _, ok := docSet[l]; ok {
 			t.Errorf("vocabulary leak: %q appears in both entity-type and candidate-type", l)
 		}

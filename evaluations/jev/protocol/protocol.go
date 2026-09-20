@@ -15,16 +15,34 @@ import (
 )
 
 // ProtocolVersion identifies the frozen state of the offline protocol.
-// v0.3 supersedes v0.2:
-//   - candidate-typing is its own task (TaskCandidateType) with a
-//     homogeneous canonical vocabulary distinct from document-type
-//   - entity-name / alias disjointness across splits is enforced
-//   - candidate exercise is labelled supplied-pool stress test only
-//   - calibration separates Choice confidence tables from max-prob
-//     tables; Brier uses distributions independently of confidence
-//   - gofmt clean
-//   - smaller honest corpus preferred to 425 inflated rows
-const ProtocolVersion = "0.3.0"
+// v0.4 supersedes v0.3 (evaluation-only, NOT production):
+//   - Both typing tasks (entity-type, candidate-type) gain explicit
+//     insufficient-evidence in the closed vocabulary, distinct from
+//     transport failure. The legacy default-fallback vocabularies
+//     remain unchanged so smoke 332 fixtures under v0.3 stay valid.
+//   - Document-typing convention: type the document by its PRIMARY
+//     SUBJECT (the most prominent thing it is about). If mixed
+//     subjects have no clear primary, the gold is
+//     insufficient-evidence (explicit abstention), NOT a baseline
+//     fallback. A baseline that always returns a label is no longer
+//     admissible as evidence-grounded gold for missing-evidence or
+//     mixed-subject cases.
+//   - Predicate directionality (resolved v0.4):
+//     `used-by` reads "source is used by target" (target consumes
+//     source). Reversing the edge source↔target direction inverts
+//     whether used-by fits.
+//   - Candidate-typing convention unchanged: homogeneous canonical
+//     role vocabulary distinct from document-type vocabulary.
+//   - Entity-name / alias disjointness across splits preserved.
+//   - Calibration split (Choice confidence vs max-prob) preserved.
+//   - Existing smoke 332 fixtures (v0.3) remain valid: their
+//     AllowedLabels do not include insufficient-evidence, but
+//     fixture-supplied AllowedLabels are accepted verbatim by the
+//     validator, and protocol_version mismatches between fixtures
+//     and manifest are surfaced via Drift. v0.3 manifests are
+//     marked stale; no measured-accuracy claim is made against the
+//     new abstention label without v0.4 fixtures that use it.
+const ProtocolVersion = "0.4.0"
 
 // SourceCommit records the inspected source revision for a fixture or
 // baseline. An empty value indicates a synthetic source group that does not
@@ -59,8 +77,17 @@ func (t Task) Valid() bool {
 // inside NER). The document classification is a property of the page, not
 // of an extracted entity.
 //
-// The first value ("document") is the default fallback and the only label
-// the deterministic abstaining baseline emits.
+// v0.4 convention (user-selected 2026-09-20): type the document by its
+// PRIMARY SUBJECT. If mixed subjects have no clear primary (e.g. a
+// construction log mixing crew, place, and project content equally), the
+// gold is insufficient-evidence (explicit abstention), NOT a baseline
+// fallback. The legacy "first label = document" default fallback is no
+// longer admissible as evidence-grounded gold for missing-evidence or
+// mixed-subject cases.
+//
+// The first value ("document") remains the legacy deterministic-fallback
+// baseline output; v0.4 baseline versions abstain instead (see
+// baseline.PredictV2).
 var DocumentTypeLabels = []string{
 	"document",
 	"person",
@@ -72,6 +99,7 @@ var DocumentTypeLabels = []string{
 	"place",
 	"tool",
 	"paper",
+	"insufficient-evidence",
 }
 
 // CandidateTypeLabels is the homogeneous canonical vocabulary for the
@@ -79,6 +107,12 @@ var DocumentTypeLabels = []string{
 // extracted entity (PERSON, ORGANIZATION, CONCEPT, etc) and are kept
 // distinct from DocumentTypeLabels so the scorer does not mix two
 // disjoint label spaces under one task.
+//
+// v0.4 convention (user-selected 2026-09-20): missing-evidence cases
+// (no candidate name, no surrounding context) abstain as
+// insufficient-evidence, NOT a baseline fallback. The legacy "first
+// label = PERSON" default fallback is no longer admissible as
+// evidence-grounded gold.
 var CandidateTypeLabels = []string{
 	"PERSON",
 	"ORGANIZATION",
@@ -87,6 +121,7 @@ var CandidateTypeLabels = []string{
 	"EVENT",
 	"LOCATION",
 	"DOCUMENT",
+	"insufficient-evidence",
 }
 
 // PredicateLabels is the seven generic relationship predicates plus the two
@@ -95,6 +130,12 @@ var CandidateTypeLabels = []string{
 // vocabulary entries; "Negated edges are unsupported; absent evidence is
 // insufficient; conflicting equally authoritative evidence is insufficient
 // unless fixture provenance establishes precedence."
+//
+// v0.4 directionality resolution: `used-by` reads "source is used by
+// target" (i.e. the target consumes the source). Reversing edge
+// source↔target inverts whether used-by fits. Other predicates follow
+// their natural-language meaning; the protocol does not impose a fixed
+// direction bit beyond this resolver for used-by.
 var PredicateLabels = []string{
 	"related-to",
 	"derived-from",

@@ -1,6 +1,6 @@
 {
-  "protocolVersion": "0.3.0",
-  "generatedAt": "2026-09-20T14:04:35.517434Z",
+  "protocolVersion": "0.4.0",
+  "generatedAt": "2026-09-20T19:57:19.877557Z",
   "fixtureFile": "review-pilot/fixtures.jsonl",
   "fixtureCount": 24,
   "splitCounts": {
@@ -29,127 +29,127 @@
     "reversed-direction": 1,
     "straightforward-positive": 6
   },
-  "sha256FixtureFile": "ce57b92c0fa0628f338c903b5083a6cf357045a9fe8804e8ec58f76fba78c0d0",
+  "sha256FixtureFile": "de13fbe5a9fea08aa1debebb98c902d7cbc87ab9e02cc659338b7bc8401fac1e",
   "sha256Manifest": "",
   "fixtureHashes": [
     {
       "id": "rp-et-001",
-      "sha256": "151b66902dc7cc97ce446c5cb74c0047381b343c9a2737dd8be8cb8ac0fc3a50",
+      "sha256": "3589421da1b656458a803eb054c436dac0135aa3af0fc5ed13af846b1fd5e185",
       "split": "tuning"
     },
     {
       "id": "rp-et-002",
-      "sha256": "b81b5f6dac64cb18c481058025813fbbe7d931b61b66c8e67f3a92bb4f1af199",
+      "sha256": "d5c846f25ff186ae62a732bdc8247665a712838240eff58b8a35445def103b5c",
       "split": "tuning"
     },
     {
       "id": "rp-et-003",
-      "sha256": "2fe46f6c29e4dca495ced172a7a9862206681075267730eeb8d4cd7637bdf357",
+      "sha256": "4c4cd935e524b6db3c066b9b25dc1afbe592155d884944b804756571a6ec1228",
       "split": "tuning"
     },
     {
       "id": "rp-et-004",
-      "sha256": "60c9ba9b5468f09f9340fbc57242d7334f5f1e27ddacfd2ab597034e979cbc82",
+      "sha256": "8a2289c4480998ba9f5b4199853ac70653d4b50a198fc7d4741f3b61e1c3b3a9",
       "split": "tuning"
     },
     {
       "id": "rp-et-005",
-      "sha256": "eed0b861556c7dbdf46993ca934c94162721561f7c9c6ab6abe8a9c3d5ab213a",
+      "sha256": "c81fd9e69cc7baf7febd07a8533bf829b2c00a7a631a7bd724922e508e1e56a9",
       "split": "tuning"
     },
     {
       "id": "rp-et-006",
-      "sha256": "d81c942da860de910b915cccd22a9ab7117c9de53f86f2f2eaf8d691d5207d34",
+      "sha256": "079963f374dee1d8a26f057fb5a13b66b366bb3b8f6043b29d88c09ce802034a",
       "split": "tuning"
     },
     {
       "id": "rp-ct-007",
-      "sha256": "7cf4aa75c5639c370cf35757b4c58471b47f70236c524bbc5d0705b0cc5a47d5",
+      "sha256": "accfcdc8fe1659ebc739470d023814cfef79f22e41f534a7e7c069c41f7b80d5",
       "split": "tuning"
     },
     {
       "id": "rp-ct-008",
-      "sha256": "a62656b034b6b73a14eb1f92a7ffae3e5c5be942807d567e179fc6cc5b9fa80e",
+      "sha256": "45d61a69a56e21ba88949aeaa79fe0b54ec5385e4104d8623f1fc6bf9b8084dd",
       "split": "tuning"
     },
     {
       "id": "rp-ct-009",
-      "sha256": "a1915a7daa0766d7ede71e15d0d26298ae928847246c69b532a1fb50477107c6",
+      "sha256": "52173fbea3ab6a097c5e8d522f09117a8667424a1620a109652562e5077602b3",
       "split": "tuning"
     },
     {
       "id": "rp-ct-010",
-      "sha256": "911826952bd5e22af62dcf3b8c4e6f01d30469c320cf00855d43ddf8de6bd88b",
+      "sha256": "0d5b3a7ee1c5cc3772d8b1ac73543e18f385874fc6a8970caf91d3ca87341576",
       "split": "tuning"
     },
     {
       "id": "rp-ct-011",
-      "sha256": "6db9a2fe1604106a1890c5ccb80e5573951f8d078156a6868b84d8dd8bdc7add",
+      "sha256": "dc0c4069da98864cb1b76b8580bbcf3092d5ddfcafcd8c13ca73526a66f65487",
       "split": "tuning"
     },
     {
       "id": "rp-ct-012",
-      "sha256": "fca17b56260cd9ab7a568662f0806de6f85d08bdc59fd7f83bcc814fd25e0314",
+      "sha256": "ac0e087b6dde0321c710c3f7f08db54632149fcd5374b6c1b7619bf8405131e0",
       "split": "tuning"
     },
     {
       "id": "rp-rel-013",
-      "sha256": "2b9e3afa9c18243625aa40f2c21da7e26bd420c0a590b172ef005b11ed1c32e5",
+      "sha256": "f10afc1214d571bbc7889dd758c8bcc323c9bb421c7fd6476314772100fd5d0b",
       "split": "tuning"
     },
     {
       "id": "rp-rel-014",
-      "sha256": "7665916c1feffe02bb45fd02bfab5dba1da03cc66cc4abdeda725fa55167d660",
+      "sha256": "de0294becaaf4576607dc6d7b98e854cdc3ec7bcd13ccdc86cd9cce74d20bbdd",
       "split": "tuning"
     },
     {
       "id": "rp-rel-015",
-      "sha256": "377cba8f6649d8b5f59e3f38155287db4fc3e8507e543e2ed889b353b5d6bac2",
+      "sha256": "1501b2fa87630e2402e23003f426780a4b7152b2394e33c7c72d753837b69742",
       "split": "tuning"
     },
     {
       "id": "rp-rel-016",
-      "sha256": "a62f044091a670a4e997a1ac5211e85cff02c6b8c457ef1a6ed8a64ef640beca",
+      "sha256": "9e42daf378faa53bbcfcc5c2c6624429c620fabb00c1e1496b5a3da6a6f38366",
       "split": "tuning"
     },
     {
       "id": "rp-rel-017",
-      "sha256": "5bc07c2b20b101d69286eeddc5927aa9c7ef93f066f26e815585e99083b1b6ef",
+      "sha256": "6bd8feb7bc7824029eac922c403d53bc3e41562141f043f31ea1b70f2fa7a56a",
       "split": "tuning"
     },
     {
       "id": "rp-rel-018",
-      "sha256": "f538f9946a9e876192d12e5c77eeb76ce9235d9a7693fc392a0b8ab033d275d2",
+      "sha256": "89139974bfa80e37828ff27f381c4bdc3cc4af67858beb70570642a7479141e0",
       "split": "tuning"
     },
     {
       "id": "rp-cs-019",
-      "sha256": "ea77725bc2c236d78ee2336e6857642c4f1fb2f158e961ebe50ecf00cf79c23b",
+      "sha256": "0c5ba585b01c2c65edee784602b647e8cb0d53e9a732e49fd074f03a16eafda0",
       "split": "tuning"
     },
     {
       "id": "rp-cs-020",
-      "sha256": "916c3887e3394e0d77655023b6cbc5eb4bef35b3189563c4ab2e9c29a5fbde2b",
+      "sha256": "1b9b8f42ce3717482a440c37c1332442447b04608022c7b50a0d9f13e249e4d5",
       "split": "tuning"
     },
     {
       "id": "rp-cs-021",
-      "sha256": "c56fb293005c8cc0923d1232e672bdf5195408bf86ddda7c1c04ed46244d9d0a",
+      "sha256": "3e372a38d265bce445c7a5dbc36c42001bb24664a8b8d7176e341fac03c8c3e8",
       "split": "tuning"
     },
     {
       "id": "rp-cs-022",
-      "sha256": "1a15f24a4b3ff4463bf82092b8d4cbec29f80785fa3415a8fd030daf65207e92",
+      "sha256": "de199b7b8664966e9d0b41f642f6aa189f20c26398feb61dbcd67d0703d04e6b",
       "split": "tuning"
     },
     {
       "id": "rp-cs-023",
-      "sha256": "504b26b6cdc9560f658da288caffdbff5dd746224958168c8b156e19d002c939",
+      "sha256": "9da31b5a2fbc7c79b0197564b2e342dcb3663f39bb359bfad2dad1a6764aef64",
       "split": "tuning"
     },
     {
       "id": "rp-cs-024",
-      "sha256": "99d4b1bc7beaf6d9a95009a26348ee08f5f1c75021ce5ed645bc18daf1487f23",
+      "sha256": "812733b29826fa4186735486f7ab010432449e422757ebe685079d6745404a44",
       "split": "tuning"
     }
   ],
