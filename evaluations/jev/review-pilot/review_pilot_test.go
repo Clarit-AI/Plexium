@@ -103,6 +103,10 @@ func TestReviewPilotSchemaValidation(t *testing.T) {
 	if claim != 6 {
 		t.Errorf("claim-support count = %d, want 6", claim)
 	}
+	// Sum invariant: 6 + 6 + 6 + 6 == 24 == total.
+	if total := entity + candT + rel + claim; total != 24 {
+		t.Errorf("sum of per-task counts %d != 24", total)
+	}
 
 	// All 3 claim verdicts represented twice.
 	var sup, contra, insuf int
@@ -164,5 +168,21 @@ func TestReviewPilotManifest(t *testing.T) {
 	}
 	if m.ReviewStatusCount[protocol.ReviewUnreviewed] != 24 {
 		t.Errorf("manifest reviewStatusCount[unreviewed] = %d, want 24", m.ReviewStatusCount[protocol.ReviewUnreviewed])
+	}
+	// Per-task count regression: each of the 4 tasks has 6 fixtures.
+	if got := m.TaskCounts.EntityType; got != 6 {
+		t.Errorf("manifest TaskCounts.EntityType = %d, want 6", got)
+	}
+	if got := m.TaskCounts.CandidateType; got != 6 {
+		t.Errorf("manifest TaskCounts.CandidateType = %d, want 6 (regression: missing case)", got)
+	}
+	if got := m.TaskCounts.Relationship; got != 6 {
+		t.Errorf("manifest TaskCounts.Relationship = %d, want 6", got)
+	}
+	if got := m.TaskCounts.ClaimSupport; got != 6 {
+		t.Errorf("manifest TaskCounts.ClaimSupport = %d, want 6", got)
+	}
+	if got := m.TaskCounts.Total; got != 24 {
+		t.Errorf("manifest TaskCounts.Total = %d, want 24", got)
 	}
 }

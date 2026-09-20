@@ -366,6 +366,8 @@ func BuildManifest(fixturesPath string, generatedAt time.Time) (protocol.Manifes
 		switch f.Task {
 		case protocol.TaskEntityType:
 			m.TaskCounts.EntityType++
+		case protocol.TaskCandidateType:
+			m.TaskCounts.CandidateType++
 		case protocol.TaskRelationship:
 			m.TaskCounts.Relationship++
 		case protocol.TaskClaimSupport:

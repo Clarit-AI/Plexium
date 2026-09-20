@@ -191,3 +191,60 @@ func TestValidateFixturesRejectsDuplicateIDs(t *testing.T) {
 		t.Errorf("expected duplicate error, got %v", err)
 	}
 }
+
+// TestBuildManifestCountsAllFourTasks is the regression for the missing
+// TaskCandidateType case in BuildManifest's per-task switch. Before the
+// fix, candidate-type fixtures were silently dropped from TaskCounts
+// even though they were counted in the total.
+func TestBuildManifestCountsAllFourTasks(t *testing.T) {
+	dir := t.TempDir()
+	fixPath := writeFixtures(t, dir, []protocol.Fixture{
+		{
+			ID: "et1", Task: protocol.TaskEntityType, SourceGroup: "g1", Split: protocol.SplitTuning, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "person", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskEntityType),
+			Excerpts: []protocol.Excerpt{{ID: "e1", Text: "x"}},
+		},
+		{
+			ID: "ct1", Task: protocol.TaskCandidateType, SourceGroup: "g1", Split: protocol.SplitTuning, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "PERSON", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskCandidateType),
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "x"}},
+			Candidates: []protocol.Candidate{{ID: "title:0", Title: "Alice Chen"}},
+		},
+		{
+			ID: "rel1", Task: protocol.TaskRelationship, SourceGroup: "g1", Split: protocol.SplitTuning, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "related-to", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskRelationship),
+			Excerpts:     []protocol.Excerpt{{ID: "e1", Text: "x"}},
+			Candidates:   []protocol.Candidate{{ID: "title:0", Title: "Alice"}, {ID: "title:1", Title: "Bob"}},
+			EdgeSourceID: "title:0", EdgeTargetID: "title:1",
+		},
+		{
+			ID: "cs1", Task: protocol.TaskClaimSupport, SourceGroup: "g1", Split: protocol.SplitTuning, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "x"}},
+			Candidates: []protocol.Candidate{{ID: "title:0", Title: "Alice"}},
+		},
+	})
+	m, err := BuildManifest(fixPath, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if m.TaskCounts.EntityType != 1 {
+		t.Errorf("EntityType count = %d, want 1", m.TaskCounts.EntityType)
+	}
+	if m.TaskCounts.CandidateType != 1 {
+		t.Errorf("CandidateType count = %d, want 1 (regression: missing case in switch)", m.TaskCounts.CandidateType)
+	}
+	if m.TaskCounts.Relationship != 1 {
+		t.Errorf("Relationship count = %d, want 1", m.TaskCounts.Relationship)
+	}
+	if m.TaskCounts.ClaimSupport != 1 {
+		t.Errorf("ClaimSupport count = %d, want 1", m.TaskCounts.ClaimSupport)
+	}
+	if m.TaskCounts.Total != 4 {
+		t.Errorf("TaskCounts.Total = %d, want 4", m.TaskCounts.Total)
+	}
+	//// Sum invariant: 1 + 1 + 1 + 1 == 4 == Total.
+	if got := m.TaskCounts.EntityType + m.TaskCounts.CandidateType + m.TaskCounts.Relationship + m.TaskCounts.ClaimSupport; got != m.TaskCounts.Total {
+		t.Errorf("sum of per-task counts %d != Total %d", got, m.TaskCounts.Total)
+	}
+}
