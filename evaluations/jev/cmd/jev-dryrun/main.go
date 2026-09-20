@@ -12,10 +12,10 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math"
 	"os"
 	"sort"
 	"strings"
@@ -26,34 +26,37 @@ import (
 
 func main() {
 	var (
-		fixturesPath   = flag.String("fixtures", "evaluations/jev/fixtures.jsonl", "path to fixture JSONL")
-		manifestPath   = flag.String("manifest", "evaluations/jev/fixtures.manifest.json", "path to manifest")
-		model          = flag.String("model", "", "model identifier (required)")
-		rateIn         = flag.Float64("rate-in", 0, "input rate in base units per 1M tokens (e.g., 0.042)")
-		rateOut        = flag.Float64("rate-out", 0, "output rate in base units per 1M tokens (e.g., 0.042)")
-		maxIn          = flag.Int("max-input-tokens", 4096, "conservative max input tokens per attempt")
-		maxOut         = flag.Int("max-output-tokens", 2048, "conservative max output tokens per attempt")
-		maxRetries     = flag.Int("max-retries", 1, "max retries per attempt")
-		retryMult      = flag.Float64("retry-multiplier", 1.0, "cost multiplier per retry (1.0 = full cost)")
-		discoveryMult  = flag.Float64("discovery-multiplier", 0.5, "discovery baseline cost multiplier")
-		discoveryCost  = flag.Float64("discovery-cost", 0, "estimated discovery baseline cost in base units")
-		cap            = flag.Float64("cap", 0, "authorized spend cap in base units (default 0)")
-		ratesVersion   = flag.String("rates-version", "unverified-"+time.Now().UTC().Format("2006-01-02"), "rates source identifier")
-		protocolVers   = flag.String("protocol-version", "0.3.0", "protocol version")
-		fixtureSHA     = flag.String("fixture-sha", "", "fixture file SHA256 (computed if empty)")
-		tokenBoundsSHA = flag.String("token-bounds-sha", "", "token bounds config SHA256 (computed if empty)")
-		outPath        = flag.String("out", "-", "output JSON path; - for stdout")
-		jsonOutput     = flag.Bool("json", true, "output JSON (vs human-readable)")
-		verbose        = flag.Bool("v", false, "verbose output")
-		repetitions    = flag.Int("repetitions", 3, "number of repetitions per fixture (protocol default: 3 for held-out scoring)")
+		fixturesPath     = flag.String("fixtures", "evaluations/jev/fixtures.jsonl", "path to fixture JSONL")
+		manifestPath     = flag.String("manifest", "evaluations/jev/fixtures.manifest.json", "path to manifest")
+		model            = flag.String("model", "", "model identifier (required)")
+		rateInStr        = flag.String("rate-in", "", "input rate in base units per 1M tokens (e.g., 0.042)")
+		rateOutStr       = flag.String("rate-out", "", "output rate in base units per 1M tokens (e.g., 0.042); 0 means free output")
+		maxIn            = flag.Int("max-input-tokens", 4096, "conservative max input tokens per attempt")
+		maxOut           = flag.Int("max-output-tokens", 2048, "conservative max output tokens per attempt")
+		maxRetries       = flag.Int("max-retries", 1, "max retries per attempt")
+		retryMult        = flag.Float64("retry-multiplier", 1.0, "cost multiplier per retry (1.0 = full cost)")
+		discoveryMult    = flag.Float64("discovery-multiplier", 0.5, "discovery baseline cost multiplier")
+		discoveryCostStr = flag.String("discovery-cost", "0", "estimated discovery baseline cost in base units")
+		capStr           = flag.String("cap", "0", "authorized spend cap in base units (default 0)")
+		ratesVersion     = flag.String("rates-version", "unverified-"+time.Now().UTC().Format("2006-01-02"), "rates source identifier")
+		protocolVers     = flag.String("protocol-version", "0.3.0", "protocol version")
+		fixtureSHA       = flag.String("fixture-sha", "", "fixture file SHA256 (computed if empty)")
+		tokenBoundsSHA   = flag.String("token-bounds-sha", "", "token bounds config SHA256 (computed if empty)")
+		outPath          = flag.String("out", "-", "output JSON path; - for stdout")
+		jsonOutput       = flag.Bool("json", true, "output JSON (vs human-readable)")
+		verbose          = flag.Bool("v", false, "verbose output")
+		repetitions      = flag.Int("repetitions", 3, "number of repetitions per fixture (protocol default: 3 for held-out scoring)")
 	)
 	flag.Parse()
 
 	if *model == "" {
 		die("model is required (use -model)")
 	}
-	if *rateIn <= 0 || *rateOut <= 0 {
-		die("rate-in and rate-out must be > 0")
+	if *rateInStr == "" {
+		die("rate-in is required (use -rate-in)")
+	}
+	if *rateOutStr == "" {
+		die("rate-out is required (use -rate-out); use 0 for free output")
 	}
 	if *maxIn <= 0 || *maxOut <= 0 {
 		die("max-input-tokens and max-output-tokens must be > 0")
@@ -64,8 +67,42 @@ func main() {
 	if *repetitions < 1 {
 		die("repetitions must be >= 1")
 	}
-	if *retryMult < 0 || *discoveryMult < 0 || *discoveryCost < 0 || *cap < 0 {
-		die("multipliers, costs, and cap must be >= 0")
+	if *retryMult < 0 || *discoveryMult < 0 {
+		die("multipliers must be >= 0")
+	}
+
+	// Parse rates and cap using exact decimal parsing with conservative ceiling.
+	rateInMicro, err := jevledger.MicroUnitFromBaseString(*rateInStr)
+	if err != nil {
+		die("invalid rate-in: %v", err)
+	}
+	rateOutMicro, err := jevledger.MicroUnitFromBaseString(*rateOutStr)
+	if err != nil {
+		die("invalid rate-out: %v", err)
+	}
+	capMicro, err := jevledger.MicroUnitFromBaseString(*capStr)
+	if err != nil {
+		die("invalid cap: %v", err)
+	}
+	discoveryCostMicro, err := jevledger.MicroUnitFromBaseString(*discoveryCostStr)
+	if err != nil {
+		die("invalid discovery-cost: %v", err)
+	}
+	// Allow zero rateOut (free output) but require rate-in > 0.
+	if rateInMicro <= 0 {
+		die("rate-in must be > 0")
+	}
+	if *maxIn <= 0 || *maxOut <= 0 {
+		die("max-input-tokens and max-output-tokens must be > 0")
+	}
+	if *maxRetries < 0 {
+		die("max-retries must be >= 0")
+	}
+	if *repetitions < 1 {
+		die("repetitions must be >= 1")
+	}
+	if *retryMult < 0 || *discoveryMult < 0 {
+		die("multipliers must be >= 0")
 	}
 
 	// Load manifest to get fixture count, task split, source groups.
@@ -88,14 +125,9 @@ func main() {
 		die("fixture SHA required (provide -fixture-sha or ensure manifest has it)")
 	}
 	if *tokenBoundsSHA == "" {
-		*tokenBoundsSHA = hashString(fmt.Sprintf("%d:%d:%d:%f:%f:%f", *maxIn, *maxOut, *maxRetries, *retryMult, *discoveryMult, *discoveryCost))
+		// Use real SHA-256 for token bounds hash.
+		*tokenBoundsSHA = computeTokenBoundsSHA(*maxIn, *maxOut, *maxRetries, *retryMult, *discoveryMult, *discoveryCostStr)
 	}
-
-	// Convert rates to micro-units.
-	rateInMicro := MicroUnitFromBase(*rateIn)
-	rateOutMicro := MicroUnitFromBase(*rateOut)
-	capMicro := MicroUnitFromBase(*cap)
-	discoveryCostMicro := MicroUnitFromBase(*discoveryCost)
 
 	// Build task plan: count attempts per task per source group.
 	// Each fixture = one attempt per repetition.
@@ -112,15 +144,15 @@ func main() {
 		RatesVersion:        *ratesVersion,
 		TokenBoundsSHA:      *tokenBoundsSHA,
 		GeneratedAt:         time.Now().UTC(),
-		RateIn:              *rateIn,
-		RateOut:             *rateOut,
+		RateIn:              rateInMicro,
+		RateOut:             rateOutMicro,
 		MaxInputTokens:      *maxIn,
 		MaxOutputTokens:     *maxOut,
 		MaxRetries:          *maxRetries,
 		RetryMultiplier:     *retryMult,
 		DiscoveryMultiplier: *discoveryMult,
-		DiscoveryCost:       *discoveryCost,
-		AuthorizedCap:       *cap,
+		DiscoveryCost:       *discoveryCostStr,
+		AuthorizedCap:       *capStr,
 		Repetitions:         *repetitions,
 		TokenBounds:         TokenBounds{MaxInputTokens: *maxIn, MaxOutputTokens: *maxOut},
 		RetryPolicy:         RetryPolicy{MaxRetries: *maxRetries, RetryMultiplier: *retryMult, DiscoveryMultiplier: *discoveryMult},
@@ -129,9 +161,14 @@ func main() {
 	// Per-task estimates.
 	for task, groups := range taskGroups {
 		var taskTotal jevledger.MicroUnit
+		// R2: FixtureCount is sum of fixture IDs across groups, not number of groups.
+		var taskFixtureCount int
+		for _, sg := range groups {
+			taskFixtureCount += len(sg.FixtureIDs)
+		}
 		taskEst := TaskEstimate{
 			Task:         task,
-			FixtureCount: len(groups),
+			FixtureCount: taskFixtureCount,
 			SourceGroups: make([]SourceGroupEstimate, 0, len(groups)),
 		}
 		for _, sg := range groups {
@@ -178,8 +215,8 @@ func main() {
 	if capMicro == 0 {
 		plan.MissingApprovals = append(plan.MissingApprovals, "authorized cap is $0 (use -cap to set)")
 	}
-	if *rateIn == 0 || *rateOut == 0 {
-		plan.MissingApprovals = append(plan.MissingApprovals, "rates are unverified quotes (not confirmed requestable)")
+	if *rateInStr == "0" || *rateOutStr == "0" {
+		plan.MissingApprovals = append(plan.MissingApprovals, "zero rate provided (free output); verify this is intended")
 	}
 	plan.MissingApprovals = append(plan.MissingApprovals, "no human label adjudication (all fixtures unreviewed)")
 	plan.MissingApprovals = append(plan.MissingApprovals, "no live model comparison baseline")
@@ -209,15 +246,15 @@ type DryRunPlan struct {
 	RatesVersion        string              `json:"ratesVersion"`
 	TokenBoundsSHA      string              `json:"tokenBoundsSha"`
 	GeneratedAt         time.Time           `json:"generatedAt"`
-	RateIn              float64             `json:"rateIn"`
-	RateOut             float64             `json:"rateOut"`
+	RateIn              jevledger.MicroUnit `json:"rateIn"`
+	RateOut             jevledger.MicroUnit `json:"rateOut"`
 	MaxInputTokens      int                 `json:"maxInputTokens"`
 	MaxOutputTokens     int                 `json:"maxOutputTokens"`
 	MaxRetries          int                 `json:"maxRetries"`
 	RetryMultiplier     float64             `json:"retryMultiplier"`
 	DiscoveryMultiplier float64             `json:"discoveryMultiplier"`
-	DiscoveryCost       float64             `json:"discoveryCost"`
-	AuthorizedCap       float64             `json:"authorizedCap"`
+	DiscoveryCost       string              `json:"discoveryCost"`
+	AuthorizedCap       string              `json:"authorizedCap"`
 	Repetitions         int                 `json:"repetitions"`
 	TokenBounds         TokenBounds         `json:"tokenBounds"`
 	RetryPolicy         RetryPolicy         `json:"retryPolicy"`
@@ -360,28 +397,15 @@ func estimateCostMicro(rateIn, rateOut jevledger.MicroUnit, tokensIn, tokensOut 
 	return costIn + costOut
 }
 
-func MicroUnitFromBase(base float64) jevledger.MicroUnit {
-	if base <= 0 {
-		return 0
-	}
-	if base > float64(jevledger.MaxMicroUnits)/float64(jevledger.MicroUnitsPerUnit) {
-		return jevledger.MaxMicroUnits
-	}
-	// Round UP (ceiling) for conservative cost estimation.
-	return jevledger.MicroUnit(math.Ceil(base * float64(jevledger.MicroUnitsPerUnit)))
+func computeTokenBoundsSHA(maxIn, maxOut, maxRetries int, retryMult, discoveryMult float64, discoveryCostStr string) string {
+	input := fmt.Sprintf("%d:%d:%d:%f:%f:%s", maxIn, maxOut, maxRetries, retryMult, discoveryMult, discoveryCostStr)
+	h := sha256.Sum256([]byte(input))
+	return fmt.Sprintf("%x", h)
 }
 
 func formatMicro(m jevledger.MicroUnit) string {
 	base := float64(m) / float64(jevledger.MicroUnitsPerUnit)
 	return fmt.Sprintf("$%.6f", base)
-}
-
-func hashString(s string) string {
-	h := 0
-	for i := 0; i < len(s); i++ {
-		h = h*31 + int(s[i])
-	}
-	return fmt.Sprintf("%08x", h)
 }
 
 func writeOutput(path string, plan DryRunPlan, asJSON, verbose bool) error {
@@ -414,11 +438,11 @@ func writeOutput(path string, plan DryRunPlan, asJSON, verbose bool) error {
 	fmt.Fprintf(out, "Token Bounds:  %s\n", plan.TokenBoundsSHA)
 	fmt.Fprintf(out, "Repetitions:   %d\n", plan.Repetitions)
 	fmt.Fprintf(out, "\n")
-	fmt.Fprintf(out, "Rates:         $%.6f / 1M in, $%.6f / 1M out\n", plan.RateIn, plan.RateOut)
+	fmt.Fprintf(out, "Rates:         %s / 1M in, %s / 1M out\n", formatMicro(plan.RateIn), formatMicro(plan.RateOut))
 	fmt.Fprintf(out, "Token Limits:  %d in / %d out per attempt\n", plan.MaxInputTokens, plan.MaxOutputTokens)
 	fmt.Fprintf(out, "Retries:       %d (x%.2f per retry)\n", plan.MaxRetries, plan.RetryMultiplier)
-	fmt.Fprintf(out, "Discovery:     $%.6f (x%.2f)\n", plan.DiscoveryCost, plan.DiscoveryMultiplier)
-	fmt.Fprintf(out, "Authorized:    $%.6f\n", plan.AuthorizedCap)
+	fmt.Fprintf(out, "Discovery:     %s (x%.2f)\n", plan.DiscoveryCost, plan.DiscoveryMultiplier)
+	fmt.Fprintf(out, "Authorized:    %s\n", plan.AuthorizedCap)
 	fmt.Fprintf(out, "\n")
 
 	for _, te := range plan.TaskEstimates {
@@ -436,7 +460,7 @@ func writeOutput(path string, plan DryRunPlan, asJSON, verbose bool) error {
 
 	fmt.Fprintf(out, "==================================\n")
 	fmt.Fprintf(out, "GRAND TOTAL RESERVED: %s\n", formatMicro(plan.TotalReserved))
-	fmt.Fprintf(out, "AUTHORIZED CAP:       %s\n", formatMicro(MicroUnitFromBase(plan.AuthorizedCap)))
+	fmt.Fprintf(out, "AUTHORIZED CAP:       %s\n", plan.AuthorizedCap)
 	fmt.Fprintf(out, "AVAILABLE:            %s\n", formatMicro(plan.TotalAvailable))
 	if plan.CapExceeded {
 		fmt.Fprintf(out, "!!! CAP EXCEEDED !!!\n")

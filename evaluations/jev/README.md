@@ -470,3 +470,57 @@ entity reuse) are documented limitations, not harness defects.
   exercises the candidate-generation path end-to-end and produces a
   separate report. The two reports must be cross-referenced before any
   adoption claim.
+
+## Budget ledger (v0.3.2, new)
+
+* Package `ledger` implements a persistent, crash-safe budget ledger.
+* All monetary amounts stored as integer micro-units (1/1,000,000 base unit).
+* Conservative reservations BEFORE each attempt (base + retries + discovery).
+* Retains unknown billing after timeout/crash; same-run resume preserves cap.
+* Fails closed for missing rates, missing token bounds, manifest/model drift.
+* Single writer via file lock; atomic append+fsync for crash safety.
+* Cost/usage never stripped/fabricated; reconcile actual vs reservation; halt on overrun.
+* **Explicit zero output price (`RateOut = 0`) supported** — represents free output (Jev advertises free output). Omitted rate still rejected.
+* Halt blocks NEW reservations/settlements but permits reconciliation of in-flight billed costs.
+
+## Dry-run CLI (v0.3.2, new)
+
+* Command `jev-dryrun` computes offline cost projection (ZERO network calls).
+* Takes explicit unverified rates, token limits, retry assumptions as strings.
+* Emits per-task/per-group reservations with retry ceiling + discovery cost.
+* Maximum possible cost under plan + missing approvals list.
+* Default authorized cap = $0 (proposed $10/$1 not authorized).
+* Exit code 1 if plan exceeds cap.
+* **Explicit `-repetitions` flag (default 3 per protocol)**.
+* **Exact decimal parsing with conservative ceiling rounding** — parses rate strings directly without float64 intermediate; rejects negative/non-finite/overflow; never saturates positive cost down.
+* Uses real SHA-256 for token bounds hash.
+
+### Dry-run reproducible command
+
+```bash
+cd evaluations/jev
+go run ./cmd/jev-dryrun \
+  -fixtures fixtures.jsonl \
+  -manifest fixtures.manifest.json \
+  -model typesafe/jev-1.13 \
+  -rate-in 0.042 \
+  -rate-out 0.042 \
+  -cap 10 \
+  -repetitions 3 \
+  -out dryrun-report.json
+```
+
+For free-output models (Jev advertises free output):
+
+```bash
+go run ./cmd/jev-dryrun \
+  -fixtures fixtures.jsonl \
+  -manifest fixtures.manifest.json \
+  -model typesafe/jev-1.13 \
+  -rate-in 0.042 \
+  -rate-out 0 \
+  -cap 10 \
+  -repetitions 3 \
+  -out dryrun-report.json
+```
+

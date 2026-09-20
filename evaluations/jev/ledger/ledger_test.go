@@ -228,8 +228,10 @@ func TestOverflowRejected(t *testing.T) {
 	path := dir + "/test-ledger.jsonl"
 	// Use a config with very high rates to trigger overflow in cost calculation.
 	cfg := testConfigFixedRunID(path, MaxMicroUnits, "fixed-run-id")
-	cfg.RateIn = MaxMicroUnits / 1000 // Very high rate
-	cfg.RateOut = MaxMicroUnits / 1000
+	rateIn := MicroUnit(MaxMicroUnits / 1000) // Very high rate
+	rateOut := MicroUnit(MaxMicroUnits / 1000)
+	cfg.RateIn = rateIn
+	cfg.RateOut = &rateOut
 	l, err := Open(cfg)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
@@ -750,6 +752,7 @@ func TestZeroTokenBoundsRejected(t *testing.T) {
 }
 
 func testConfigFixedRunID(path string, cap MicroUnit, runID string) LedgerConfig {
+	rateOut := MicroUnit(1_000_000)
 	return LedgerConfig{
 		Path:                  path,
 		AuthorizedCap:         cap,
@@ -760,6 +763,6 @@ func testConfigFixedRunID(path string, cap MicroUnit, runID string) LedgerConfig
 		RetryPolicy:           DefaultReservationRetryPolicy(),
 		DiscoveryCostEstimate: 0,
 		RateIn:                1_000_000,
-		RateOut:               1_000_000,
+		RateOut:               &rateOut,
 	}
 }

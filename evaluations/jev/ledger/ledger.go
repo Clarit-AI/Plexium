@@ -148,11 +148,10 @@ type LedgerConfig struct {
 	// RateIn is the input token rate in micro-units per 1M tokens.
 	RateIn MicroUnit
 	// RateOut is the output token rate in micro-units per 1M tokens.
-	// A value of 0 means "omitted/unknown" — this is VALID and distinct from
-	// an explicitly supplied zero rate (which would mean free output).
-	// Use a pointer or sentinel if you need to distinguish "omitted" from "zero".
-	// For this implementation, 0 means "not configured" and is rejected by Reserve.
-	RateOut MicroUnit
+	// nil means "omitted/unknown" — this is invalid and rejected.
+	// A pointer to 0 means explicitly supplied zero rate (free output).
+	// A pointer to a positive value means that rate.
+	RateOut *MicroUnit
 }
 
 // TokenBounds defines conservative token limits used for reservation sizing.
@@ -277,6 +276,10 @@ func Open(cfg LedgerConfig) (*Ledger, error) {
 // writeInitEntry writes the initialization header as the first line of the ledger.
 // This persists the full ManifestKey and AuthorizedCap for drift detection on reopen.
 func (l *Ledger) writeInitEntry() error {
+	var rateOutVal MicroUnit
+	if l.cfg.RateOut != nil {
+		rateOutVal = *l.cfg.RateOut
+	}
 	init := Entry{
 		ID:              fmt.Sprintf("init-%s-%d", l.cfg.RunID, time.Now().UnixNano()),
 		Type:            EntryInit,
@@ -291,7 +294,7 @@ func (l *Ledger) writeInitEntry() error {
 		TokensIn:        0,
 		TokensOut:       0,
 		RateIn:          0,
-		RateOut:         0,
+		RateOut:         rateOutVal,
 		Notes:           "initialization header",
 		ProtocolVersion: l.cfg.ManifestKey.ProtocolVersion,
 		AuthorizedCap:   l.cfg.AuthorizedCap,
@@ -309,26 +312,47 @@ func (l *Ledger) rewriteInitEntry() error {
 	}
 	// Update the first entry's halted state.
 	l.entries[0].Halted = l.halted
-	// Rewrite the entire file.
-	if _, err := l.file.Seek(0, 0); err != nil {
-		return &LedgerError{Code: LedgerCodeIO, Message: "seek to start for rewrite", Cause: err}
-	}
-	if err := l.file.Truncate(0); err != nil {
-		return &LedgerError{Code: LedgerCodeIO, Message: "truncate for rewrite", Cause: err}
+	// Rewrite the entire file atomically: write to temp, then rename.
+	tempPath := l.file.Name() + ".tmp"
+	tempFile, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return &LedgerError{Code: LedgerCodeIO, Message: "create temp file for rewrite", Cause: err}
 	}
 	for _, e := range l.entries {
 		data, err := json.Marshal(e)
 		if err != nil {
+			tempFile.Close()
+			os.Remove(tempPath)
 			return &LedgerError{Code: LedgerCodeIO, Message: "marshal entry for rewrite", Cause: err}
 		}
 		data = append(data, '\n')
-		if _, err := l.file.Write(data); err != nil {
+		if _, err := tempFile.Write(data); err != nil {
+			tempFile.Close()
+			os.Remove(tempPath)
 			return &LedgerError{Code: LedgerCodeIO, Message: "write entry for rewrite", Cause: err}
 		}
 	}
-	if err := l.file.Sync(); err != nil {
-		return &LedgerError{Code: LedgerCodeIO, Message: "sync for rewrite", Cause: err}
+	if err := tempFile.Sync(); err != nil {
+		tempFile.Close()
+		os.Remove(tempPath)
+		return &LedgerError{Code: LedgerCodeIO, Message: "sync temp file for rewrite", Cause: err}
 	}
+	if err := tempFile.Close(); err != nil {
+		os.Remove(tempPath)
+		return &LedgerError{Code: LedgerCodeIO, Message: "close temp file for rewrite", Cause: err}
+	}
+	// Atomic rename.
+	if err := os.Rename(tempPath, l.file.Name()); err != nil {
+		os.Remove(tempPath)
+		return &LedgerError{Code: LedgerCodeIO, Message: "atomic rename for rewrite", Cause: err}
+	}
+	// Reopen the file handle to the new file.
+	oldFile := l.file
+	l.file, err = os.OpenFile(l.file.Name(), os.O_RDWR|os.O_APPEND, 0600)
+	if err != nil {
+		return &LedgerError{Code: LedgerCodeIO, Message: "reopen after rename", Cause: err}
+	}
+	_ = oldFile.Close()
 	return nil
 }
 
@@ -495,10 +519,8 @@ func (l *Ledger) Reserve(ctx context.Context, attempt int, task, sourceGroup str
 	}
 
 	// Validate rates are known (fail closed if missing).
-	// Note: RateOut == 0 means "omitted/unknown" and is rejected by Reserve.
-	// An explicitly supplied zero rate (free output) would need a different
-	// representation (e.g., pointer) — for now we treat 0 as "not configured".
-	if l.cfg.RateIn == 0 || l.cfg.RateOut == 0 {
+	// RateOut is now a pointer: nil means omitted, pointer to 0 means free output.
+	if l.cfg.RateIn == 0 || l.cfg.RateOut == nil {
 		return "", 0, &LedgerError{Code: LedgerCodeMissingRates, Message: "input/output rates must be configured before reservation"}
 	}
 
@@ -511,7 +533,7 @@ func (l *Ledger) Reserve(ctx context.Context, attempt int, task, sourceGroup str
 	}
 
 	// Compute base cost estimate (ceiling division for conservatism).
-	base := estimateCost(l.cfg.RateIn, l.cfg.RateOut, tokensInEst, tokensOutEst)
+	base := estimateCost(l.cfg.RateIn, *l.cfg.RateOut, tokensInEst, tokensOutEst)
 
 	// Add retry budget.
 	retryBudget := MicroUnit(float64(base) * l.cfg.RetryPolicy.RetryMultiplier * float64(l.cfg.RetryPolicy.MaxRetries))
@@ -553,7 +575,7 @@ func (l *Ledger) Reserve(ctx context.Context, attempt int, task, sourceGroup str
 		TokensIn:        tokensInEst,
 		TokensOut:       tokensOutEst,
 		RateIn:          l.cfg.RateIn,
-		RateOut:         l.cfg.RateOut,
+		RateOut:         *l.cfg.RateOut,
 		Notes:           fmt.Sprintf("reservation for attempt %d task %s group %s", attempt, task, sourceGroup),
 		ProtocolVersion: protocolVersion,
 	}
