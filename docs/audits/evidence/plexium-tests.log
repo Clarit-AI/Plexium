@@ -1,0 +1,34 @@
+	github.com/Clarit-AI/Plexium		coverage: 0.0% of statements
+ok  	github.com/Clarit-AI/Plexium/cmd/plexium	5.874s	coverage: 33.4% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/agent	0.630s	coverage: 68.2% of statements
+	github.com/Clarit-AI/Plexium/internal/capabilityprofile		coverage: 0.0% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/ci	0.315s	coverage: 33.9% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/compile	0.327s	coverage: 92.3% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/config	0.325s	coverage: 50.8% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/convert	1.050s	coverage: 85.3% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/daemon	2.201s	coverage: 60.6% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/generate	0.284s	coverage: 43.5% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/hook	0.267s	coverage: 71.8% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/integrations/beads	0.337s	coverage: 76.0% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/integrations/memento	5.257s	coverage: 51.6% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/integrations/pageindex	2.733s	coverage: 84.6% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/integrations/roles	0.154s	coverage: 100.0% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/lint	3.682s	coverage: 42.0% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/manifest	2.451s	coverage: 76.6% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/markdown	3.143s	coverage: 90.4% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/migrate	1.947s	coverage: 80.2% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/plugins	3.918s	coverage: 77.4% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/plugins/bootstrap	2.589s	coverage: 85.5% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/plugins/markedup	4.109s	coverage: 78.7% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/prompts	1.598s	coverage: 73.3% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/publish	2.805s	coverage: 55.9% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/regen	0.790s	coverage: 73.5% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/reports	0.695s	coverage: 93.4% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/retry	0.448s	coverage: 100.0% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/scanner	0.466s	coverage: 83.1% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/skills	0.482s	coverage: 77.3% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/sync	0.403s	coverage: 81.4% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/template	0.277s	coverage: 48.3% of statements
+ok  	github.com/Clarit-AI/Plexium/internal/wiki	0.482s	coverage: 69.6% of statements
+ok  	github.com/Clarit-AI/Plexium/validation	9.182s	coverage: [no statements]
+	github.com/Clarit-AI/Plexium/validation/inspect		coverage: 0.0% of statements

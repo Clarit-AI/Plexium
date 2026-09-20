@@ -1,0 +1,29 @@
+First run used MARKEDUP_DISABLE_KEYRING=1 globally. Config failures below were resolved by rerunning config with its fake keyring and the global override removed; see markedup-config-tests.log. Baseline: local 4513879, not published main.
+
+ok  	github.com/Clarit-AI/markedup	20.000s	coverage: [no statements]
+ok  	github.com/Clarit-AI/markedup/cache	0.809s	coverage: 86.0% of statements
+	github.com/Clarit-AI/markedup/cmd/markedup		coverage: 0.0% of statements
+--- FAIL: TestKeyringAvailable (0.00s)
+--- FAIL: TestMigrateLegacyKeys_HappyPath (0.00s)
+--- FAIL: TestMigrateLegacyKeys_PreservesOnConflict (0.00s)
+--- FAIL: TestMigrateLegacyKeys_Idempotent (0.00s)
+--- FAIL: TestMigrateLegacyKeys_SplitsAcrossEndpoints (0.00s)
+--- FAIL: TestMigrateLegacyKeys_SkippedWhenNoEndpoint (0.00s)
+--- FAIL: TestHydrateKeysFromKeyring_OneReadPerEndpoint (0.00s)
+--- FAIL: TestHydrateKeys_MigrationRunsOncePerProcess (0.00s)
+--- FAIL: TestHydrateKeysFromKeyring_DoesNotClobberExplicit (0.00s)
+--- FAIL: TestHydrateKeys_OpensKeyringAndMigrates (0.00s)
+FAIL
+FAIL	github.com/Clarit-AI/markedup/config	5.717s
+ok  	github.com/Clarit-AI/markedup/embed	0.634s	coverage: 88.6% of statements
+ok  	github.com/Clarit-AI/markedup/enrich	0.971s	coverage: 93.0% of statements
+ok  	github.com/Clarit-AI/markedup/index	0.466s	coverage: 93.4% of statements
+ok  	github.com/Clarit-AI/markedup/internal/cli	0.236s	coverage: 42.4% of statements
+ok  	github.com/Clarit-AI/markedup/internal/tui	0.168s	coverage: 57.4% of statements
+ok  	github.com/Clarit-AI/markedup/internal/tui/setup	0.122s	coverage: 70.3% of statements
+ok  	github.com/Clarit-AI/markedup/llm	0.215s	coverage: 87.5% of statements
+ok  	github.com/Clarit-AI/markedup/markdown	0.183s	coverage: 86.3% of statements
+ok  	github.com/Clarit-AI/markedup/rerank	0.215s	coverage: 82.3% of statements
+ok  	github.com/Clarit-AI/markedup/schema	0.158s	coverage: 98.0% of statements
+ok  	github.com/Clarit-AI/markedup/temporal	0.152s	coverage: 95.0% of statements
+FAIL

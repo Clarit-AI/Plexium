@@ -1,0 +1,15 @@
+{
+  "runs": [
+    {
+      "exit": 0,
+      "stdout": "{\n  \"sourceFilesChecked\": 1,\n  \"stalePages\": 1,\n  \"hashesUpdated\": 1,\n  \"navRecompiled\": true,\n  \"dryRun\": false,\n  \"pagesAffected\": [\n    \"guides/sync-probe.md\"\n  ],\n  \"pagesRegenerated\": 0\n}\n",
+      "stderr": ""
+    },
+    {
+      "exit": 0,
+      "stdout": "{\n  \"sourceFilesChecked\": 1,\n  \"stalePages\": 0,\n  \"hashesUpdated\": 0,\n  \"navRecompiled\": false,\n  \"dryRun\": false,\n  \"pagesAffected\": null,\n  \"pagesRegenerated\": 0\n}\n",
+      "stderr": ""
+    }
+  ],
+  "pageUnchanged": true
+}

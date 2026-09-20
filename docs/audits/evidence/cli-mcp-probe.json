@@ -1,0 +1,115 @@
+{
+  "root": "/private/tmp/plexium-audit-eya4ybcq",
+  "results": [
+    {
+      "command": "git init -q",
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": "/private/tmp/plexium-resync init",
+      "exit": 0,
+      "stdout": "Initialized Plexium wiki in /private/tmp/plexium-audit-eya4ybcq/.wiki\nCreated 17 directories and 24 files\n\nNext steps:\n  1. Run 'plexium setup claude' or 'plexium setup codex' for agent-ready onboarding\n  2. Run 'plexium convert' to replace the starter scaffold with grounded project pages\n  3. Run 'plexium retrieve \"what does this project do?\"' to inspect early wiki coverage\n  4. Run 'plexium doctor' or 'plexium lint --deterministic' to validate the setup\n  5. For the first bulk wiki build, prefer agent teams/sub-agents when your coding agent supports them\n",
+      "stderr": ""
+    },
+    {
+      "initialize": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "capabilities": {
+            "tools": {}
+          },
+          "protocolVersion": "2024-11-05",
+          "serverInfo": {
+            "name": "plexium-pageindex",
+            "version": "0.1.0"
+          }
+        }
+      }
+    },
+    {
+      "notification_response": {
+        "jsonrpc": "2.0",
+        "id": null,
+        "error": {
+          "code": -32601,
+          "message": "Method not found: notifications/initialized"
+        }
+      }
+    },
+    {
+      "before": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "[{\"page\":{\"path\":\"guides/probe.md\",\"title\":\"Amberwidget\",\"section\":\"guides\",\"summary\":\"An initial summary.\",\"links\":[],\"frontmatter\":{\"title\":\"Amberwidget\"}},\"score\":1,\"matchType\":\"title\",\"snippet\":\"Amberwidget\"}]"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "body_only": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "[]"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "after_new": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "[]"
+            }
+          ]
+        }
+      },
+      "after_old": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "[{\"page\":{\"path\":\"guides/probe.md\",\"title\":\"Amberwidget\",\"section\":\"guides\",\"summary\":\"An initial summary.\",\"links\":[],\"frontmatter\":{\"title\":\"Amberwidget\"}},\"score\":1,\"matchType\":\"title\",\"snippet\":\"Amberwidget\"}]"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "command": "/private/tmp/plexium-resync retrieve Cobaltwidget --format json",
+      "exit": 0,
+      "stdout": "{\n  \"query\": \"Cobaltwidget\",\n  \"pages\": [\n    {\n      \"path\": \"guides/probe.md\",\n      \"title\": \"Cobaltwidget\",\n      \"summary\": \"Updated summary.\",\n      \"relevance\": 1\n    }\n  ],\n  \"method\": \"pageindex\"\n}\n",
+      "stderr": ""
+    },
+    {
+      "command": "/private/tmp/plexium-resync lint --deterministic --ci --output /private/tmp/plexium-audit-eya4ybcq/report.json",
+      "exit": 1,
+      "stdout": "",
+      "stderr": "Error: unknown flag: --output\n"
+    },
+    {
+      "command": "/private/tmp/plexium-resync lint --deterministic --output-json",
+      "exit": 1,
+      "stdout": "{\n  \"type\": \"lint\",\n  \"timestamp\": \"2026-09-20T03:18:03Z\",\n  \"deterministic\": {\n    \"brokenLinks\": [],\n    \"orphanPages\": [\n      {\n        \"wikiPath\": \"guides/probe.md\",\n        \"reason\": \"no inbound links\",\n        \"severity\": \"error\"\n      }\n    ],\n    \"staleCandidates\": [],\n    \"missingSourceFiles\": null,\n    \"manifestDrift\": null,\n    \"sidebarIssues\": [\n      {\n        \"lineNum\": 4,\n        \"target\": \"architecture/overview|Architecture Overview.md\",\n        \"linkText\": \"architecture/overview|Architecture Overview\"\n      },\n      {\n        \"lineNum\": 5,\n        \"target\": \"onboarding|Onboarding Guide.md\",\n        \"linkText\": \"onboarding|Onboarding Guide\"\n      },\n      {\n        \"lineNum\": 6,\n        \"target\": \"contradictions|Contradictions.md\",\n        \"linkText\": \"contradictions|Contradictions\"\n      },\n      {\n        \"lineNum\": 7,\n        \"target\": \"open-questions|Open Questions.md\",\n        \"linkText\": \"open-questions|Open Questions\"\n      },\n      {\n        \"lineNum\": 8,\n        \"target\": \"_log|Activity Log.md\",\n        \"linkText\": \"_log|Activity Log\"\n      }\n    ],\n    \"frontmatterIssues\": [\n      {\n        \"wikiPath\": \"guides/probe.md\",\n        \"field\": \"ownership\",\n        \"message\": \"missing required frontmatter field: ownership\"\n      }\n    ]\n  },\n  \"llmAugmented\": {\n    \"contradictions\": null,\n    \"suggestedPages\": null,\n    \"missingCrossRefs\": null\n  },\n  \"summary\": {\n    \"errors\": 1,\n    \"warnings\": 6,\n    \"info\": 0,\n    \"passesCI\": false\n  }\n}\n",
+      "stderr": ""
+    }
+  ]
+}
