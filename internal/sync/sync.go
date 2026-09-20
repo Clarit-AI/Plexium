@@ -211,7 +211,7 @@ func Run(opts Options) (*SyncResult, error) {
 		}
 
 		if err := mgr.UpsertPage(stalePage); err != nil {
-			return nil, fmt.Errorf("updating page %s: %w", stalePage.WikiPath)
+			return nil, fmt.Errorf("updating page %s: %w", stalePage.WikiPath, err)
 		}
 	}
 	result.HashesUpdated = updated
