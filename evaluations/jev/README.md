@@ -7,9 +7,9 @@ remote-model pipelines against a synthesized corpus of evaluation
 fixtures.
 
 The harness follows protocol **v0.3**, which supersedes v0.2. The v0.3
-changes are recorded in `CHANGELOG.md`. **No v0.2 measurement remains
-valid;** the v0.2 eval report was superseded and is not committed here.
-Any v0.2 result remains in git history for forensic reference only.
+changes are recorded in `CHANGELOG.md`. Earlier reports are superseded.
+Use the root-level fixture and report paths below; the `pilot/` directory
+is a stale duplicate location, not an authoritative historical snapshot.
 
 ## Scope disclosure — SMOKE TEST ONLY
 
@@ -139,10 +139,7 @@ evaluations/jev/
 ├── fixtures.manifest.json     manifest with file + per-fixture SHA-256
 ├── eval-report.json           baseline + discovery + (optional) replay report
 ├── candidategen-report.json   candidate-generation exercise output (supplied-pool stress test)
-└── pilot/                     (legacy v0.2 location, retained for reference only)
-    ├── fixtures.jsonl         v0.2 corpus (425 fixtures, 32 groups)
-    ├── fixtures.manifest.json v0.2 manifest
-    └── eval-report.json       v0.2 baseline report (no discovery block)
+└── pilot/                     stale duplicate location; do not use for evaluation
 ```
 
 ## Reproducible offline run
@@ -168,26 +165,24 @@ The eval CLI does not require any API keys and does not dial out. Live
 inference is not in scope of the default invocation; future live runners
 must add explicit `--live` and credentials flags.
 
-**Reproducibility guarantee:** The JSON outputs (`eval-report.json`,
-`candidategen-report.json`, `fixtures.manifest.json`) are byte-stable
-across repeated invocations on the same fixture set. All unordered
-collections (maps, slices derived from maps) are sorted before
-serialization. Timing fields (`generatedAt`, `generationNs`,
-`AttemptLatencies`, `TotalWallMS`) are preserved in raw records but
-excluded from the deterministic projection used for comparison.
+**Reproducibility comparison:** Compare semantic JSON after excluding only
+runtime timestamps and measured duration fields. Raw outputs may differ
+in those fields. Preserve raw timing records, and never remove cost or
+usage fields from comparison. The final independent reproducibility check
+is recorded in the KHA-579 review artifacts.
 
 ## Pilot corpus (v0.3)
 
-* 332 fixtures across 29 independent synthetic source groups (20 base
+* 332 fixtures across 29 synthetic source-group IDs (20 base
   groups: 4 tuning / 16 held-out; plus 9 coverage fillers targeting
   missing vocabulary labels in the held-out split).
-* All entities, titles, and bodies are fictional. No real-world facts;
-  no parametric-memory bleed.
+* Entities, titles, and bodies are fictional. This does not establish
+  independent scenarios or remove repeated-pattern leakage.
 * Candidate-level IDs are salt-suffixed with the group ID
   (`sg-001/vornholt-pass`) guaranteeing disjointness across splits.
-* Each perturbation template's text embeds the group ID so the same
-  perturbation family cannot accidentally be reused across groups.
-* Template-family independence check (per protocol v0.3): the loader
+* Perturbation text and family IDs embed group IDs, but shared syntax
+  still crosses splits. This corpus cannot support held-out quality claims.
+* Field-level split check (per protocol v0.3): the loader
   enforces template-family, group-ID, and normalized entity-name/alias
   disjointness across splits with explicit per-dimension flags.
 
@@ -359,9 +354,10 @@ Still missing:
 
 ### 6. Fixture corpus
 
-* 29 distinct fictional source groups plus 9 held-out coverage fillers.
+* 29 source-group IDs total: 20 base groups and 9 coverage fillers.
 * All entities and bodies are fictional; no real-world facts.
-* Per-source-group split assignment so independence is enforceable.
+* Per-source-group split assignment with field-level disjointness checks;
+  semantic independence is not established.
 * Adversarial / conflicting / irrelevant / numeric-trap / rename /
   missing-evidence perturbations attached to every group, with
   per-group perturbation text (TemplateFamily IDs are per-group for
@@ -386,20 +382,24 @@ Still missing:
 Concrete items the orchestrator must still produce before any
 Jev-adoption decision can be made:
 
-1. **Verified OpenRouter request pin.** Either `jev-1.13.0` or
-   `typesafe/jev-1.13-20260917` must be confirmed requestable by an
-   adapter round-trip. The harness already enforces that the response
+1. **Verified OpenRouter request pin.** The documented OpenRouter request
+   example uses `typesafe/jev-1.13`; its response example resolves to
+   `typesafe/jev-1.13-20260917`. Requestability of the dated ID is unverified.
+   `jev-1.13.0` is a native TypeSafe identifier, not a verified OpenRouter ID.
+   The harness already enforces that the response
    model equals the pinned model; it does not silently alias.
 2. **Verified TypeSafe model pin and price.** The published $0.042/M
    input figure is documented but not yet confirmed for the resolved
    pin.
-3. **Frozen budget and ledger.** The protocol defines a $10 cap and $1
-   pilot sub-cap; the harness neither enforces nor reserves a budget.
+3. **Authorized budget and ledger.** The protocol proposes a $10 cap and
+   $1 pilot sub-cap; neither is authorized. The harness neither enforces
+   nor reserves a budget. Current paid-run authorization is $0.
 4. **Approved / adjusted labels for every fixture.** Today every fixture
    is `unreviewed`. No metric from this harness is a "measured quality"
    result until human adjudication changes that.
-5. **Hold-out run with three repetitions per case, fixed seed, and
-   tracked cold/warm latency.** None has been done.
+5. **Held-out run with three repetitions per case and fixed seed.**
+   Record first/subsequent requests separately; provider cold/warm state
+   remains unknown unless independently established. None has been done.
 6. **Subgroup bootstrap intervals.** Required by the protocol for
    paired-baseline comparisons.
 7. **Cost / latency adoption gates.** The plan enumerates a 20%
@@ -424,8 +424,10 @@ labels, the recommended sequence is:
    into runtime checks: the harness should verify each span resolves
    to the expected value, and any mismatch becomes an
    `unsupported-acceptance` event.
-5. **Held-out baseline.** Stand up a non-trivial second baseline and
-   run all 332 fixtures against it. The scorer already reports per-task
+5. **Held-out baseline.** First author a separate, independently grouped,
+   human-adjudicated corpus; do not promote these 332 smoke fixtures into
+   held-out evidence. Compare an appropriate current/deterministic baseline,
+   inexpensive structured-output model and pinned Jev. The scorer reports per-task
    and per-(task, split) predictions, so this only requires another
    runner and a second invocation.
 6. **Adapter live probe.** Run a small (5-case) live request batch
@@ -456,11 +458,12 @@ entity reuse) are documented limitations, not harness defects.
 * The pilot corpus is marked `unreviewed` and may contain factual
   errors. Reviewers should treat each fixture's `expectedLabel` as a
   proposal, not a gold answer.
-* The fixture author field is `agent:KHA-579-pilot-author-v3`. Reviewers
-  must replace this with a human handle only on approval.
+* Preserve the fixture's agent author provenance. Record a human reviewer
+  separately when review actually occurs; do not replace authorship.
 * The deterministic baseline abstains on relationship and claim-support
   tasks, and returns `PERSON` for candidate-type. That is the
-  protocol-mandated behaviour, not a bug.
+  deliberately weak baseline, not a protocol requirement or a measured
+  approximation of the existing implementation.
 * All transport tests use `httptest`. The harness never opens a real
   network connection in this directory.
 * `cmd/jev-candidategen` is a separate CLI from `cmd/jev-eval`; it
