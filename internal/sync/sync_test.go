@@ -573,3 +573,108 @@ wiki:
 	assert.NotEqual(t, "", page.SourceFiles[1].ValidatedHash,
 		"B's validated hash should still be set from the successful first regen")
 }
+
+// TestSync_MarkReviewedSkipsDeletedSource covers KHA-287 follow-up:
+// ValidatedUpdated must count only sources whose hash was actually
+// validated. A source file deleted between syncs triggers a ComputeHash
+// error path that keeps the old entry; the counter must not inflate for
+// that source.
+func TestSync_MarkReviewedSkipsDeletedSource(t *testing.T) {
+	root := t.TempDir()
+
+	// Two source files; both exist at manifest time.
+	srcDir := filepath.Join(root, "src")
+	require.NoError(t, os.MkdirAll(srcDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "kept.go"), []byte("package kept\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "deleted.go"), []byte("package deleted\n"), 0644))
+
+	// Wiki + plexium config
+	wikiDir := filepath.Join(root, ".wiki", "modules")
+	require.NoError(t, os.MkdirAll(wikiDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".wiki", "Home.md"), []byte("# Home\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(wikiDir, "combo.md"), []byte("# Combo\n"), 0644))
+
+	plexDir := filepath.Join(root, ".plexium")
+	require.NoError(t, os.MkdirAll(plexDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(plexDir, "config.yml"), []byte(`
+version: 1
+repo:
+  name: test-repo
+  language: go
+sources:
+  include: ["**/*.go"]
+  exclude: ["vendor/**"]
+wiki:
+  root: .wiki
+`), 0644))
+
+	hashKept, err := manifest.ComputeHash(filepath.Join(srcDir, "kept.go"))
+	require.NoError(t, err)
+	hashDeleted, err := manifest.ComputeHash(filepath.Join(srcDir, "deleted.go"))
+	require.NoError(t, err)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	mgr, err := manifest.NewManager(filepath.Join(plexDir, "manifest.json"))
+	require.NoError(t, err)
+	require.NoError(t, mgr.Save(&manifest.Manifest{
+		Version: 2,
+		Pages: []manifest.PageEntry{{
+			WikiPath:  "modules/combo.md",
+			Title:     "Combo",
+			Ownership: "managed",
+			Section:   "Modules",
+			SourceFiles: []manifest.SourceFile{
+				{Path: "src/kept.go", Hash: hashKept, ValidatedHash: hashKept, LastValidatedAt: now},
+				{Path: "src/deleted.go", Hash: hashDeleted, ValidatedHash: hashDeleted, LastValidatedAt: now},
+			},
+			LastUpdated: now,
+		}},
+		UnmanagedPages: []manifest.UnmanagedEntry{},
+	}))
+
+	// Edit the kept file and delete the other. The deleted file's hash
+	// can no longer be recomputed → ComputeHash errors inside the loop.
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "kept.go"), []byte("package kept\n\nfunc Kept() {}\n"), 0644))
+	require.NoError(t, os.Remove(filepath.Join(srcDir, "deleted.go")))
+
+	cfg, err := config.LoadFromDir(root)
+	require.NoError(t, err)
+
+	// --mark-reviewed should advance ValidatedHash for src/kept.go only.
+	r, err := Run(Options{
+		RepoRoot:     root,
+		Config:       cfg,
+		DryRun:       false,
+		MarkReviewed: true,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, r.ValidatedUpdated,
+		"ValidatedUpdated must count only src/kept.go, not the deleted src/deleted.go")
+
+	// Page-level assertions: kept.go's ValidatedHash advanced; deleted.go's
+	// must be unchanged from the baseline (no fresh hash available).
+	after, err := mgr.Load()
+	require.NoError(t, err)
+	require.Len(t, after.Pages, 1)
+	require.Len(t, after.Pages[0].SourceFiles, 2)
+
+	var kept, deleted *manifest.SourceFile
+	for i := range after.Pages[0].SourceFiles {
+		switch after.Pages[0].SourceFiles[i].Path {
+		case "src/kept.go":
+			kept = &after.Pages[0].SourceFiles[i]
+		case "src/deleted.go":
+			deleted = &after.Pages[0].SourceFiles[i]
+		}
+	}
+	require.NotNil(t, kept, "kept.go entry should remain in manifest")
+	require.NotNil(t, deleted, "deleted.go entry should remain in manifest (kept on error)")
+
+	assert.NotEqual(t, hashKept, kept.ValidatedHash,
+		"kept.go ValidatedHash must advance after --mark-reviewed")
+	assert.Equal(t, hashDeleted, deleted.ValidatedHash,
+		"deleted.go ValidatedHash must remain at baseline (no new hash computed)")
+	assert.Equal(t, hashDeleted, deleted.Hash,
+		"deleted.go Hash must remain at baseline (ComputeHash errored)")
+}

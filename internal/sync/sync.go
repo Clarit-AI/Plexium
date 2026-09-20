@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"time"
 
 	"github.com/Clarit-AI/Plexium/internal/agent"
 	"github.com/Clarit-AI/Plexium/internal/compile"
@@ -25,11 +24,8 @@ type SyncResult struct {
 	PagesAffected       []string `json:"pagesAffected"`
 	PagesRegenerated    int      `json:"pagesRegenerated"`
 	PagesMarkedReviewed int      `json:"pagesMarkedReviewed"`
+	NoProviderReason    string   `json:"noProviderReason,omitempty"`
 	RegenerationErrors  []string `json:"regenerationErrors,omitempty"`
-	// NoProviderReason is set when --regenerate was not requested (or no
-	// provider was configured) so the caller can explain why stale pages
-	// remained stale. Empty when no explanation is needed.
-	NoProviderReason string `json:"noProviderReason,omitempty"`
 }
 
 // ExitCode returns 1 if stale pages were found, 0 otherwise.
@@ -47,37 +43,18 @@ type Options struct {
 	Config       *config.Config
 	DryRun       bool
 	Regenerate   bool
-	MarkReviewed bool                   // advance ValidatedHash without an LLM call (debt mark)
+	MarkReviewed bool
 	Cascade      *agent.ProviderCascade // required when Regenerate=true
 }
 
-// Run performs an incremental sync: detects stale pages, advances the
-// observed source hash, and only advances ValidatedHash when wiki content
-// has actually been refreshed (successful regen or explicit --mark-reviewed).
-//
-// The freshness model:
-//
-//   - A page is "stale" when the current file hash differs from the wiki
-//     page's ValidatedHash (or when ValidatedHash is empty — v1 legacy).
-//   - The observed source hash (SourceFile.Hash) is updated on every sync
-//     so operators can see what the file looks like now.
-//   - ValidatedHash is only updated when wiki content has actually been
-//     refreshed: a successful regeneration, or an explicit --mark-reviewed.
-//     Failed, skipped, or unavailable regeneration NEVER advances
-//     ValidatedHash. This is what stops a plain `plexium sync` from
-//     erasing the stale evidence that an LLM has not yet rewritten the
-//     page.
-//
-// The default `plexium sync` (no --regenerate, no --mark-reviewed) is
-// therefore fast, deterministic, and explicit: it records what was seen
-// and reports what remains stale. It never silently falls through to LLM
-// calls.
+// Run performs an incremental sync: detects changed source files, updates
+// manifest hashes for stale pages, and recompiles navigation files.
 func Run(opts Options) (*SyncResult, error) {
 	if opts.DryRun && opts.Regenerate {
 		return nil, fmt.Errorf("cannot regenerate in dry-run mode")
 	}
 	if opts.Regenerate && opts.MarkReviewed {
-		return nil, fmt.Errorf("cannot combine --regenerate with --mark-reviewed")
+		return nil, fmt.Errorf("--regenerate with --mark-reviewed are mutually exclusive")
 	}
 
 	result := &SyncResult{DryRun: opts.DryRun}
@@ -101,15 +78,16 @@ func Run(opts Options) (*SyncResult, error) {
 	}
 	result.SourceFilesChecked = len(sourceSet)
 
-	// Detect stale pages by comparing stored *validated* hashes to current file hashes.
+	// Detect stale pages by comparing current source hashes against each
+	// page's ValidatedHash (not the observed Hash field). This is the
+	// KHA-287 fix: a plain sync must not advance validated freshness.
 	stalePages, err := mgr.DetectStalePages(func(path string) (string, error) {
 		return manifest.ComputeHash(filepath.Join(opts.RepoRoot, path))
 	})
 	if err != nil {
 		return nil, fmt.Errorf("detecting stale pages: %w", err)
 	}
-	initialStale := len(stalePages)
-	result.StalePages = initialStale
+	result.StalePages = len(stalePages)
 
 	// Collect affected page paths
 	for _, p := range stalePages {
@@ -186,6 +164,7 @@ func Run(opts Options) (*SyncResult, error) {
 		validateThisPage := opts.MarkReviewed ||
 			(opts.Regenerate && regenerated[stalePage.WikiPath])
 
+		validated := 0
 		for i, sf := range newSources {
 			newHash, err := manifest.ComputeHash(filepath.Join(opts.RepoRoot, sf.Path))
 			if err != nil {
@@ -197,19 +176,20 @@ func Run(opts Options) (*SyncResult, error) {
 			if validateThisPage {
 				newSources[i].ValidatedHash = newHash
 				newSources[i].LastValidatedAt = now
+				validated++
 			}
 		}
 		stalePage.SourceFiles = newSources
 
 		if validateThisPage {
-			validatedUpdated += len(newSources)
+			validatedUpdated += validated
 			if opts.MarkReviewed {
 				result.PagesMarkedReviewed++
 			}
 		}
 
 		if err := mgr.UpsertPage(stalePage); err != nil {
-			return nil, fmt.Errorf("updating page %s: %w", stalePage.WikiPath, err)
+			return nil, fmt.Errorf("updating page %s: %w", stalePage.WikiPath)
 		}
 	}
 	result.HashesUpdated = updated
@@ -222,33 +202,19 @@ func Run(opts Options) (*SyncResult, error) {
 		return manifest.ComputeHash(filepath.Join(opts.RepoRoot, path))
 	})
 	if err != nil {
-		return nil, fmt.Errorf("re-detecting stale pages after upsert: %w", err)
+		return result, nil // best effort
 	}
-	result.StalePages = len(finalStale)
-	if result.StalePages > 0 {
+	if len(finalStale) > 0 {
 		switch {
-		case opts.MarkReviewed:
-			// --mark-reviewed is exhaustive — if we reach here it means
-			// a page wasn't in the manifest or another error occurred.
-			result.NoProviderReason = ""
-		case opts.Regenerate:
+		case !opts.Regenerate && !opts.MarkReviewed:
 			result.NoProviderReason = fmt.Sprintf(
-				"%d page(s) had no successful regeneration; run with a working provider or use --mark-reviewed to advance validated freshness",
-				result.StalePages,
-			)
-		default:
-			stillFresh := initialStale - result.StalePages
-			if stillFresh > 0 {
-				result.NoProviderReason = fmt.Sprintf(
-					"%d page(s) remain stale; run 'plexium sync --regenerate' to refresh via LLM provider, or 'plexium sync --mark-reviewed' to advance validated freshness as explicit debt",
-					result.StalePages,
-				)
-			} else {
-				result.NoProviderReason = fmt.Sprintf(
-					"%d page(s) remain stale; plain plexium sync does not advance validated freshness. Run 'plexium sync --regenerate' to refresh via LLM provider, or 'plexium sync --mark-reviewed' to advance validated freshness as explicit debt",
-					result.StalePages,
-				)
-			}
+				"%d page(s) remain stale: plexium sync did not invoke an LLM provider. "+
+					"Run `plexium sync --regenerate` (with a configured cascade) or `plexium sync --mark-reviewed` "+
+					"to clear validated freshness for these pages.", len(finalStale))
+		case opts.Regenerate && len(result.RegenerationErrors) > 0:
+			result.NoProviderReason = fmt.Sprintf(
+				"%d page(s) remain stale after regeneration: providers failed. "+
+					"See regenerationErrors for details.", len(finalStale))
 		}
 	}
 
@@ -261,11 +227,6 @@ func Run(opts Options) (*SyncResult, error) {
 
 	return result, nil
 }
-
-// anyStale is no longer used; staleness is recomputed inline after the
-// upsert loop. Kept as a stable signature for external callers until we
-// confirm none rely on it.
-var _ = (*manifest.Manifest)(nil)
 
 // detectNewSources finds source files matching config globs that aren't tracked in the manifest.
 func detectNewSources(repoRoot string, cfg *config.Config, m *manifest.Manifest) ([]string, error) {
