@@ -1,7 +1,7 @@
 // Schema and manifest validation tests for the review-pilot packet.
 // Human-reviewer spotcheck: verify proposed labels are in the closed
-// vocabulary, rp-et-001 carries its human approval, and the remaining
-// fixtures stay unreviewed.
+// vocabulary, the four adjudicated fixtures carry human approval, and the
+// remaining fixtures stay unreviewed.
 package main
 
 import (
@@ -66,10 +66,16 @@ func TestReviewPilotSchemaValidation(t *testing.T) {
 		t.Fatalf("expected 24 fixtures, got %d", len(fxs))
 	}
 
-	// Spotcheck: every proposed label is in vocab for its task; rp-et-001
-	// is the sole human-approved fixture; every author is set.
+	approvedIDs := map[string]bool{
+		"rp-et-001": true,
+		"rp-et-002": true,
+		"rp-et-003": true,
+		"rp-et-006": true,
+	}
+	// Spotcheck: every proposed label is in vocab for its task; exactly the
+	// four adjudicated fixtures are approved; every author is set.
 	for _, f := range fxs {
-		if f.ID == "rp-et-001" {
+		if approvedIDs[f.ID] {
 			if f.ReviewStatus != protocol.ReviewApproved {
 				t.Errorf("fixture %s: reviewStatus=%v (want approved)", f.ID, f.ReviewStatus)
 			}
@@ -181,11 +187,11 @@ func TestReviewPilotManifest(t *testing.T) {
 	if m.SplitCounts.Tuning != 24 || m.SplitCounts.HoldOut != 0 {
 		t.Errorf("manifest SplitCounts wrong: %+v", m.SplitCounts)
 	}
-	if m.ReviewStatusCount[protocol.ReviewUnreviewed] != 23 {
-		t.Errorf("manifest reviewStatusCount[unreviewed] = %d, want 23", m.ReviewStatusCount[protocol.ReviewUnreviewed])
+	if m.ReviewStatusCount[protocol.ReviewUnreviewed] != 20 {
+		t.Errorf("manifest reviewStatusCount[unreviewed] = %d, want 20", m.ReviewStatusCount[protocol.ReviewUnreviewed])
 	}
-	if m.ReviewStatusCount[protocol.ReviewApproved] != 1 {
-		t.Errorf("manifest reviewStatusCount[approved] = %d, want 1", m.ReviewStatusCount[protocol.ReviewApproved])
+	if m.ReviewStatusCount[protocol.ReviewApproved] != 4 {
+		t.Errorf("manifest reviewStatusCount[approved] = %d, want 4", m.ReviewStatusCount[protocol.ReviewApproved])
 	}
 	// Per-task count regression: each of the 4 tasks has 6 fixtures.
 	if got := m.TaskCounts.EntityType; got != 6 {
@@ -210,22 +216,20 @@ func TestReviewPilotManifest(t *testing.T) {
 // loader roundtrip (raw read -> Unmarshal -> Marshal -> re-read).
 // Before the fix, these fields were absent from protocol.Fixture
 // and encoding/json silently discarded them on Unmarshal.
-// TestReviewPilotV0D4LabelsByConvention is the behavioural regression
-// for the v0.4 corrections: 4 fixtures must use insufficient-evidence
-// gold per the explicit-abstention convention; 1 must use paper per
-// the primary-subject typing convention. At v0.3, these 4 cases used
-// the legacy default-fallback (document / PERSON) and rp-et-006 used
-// document.
-func TestReviewPilotV0D4LabelsByConvention(t *testing.T) {
+// TestReviewPilotLabelsByCurrentAdjudication locks the current fixture labels,
+// including the three human corrections layered on the v0.4 packet.
+func TestReviewPilotLabelsByCurrentAdjudication(t *testing.T) {
 	fxPath, mfPath := paths(t)
 	loaded, err := loader.Load(fxPath, mfPath)
 	if err != nil {
 		t.Fatalf("loader.Load: %v", err)
 	}
 	want := map[string]string{
-		"rp-et-002": "insufficient-evidence", // mixed subjects, no clear primary
+		"rp-et-001": "place",                 // approved regional subject
+		"rp-et-002": "project",               // approved civic foundation project
+		"rp-et-003": "document",              // approved accord-as-formal-document
 		"rp-et-004": "insufficient-evidence", // empty body (missing evidence)
-		"rp-et-006": "paper",                 // primary subject = climate analysis
+		"rp-et-006": "place",                 // approved named-region environment
 		"rp-ct-010": "insufficient-evidence", // placeholder candidate, no context
 	}
 	got := map[string]string{}
@@ -236,7 +240,7 @@ func TestReviewPilotV0D4LabelsByConvention(t *testing.T) {
 	}
 	for id, exp := range want {
 		if got[id] != exp {
-			t.Errorf("fixture %s: v0.4 expected gold %q, got %q", id, exp, got[id])
+			t.Errorf("fixture %s: expected gold %q, got %q", id, exp, got[id])
 		}
 	}
 	// Manifest protocolVersion must be 0.4.0.
@@ -260,29 +264,42 @@ func TestReviewPilotHumanAdjudicationMetadata(t *testing.T) {
 		t.Fatalf("loader.Load: %v", err)
 	}
 
-	var approved *protocol.Fixture
+	want := map[string]struct {
+		label             string
+		rationaleFragment string
+	}{
+		"rp-et-001": {label: "place", rationaleFragment: "intentionally ambiguous benchmark case"},
+		"rp-et-002": {label: "project", rationaleFragment: "public works project"},
+		"rp-et-003": {label: "document", rationaleFragment: "identifiable formal agreements"},
+		"rp-et-006": {label: "place", rationaleFragment: "environmental characteristics"},
+	}
+	approved := make(map[string]protocol.Fixture)
 	for i := range loaded.Fixtures {
 		if loaded.Fixtures[i].ReviewStatus == protocol.ReviewApproved {
-			if approved != nil {
-				t.Fatalf("multiple approved fixtures: %s and %s", approved.ID, loaded.Fixtures[i].ID)
-			}
-			approved = &loaded.Fixtures[i]
+			approved[loaded.Fixtures[i].ID] = loaded.Fixtures[i]
 		}
 	}
-	if approved == nil {
-		t.Fatal("missing approved fixture")
+	if len(approved) != len(want) {
+		t.Fatalf("approved fixture count = %d, want %d: %v", len(approved), len(want), approved)
 	}
-	if approved.ID != "rp-et-001" || approved.ExpectedLabel != "place" {
-		t.Fatalf("approved fixture = %s/%s, want rp-et-001/place", approved.ID, approved.ExpectedLabel)
+	for id, expected := range want {
+		fixture, ok := approved[id]
+		if !ok {
+			t.Errorf("fixture %s is not approved", id)
+			continue
+		}
+		if fixture.ExpectedLabel != expected.label {
+			t.Errorf("fixture %s: label=%q, want %q", id, fixture.ExpectedLabel, expected.label)
+		}
+		if fixture.Reviewer != "KHAEntertainment" {
+			t.Errorf("fixture %s: reviewer=%q, want KHAEntertainment", id, fixture.Reviewer)
+		}
+		if !bytes.Contains([]byte(fixture.Rationale), []byte(expected.rationaleFragment)) {
+			t.Errorf("fixture %s: rationale %q does not contain %q", id, fixture.Rationale, expected.rationaleFragment)
+		}
 	}
-	if approved.Reviewer != "KHAEntertainment" {
-		t.Fatalf("approved reviewer = %q, want KHAEntertainment", approved.Reviewer)
-	}
-	if !bytes.Contains([]byte(approved.Rationale), []byte("intentionally ambiguous benchmark case")) {
-		t.Fatalf("approved rationale does not preserve ambiguity annotation: %q", approved.Rationale)
-	}
-	if len(approved.ChallengeCategories) != 1 || approved.ChallengeCategories[0] != protocol.ChallengeCompeting {
-		t.Fatalf("approved challenge categories = %v, want [competing-candidates]", approved.ChallengeCategories)
+	if fixture := approved["rp-et-001"]; len(fixture.ChallengeCategories) != 1 || fixture.ChallengeCategories[0] != protocol.ChallengeCompeting {
+		t.Fatalf("rp-et-001 challenge categories = %v, want [competing-candidates]", fixture.ChallengeCategories)
 	}
 }
 

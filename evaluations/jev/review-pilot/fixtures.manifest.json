@@ -1,6 +1,6 @@
 {
   "protocolVersion": "0.4.0",
-  "generatedAt": "2026-09-20T20:37:11.690017Z",
+  "generatedAt": "2026-09-20T20:45:10.981211Z",
   "fixtureFile": "review-pilot/fixtures.jsonl",
   "fixtureCount": 24,
   "splitCounts": {
@@ -17,8 +17,8 @@
   },
   "sourceGroupCount": 24,
   "reviewStatusCount": {
-    "approved": 1,
-    "unreviewed": 23
+    "approved": 4,
+    "unreviewed": 20
   },
   "challengeCount": {
     "adversarial-instruction": 2,
@@ -30,7 +30,7 @@
     "reversed-direction": 1,
     "straightforward-positive": 5
   },
-  "sha256FixtureFile": "d6d08975479333dbf1d8b135a3020ffa8214a70b6223776a9992d2ac9ab6fda0",
+  "sha256FixtureFile": "b09b20794657620e2ff41b63a874017262af0c4e4f5ba6227fd2e84ad3f01c7c",
   "sha256Manifest": "",
   "fixtureHashes": [
     {
@@ -40,12 +40,12 @@
     },
     {
       "id": "rp-et-002",
-      "sha256": "d5c846f25ff186ae62a732bdc8247665a712838240eff58b8a35445def103b5c",
+      "sha256": "79e18cea0db05ce562bd2aee0173c9e35f7bd2617ac5771395252452629691a6",
       "split": "tuning"
     },
     {
       "id": "rp-et-003",
-      "sha256": "4c4cd935e524b6db3c066b9b25dc1afbe592155d884944b804756571a6ec1228",
+      "sha256": "6f6f5d8c29ed663379da9bf948e9716f733a30eeccc461102b6f174d6ea46ae1",
       "split": "tuning"
     },
     {
@@ -60,7 +60,7 @@
     },
     {
       "id": "rp-et-006",
-      "sha256": "079963f374dee1d8a26f057fb5a13b66b366bb3b8f6043b29d88c09ce802034a",
+      "sha256": "0a4c808384f3292ac8c4bca086bc3bb01215be3634a48af0a8e1543e95a84ec1",
       "split": "tuning"
     },
     {

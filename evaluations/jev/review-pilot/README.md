@@ -12,6 +12,7 @@ challenge categories, and adjudication template.
 
 The packet does NOT modify the accepted harness / ledger / scorer.
 All 24 fixtures are agent-authored and retain their author provenance.
-`rp-et-001` is human-approved as `place` by `KHAEntertainment`, with
-its subject ambiguity preserved in the rationale; the other 23 remain
-`unreviewed` proposals.
+Four entity-type fixtures are human-approved by `KHAEntertainment`:
+`rp-et-001 = place`, `rp-et-002 = project`, `rp-et-003 = document`,
+and `rp-et-006 = place`. The other 20 remain `unreviewed` proposals.
+See `review.md` for the correction log and primary-subject rubric.
