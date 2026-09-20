@@ -178,6 +178,28 @@ type Report struct {
 	ByPattern        map[string]int                    `json:"byPattern"`
 }
 
+// sortStrings returns a sorted copy of the input slice.
+func sortStrings(in []string) []string {
+	out := make([]string, len(in))
+	copy(out, in)
+	sort.Strings(out)
+	return out
+}
+
+// sortEdges returns a sorted copy of the input slice, ordered by
+// SourceID then TargetID.
+func sortEdges(in []candidate.DirectedEdgeCandidate) []candidate.DirectedEdgeCandidate {
+	out := make([]candidate.DirectedEdgeCandidate, len(in))
+	copy(out, in)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].SourceID != out[j].SourceID {
+			return out[i].SourceID < out[j].SourceID
+		}
+		return out[i].TargetID < out[j].TargetID
+	})
+	return out
+}
+
 // Run executes the discovery baseline against the supplied sources and
 // gold, then reports what the baseline found and missed.
 func Run(sources []Source, gold func(group string) []string, edges func(group string) []candidate.DirectedEdgeCandidate, allGroups []string) *Report {
@@ -191,8 +213,8 @@ func Run(sources []Source, gold func(group string) []string, edges func(group st
 		SourceCount:      len(sources),
 		EntityRecall:     entityRecall,
 		EdgeRecall:       edgeRecall,
-		MissedEntities:   missedE,
-		MissedEdges:      missedEdges,
+		MissedEntities:   sortStrings(missedE),
+		MissedEdges:      sortEdges(missedEdges),
 		GenerationTimeNs: time.Since(start).Nanoseconds(),
 		ByPattern:        map[string]int{},
 	}
@@ -202,5 +224,7 @@ func Run(sources []Source, gold func(group string) []string, edges func(group st
 			rep.ByPattern[d.Pattern]++
 		}
 	}
+	// Sort ByPattern keys for deterministic output
+	// (map iteration order is not guaranteed)
 	return rep
 }

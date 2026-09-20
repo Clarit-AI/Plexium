@@ -1,4 +1,4 @@
-# Offline evaluation harness for KHA-579 (Jev), protocol v0.2
+# Offline evaluation harness for KHA-579 (Jev), protocol v0.3
 
 This directory contains the offline evaluation harness for Linear
 [KHA-579](https://linear.app/khaentertainment/issue/KHA-579): a Go-based
@@ -6,12 +6,42 @@ harness that scores candidate-generation, deterministic-baseline, and
 remote-model pipelines against a synthesized corpus of evaluation
 fixtures.
 
-The harness follows protocol **v0.2**, which supersedes the v0.1
-implementation that was the subject of the parent review. The v0.2
-changes are recorded in the `CHANGELOG.md` style below and apply across
-all packages in this directory. **No v0.1 measurement remains valid;**
-the v0.1 eval report was superseded and is not committed here. Any v0.1
-result remains in git history for forensic reference only.
+The harness follows protocol **v0.3**, which supersedes v0.2. The v0.3
+changes are recorded in `CHANGELOG.md`. **No v0.2 measurement remains
+valid;** the v0.2 eval report was superseded and is not committed here.
+Any v0.2 result remains in git history for forensic reference only.
+
+## Scope disclosure — SMOKE TEST ONLY
+
+**This corpus is a smoke test for the offline harness, not a
+measured-quality study.** Key limitations:
+
+- All 332 fixtures carry `reviewStatus: "unreviewed"` — no human
+  adjudication has been performed.
+- Body text mentions the same underlying fictional entities across
+  nominal tuning/held-out splits (e.g., "Vornholt Pass", "Greycloak
+  Workshop", "Maringen", "Breyganth", "Cantorian", "Steppes" appear in
+  both splits). Candidate-level IDs are salted and disjoint, but the
+  body-level entity channel is NOT eliminated.
+- Shared perturbation syntax recurs across splits (e.g., the exact
+  "[Conflicting update for X: Y does NOT participate; this contradicts
+  the prior statement.]" template and "Formerly known as X." pattern
+  are byte-identical modulo salted names). TemplateFamily IDs are
+  per-group, so the split check passes, but the syntactic pattern is
+  shared.
+- Split independence check (`loader.VerifySplitIndependence`) establishes
+  **field-level disjointness only** (group IDs, template-family IDs,
+  normalized entity-name/alias sets). It does NOT establish semantic or
+  template independence, and the protocol's 150-independent-negative
+  bound is not met.
+- All `GateEligible` fields reflect **vocabulary coverage only** — every
+  label in each task's closed vocabulary appears at least once in gold.
+  This does NOT imply statistical validity or study readiness.
+- Contradiction recall has exactly **one** `contradicted` gold case in the
+  entire corpus; no meaningful recall estimate is possible.
+
+**Held-out quality study: NOT prepared.** Human labels, effective
+independent sample size, and real model comparisons remain absent.
 
 ## What this package does
 
@@ -42,12 +72,13 @@ result remains in git history for forensic reference only.
 * Marks gate eligibility separately and reports the reason when the
   corpus does not exercise every vocabulary label or every required
   negative class. Gate eligibility is never silently false.
-* Calibration block (multiclass Brier, 5-bin reliability, coverage at
-  thresholds {0, 0.5, 0.7, 0.85, 0.95}) is populated only when
-  probabilities are present. When probabilities are present without a
-  recorded confidence, the calibration uses the max-prob as a proxy and
-  flags the report with `unscorableReason` if neither is available.
-* JSONL replay path joins fixtureId to the authoritative loaded corpus;
+* Calibration block: Brier score (from distributions only), plus two
+  **separate** reliability tables that are NEVER blended:
+  - `ChoiceConfidence`: model-reported `Confidence` values (when present)
+  - `MaxProbability`: derived `max(Probabilities)` values (when present)
+  Each table has its own sample population and coverage-by-threshold.
+  Absence of either is recorded as absence, never synthesized to 0.
+* JSONL replay path joins `fixtureId` to the authoritative loaded corpus;
   the replay stream carries NO gold / task / split / sourceGroup fields,
   eliminating the prior code's adversarial override vector. Replay
   entries are validated against the same shared semantic validator the
@@ -56,8 +87,15 @@ result remains in git history for forensic reference only.
   repetitions.
 * Runs an actual candidate-generation exercise (`jev-candidategen`) that
   invokes `candidate.Generate` end-to-end and reports entity / edge
-  recall against the gold pool. The exercise supports deliberate
+  recall against the supplied pool. The exercise supports deliberate
   gold-omission cases so a "perfect recall" claim cannot be gold-fed.
+  **This exercise is explicitly labeled `supplied-pool-stress-test` and
+  does NOT measure realistic discovery recall.**
+* Evidence-only deterministic discovery baseline (`discovery` package):
+  extracts candidates from raw markdown body via three regex patterns
+  (heading, wikilink, definition), never reads fixture Candidates or
+  ExpectedLabel; gold is joined only at scoring time. Reports
+  `missedEntities` list showing what real discovery would need to add.
 * Never performs network inference. Live runner paths are reachable but
   the default invocation runs offline only.
 
@@ -87,6 +125,7 @@ evaluations/jev/
 ├── adapter/                   typed HTTP adapters for Decisions + chat
 ├── candidate/                 deterministic candidate generation
 ├── candidateex/               candidate-generation exercise (invoke + measure)
+├── discovery/                 evidence-only deterministic discovery baseline
 ├── baseline/                  deterministic abstaining baseline
 ├── scoring/                   per-task metrics, calibration
 ├── validate/                  shared semantic validator (replay + adapter)
@@ -96,12 +135,14 @@ evaluations/jev/
 ├── cmd/jev-manifest/          writes the manifest from a fixture JSONL
 ├── cmd/jev-eval/              runs the deterministic baseline + optional replay
 ├── cmd/jev-candidategen/      runs the candidate-generation exercise
-└── pilot/
-    ├── fixtures.jsonl         425 fixtures across 32 distinct synthetic source groups
-    ├── fixtures.manifest.json manifest with file + per-fixture SHA-256
-    ├── eval-report.json       baseline + (optional) replay report
-    ├── predictions.jsonl      raw per-case predictions (replay input/output)
-    └── candidate-report.json  candidate-generation exercise output
+├── fixtures.jsonl             332 fixtures across 29 source groups
+├── fixtures.manifest.json     manifest with file + per-fixture SHA-256
+├── eval-report.json           baseline + discovery + (optional) replay report
+├── candidategen-report.json   candidate-generation exercise output (supplied-pool stress test)
+└── pilot/                     (legacy v0.2 location, retained for reference only)
+    ├── fixtures.jsonl         v0.2 corpus (425 fixtures, 32 groups)
+    ├── fixtures.manifest.json v0.2 manifest
+    └── eval-report.json       v0.2 baseline report (no discovery block)
 ```
 
 ## Reproducible offline run
@@ -113,51 +154,62 @@ cd evaluations/jev
 gofmt -l .
 go vet ./...
 go test -race ./...
-go run ./cmd/jev-corpus -out pilot/fixtures.jsonl
-go run ./cmd/jev-manifest -fixtures pilot/fixtures.jsonl -out pilot/fixtures.manifest.json
-go run ./cmd/jev-eval -fixtures pilot/fixtures.jsonl \
-    -manifest pilot/fixtures.manifest.json \
-    -out pilot/eval-report.json
-go run ./cmd/jev-candidategen -fixtures pilot/fixtures.jsonl \
-    -manifest pilot/fixtures.manifest.json \
-    -deliberate-omit sg-001 \
-    -out pilot/candidate-report.json
+go run ./cmd/jev-corpus -out fixtures.jsonl
+go run ./cmd/jev-manifest -fixtures fixtures.jsonl -out fixtures.manifest.json
+go run ./cmd/jev-eval -fixtures fixtures.jsonl \
+    -manifest fixtures.manifest.json \
+    -out eval-report.json
+go run ./cmd/jev-candidategen -fixtures fixtures.jsonl \
+    -manifest fixtures.manifest.json \
+    -out candidategen-report.json
 ```
 
 The eval CLI does not require any API keys and does not dial out. Live
 inference is not in scope of the default invocation; future live runners
 must add explicit `--live` and credentials flags.
 
-## Pilot corpus (v0.2)
+**Reproducibility guarantee:** The JSON outputs (`eval-report.json`,
+`candidategen-report.json`, `fixtures.manifest.json`) are byte-stable
+across repeated invocations on the same fixture set. All unordered
+collections (maps, slices derived from maps) are sorted before
+serialization. Timing fields (`generatedAt`, `generationNs`,
+`AttemptLatencies`, `TotalWallMS`) are preserved in raw records but
+excluded from the deterministic projection used for comparison.
 
-* 425 fixtures across 32 independent synthetic source groups (12 tuning,
-  20 held-out, plus 9 coverage fillers targeting missing vocabulary
-  labels in the held-out split).
+## Pilot corpus (v0.3)
+
+* 332 fixtures across 29 independent synthetic source groups (20 base
+  groups: 4 tuning / 16 held-out; plus 9 coverage fillers targeting
+  missing vocabulary labels in the held-out split).
 * All entities, titles, and bodies are fictional. No real-world facts;
   no parametric-memory bleed.
-* Each source group's IDs are unique (e.g., `sg-001`); each
-  perturbation template's text embeds the group ID so the same
+* Candidate-level IDs are salt-suffixed with the group ID
+  (`sg-001/vornholt-pass`) guaranteeing disjointness across splits.
+* Each perturbation template's text embeds the group ID so the same
   perturbation family cannot accidentally be reused across groups.
-* Template-family independence check (per protocol v0.2): the loader
-  refuses to admit fixtures that share a non-empty TemplateFamily across
-  different splits.
+* Template-family independence check (per protocol v0.3): the loader
+  enforces template-family, group-ID, and normalized entity-name/alias
+  disjointness across splits with explicit per-dimension flags.
 
 Per-split counts:
 
 | Task | Tuning | Held-out | Total |
 | --- | --- | --- | --- |
-| entity-type | 48 | 85 | 133 |
-| relationship | 36 | 64 | 100 |
-| claim-support | 72 | 120 | 192 |
-| **total** | **156** | **269** | **425** |
+| entity-type | 12 | 75 | 87 |
+| candidate-type | 14 | 67 | 81 |
+| relationship | 16 | 76 | 92 |
+| claim-support | 12 | 60 | 72 |
+| **total** | **54** | **278** | **332** |
 
-All 10 entity-type labels are exercised by gold; all 9 relationship
-vocabulary entries (7 generic predicates + 2 abstain labels) are
-exercised; all 3 claim-support verdicts are exercised. The protocol's
-headline gates are computable on this corpus without gate-ineligibility
-firing for "label not exercised".
+All 10 entity-type labels, all 7 candidate-type labels, all 9
+relationship vocabulary entries (7 generic predicates + 2 abstain labels),
+and all 3 claim-support verdicts are exercised by gold in the held-out
+split. The protocol's headline gates are computable on this corpus
+without gate-ineligibility firing for "label not exercised" in held-out.
+**Tuning split gate eligibility is false for multiple tasks due to
+missing labels** (by design — tuning is small).
 
-## Candidate generation (v0.2)
+## Candidate generation (v0.3)
 
 * Pool entries carry an opaque ID (the source group's `LocalID`); the
   shortlist preserves the ID verbatim. Classifier inputs see only opaque
@@ -165,21 +217,39 @@ firing for "label not exercised".
   IDs.
 * The candidate-generation exercise (`candidateex`) runs
   `candidate.Generate` end-to-end against curated fixtures and reports
-  entity / edge recall against the gold pool. It supports deliberate
+  entity / edge recall against the supplied pool. It supports deliberate
   gold-omission cases so recall cannot silently hit 1.0 due to gold
   feeding.
+* **Kind is `supplied-pool-stress-test`** — the pool is gold-derived and
+  the exercise measures stress-test recall only, NOT realistic discovery
+  recall. See `candidategen-report.json` for the explicit provenance
+  note.
 * Truncation flags are recorded on the shortlist and surfaced in the
   exercise report's `TruncatedFixtures` list.
 
-Latest candidate-exercise summary (pilot, deliberately omitting
-sg-001's gold entity):
+Latest candidate-exercise summary (pilot):
 
 | Metric | Value |
 | --- | --- |
-| Entity recall (overall) | 0.949 |
-| Edge recall (overall) | 0.880 |
-| Omitted gold fixtures | 9 (sg-001 group) |
+| Entity recall (overall) | 0.270 |
+| Edge recall (overall) | 0.015 |
+| Omitted gold fixtures | 0 |
 | Truncated fixtures | 0 |
+
+## Discovery baseline (v0.3, new)
+
+* Package `discovery` implements an evidence-only deterministic baseline.
+* Three extraction patterns: markdown headings (`# ` through `###### `),
+  wikilinks (`[[Title]]` or `[[Title|alias]]`), definitions
+  (`def: <Title> = <description>`).
+* **Never reads fixture `Candidates`, `ExpectedLabel`, or `GoldEntities`**.
+  Gold is joined only at scoring time via `discovery.JoinGold`.
+* Reports `entityRecall`, `edgeRecall`, `missedEntities`, `missedEdges`,
+  and per-pattern counts. On this corpus (bodies lack markdown patterns),
+  entity recall = 0.0 and the full gold entity list appears in
+  `missedEntities` — this is the intended honest signal.
+* The baseline is explicitly labeled an "intentionally narrow low-recall
+  upper bound on what an entity-aware extractor might achieve."
 
 ## Complexity inventory
 
@@ -195,15 +265,13 @@ missing before a future adoption claim.
   "missed because truncated" from "missed because no evidence".
 * Pool entries may carry an opaque ID; the shortlist preserves it.
 * No generative candidate discovery. The harness accepts the supplied
-  candidate pool as ground truth for evaluation; the protocol permits an
-  optional generative pass whose cost is charged to every pipeline that
-  uses it (v0.2 corrected the v0.1 README inversion on this point).
+  candidate pool as ground truth for evaluation.
 
 Still missing:
 
 * Confidence-calibrated candidate ranker.
 * Empirical evidence for whether 12 / 24 caps are right at scale.
-* Generative discovery pass (deliberately not in scope of v0.2; the
+* Generative discovery pass (deliberately not in scope; the
   fixture-supplied candidate list is the only source of truth).
 
 ### 2. Typed adapters
@@ -239,6 +307,9 @@ Still missing:
 ### 3. Deterministic abstaining baseline
 
 * `entity-type` always returns the default fallback `document`.
+* `candidate-type` always returns the first vocabulary label `PERSON`
+  (the baseline's fixed vocabulary for candidate-type is the first
+  `CandidateTypeLabels` entry).
 * `relationship` always returns `insufficient-evidence`. The protocol
   requires deterministic code to abstain rather than guess a predicate.
 * `claim-support` always returns `insufficient-evidence`.
@@ -288,22 +359,25 @@ Still missing:
 
 ### 6. Fixture corpus
 
-* 32 distinct fictional source groups plus 9 held-out coverage fillers.
+* 29 distinct fictional source groups plus 9 held-out coverage fillers.
 * All entities and bodies are fictional; no real-world facts.
 * Per-source-group split assignment so independence is enforceable.
 * Adversarial / conflicting / irrelevant / numeric-trap / rename /
   missing-evidence perturbations attached to every group, with
   per-group perturbation text (TemplateFamily IDs are per-group for
   perturbation cases; base cases have empty TemplateFamily).
-* All 10 entity-type labels, all 9 relationship vocabulary entries, and
-  all 3 claim-support verdicts are exercised by gold.
+* All 10 entity-type labels, all 7 candidate-type labels, all 9
+  relationship vocabulary entries, and all 3 claim-support verdicts are
+  exercised by gold in held-out.
 
 Still missing:
 
-* ≥ 30 tuning cases per task. The pilot currently carries 36 relationship
-  tuning cases, 48 entity-type, 72 claim-support; the relationship
-  tuning is right at the target.
-* Human review / adjudication for all 425 fixtures.
+* ≥ 30 tuning cases per task. The pilot currently carries 12/14/16/12
+  tuning cases per task; the protocol target is ≥ 30/task.
+* ≥ 150 held-out negatives per negative-class gate. Held-out has 57
+  relationship / 43 claim-support negative cases (protocol target
+  ≥ 150 each).
+* Human review / adjudication for all 332 fixtures.
 * Numeric invariant automated checks (recorded as
   `NumericInvariants`, runtime check deferred to a future revision).
 
@@ -344,24 +418,26 @@ labels, the recommended sequence is:
    `insufficient-evidence` abstain or trigger a fixture revision.
 2. **Add more relationship tuning cases.** Target ≥ 30 cases per task in
    the tuning split.
-3. **Numeric invariants.** Promote `NumericInvariants` from records
+3. **Add held-out negatives.** Target ≥ 150 per negative-class gate in
+   held-out.
+4. **Numeric invariants.** Promote `NumericInvariants` from records
    into runtime checks: the harness should verify each span resolves
    to the expected value, and any mismatch becomes an
    `unsupported-acceptance` event.
-4. **Held-out baseline.** Stand up a non-trivial second baseline and
-   run all 425 fixtures against it. The scorer already reports per-task
+5. **Held-out baseline.** Stand up a non-trivial second baseline and
+   run all 332 fixtures against it. The scorer already reports per-task
    and per-(task, split) predictions, so this only requires another
    runner and a second invocation.
-5. **Adapter live probe.** Run a small (5-case) live request batch
+6. **Adapter live probe.** Run a small (5-case) live request batch
    against `/api/alpha/decisions` once paid authorization is in place.
    The transport validation already enforces the response shape; the
    probe's purpose is to confirm the pin resolves to the expected model
    string.
-6. **Three-repetition held-out run.** Each held-out fixture is run three
+7. **Three-repetition held-out run.** Each held-out fixture is run three
    times with the seeded interleaving. The runner preserves raw offline
    runs and never labels them as "Jev results" — only after human review
    can a measurement be promoted into an adoption claim.
-7. **Decision gate.** Compare Pinned-Jev against the second baseline
+8. **Decision gate.** Compare Pinned-Jev against the second baseline
    using the protocol's paired bootstrap. If the lower bound is
    ≥ -0.02 on the quality axis and the protocol's other gates pass,
    document a concrete retirement proposal for the existing extraction
@@ -369,21 +445,22 @@ labels, the recommended sequence is:
 
 ## Notes on review responses
 
-The review artifact flagged ten distinct defects across P1–P4. Each
-finding is addressed in the v0.2 commit; the resolution list and the
-specific test that demonstrates the fix is in `CHANGELOG.md`. v0.1
-reports and the v0.1 corpus remain in git history for forensic reference
-but are superseded.
+The review artifact flagged ten distinct defects across P1–P4 in v0.1;
+v0.2 addressed them (see `CHANGELOG.md`). The v0.3 re-review cataloged
+N1–N4; N1 (stale docs) and N2 (report reproducibility) are addressed
+in this commit. N3 (tuning/held-out sample size) and N4 (body-level
+entity reuse) are documented limitations, not harness defects.
 
 ## Notes for reviewers
 
 * The pilot corpus is marked `unreviewed` and may contain factual
   errors. Reviewers should treat each fixture's `expectedLabel` as a
   proposal, not a gold answer.
-* The fixture author field is `agent:KHA-579-pilot-author-v2`. Reviewers
+* The fixture author field is `agent:KHA-579-pilot-author-v3`. Reviewers
   must replace this with a human handle only on approval.
 * The deterministic baseline abstains on relationship and claim-support
-  tasks. That is the protocol-mandated behaviour, not a bug.
+  tasks, and returns `PERSON` for candidate-type. That is the
+  protocol-mandated behaviour, not a bug.
 * All transport tests use `httptest`. The harness never opens a real
   network connection in this directory.
 * `cmd/jev-candidategen` is a separate CLI from `cmd/jev-eval`; it

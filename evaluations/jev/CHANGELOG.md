@@ -1,6 +1,68 @@
 # KHA-579 evaluation harness changelog
 
-## v0.2.0 — review-driven correction pass
+## v0.3.0 — focused v0.3 correction pass
+
+Supersedes v0.2.0. The v0.2 corpus, manifest, eval-report, and reports
+remain in git history as commit `dba725b`; they are NOT promoted to
+measured-quality status. Every v0.2 measurement must be re-run against
+the v0.3 corpus before any adoption decision.
+
+The v0.3 re-review artifact
+(`/Users/bbrenner/.traycer/epics/1088c958-cb42-463c-8c23-d9e728f7a0aa/artifacts/jev-harness-review/v0.3-rereview/index.md`)
+cataloged N1–N4. The table below records the finding, the resolution,
+and the test that demonstrates the fix.
+
+### N1 — P2: README/CHANGELOG stale at v0.2
+
+| Finding | Resolution | Verification |
+|---------|------------|--------------|
+| README claimed 425 fixtures / 32 groups / v0.2 corpus, omitted `candidate-type` task, `discovery` package, calibration tables, and smoke-test disclosure | README fully rewritten for v0.3: 332 fixtures / 29 groups / 4 tasks; explicit SMOKE TEST ONLY header; body-level entity reuse and shared perturbation syntax across splits disclosed; GateEligible = vocabulary coverage only; one contradicted case caveat | `git diff dba725b..HEAD -- README.md` shows full rewrite |
+| CHANGELOG stopped at v0.2 | CHANGELOG extended with v0.3 section documenting N1–N4 resolutions | `git diff dba725b..HEAD -- CHANGELOG.md` shows new section |
+
+### N2 — P2: Committed reports not byte-reproducible
+
+| Finding | Resolution | Verification |
+|---------|------------|--------------|
+| `pilot/eval-report.json` omits `discovery` block (predates discovery wiring) | Legacy `pilot/` directory retained for reference; canonical reports now at root (`eval-report.json`, `candidategen-report.json`, `fixtures.manifest.json`). Discovery block included. | `go run ./cmd/jev-eval ...` produces root `eval-report.json` with discovery block |
+| `missedEntities` ordering non-deterministic (map iteration) | `discovery.Run` now sorts `missedEntities` and `missedEdges` before serialization; all unordered report lists sorted (support labels, labels, etc.) | `scoring_test.go::TestReportDeterministicOrdering`, `discovery_test.go::TestRunDeterministicOutput` |
+| Duplicate reports in root vs `pilot/` confusing | Root is canonical; `pilot/` marked legacy v0.2. README reproduction commands use root paths. | README commands updated |
+| `generatedAt`, `generationNs`, timing fields differ on each run | Timing fields preserved in raw records; deterministic projection test compares semantic content excluding timing | `scoring_test.go::TestReportDeterministicProjection` |
+
+### N3 — P3: Corpus below protocol tuning targets (documented limitation)
+
+| Finding | Resolution |
+|---------|------------|
+| Tuning: 12/14/16/12 per task (protocol ≥ 30) | Documented in README "Still-missing acceptance evidence" and "Expansion plan". `GateEligible` correctly reflects vocabulary coverage only. `SplitGroupIndependence` doc comment explicitly disclaims statistical independence and unmet 150-negative bound. |
+| Held-out: 57 relationship / 43 claim-support negatives (protocol ≥ 150) | Same disclosure. |
+| Exactly one `contradicted` gold case | Disclosed in README scope header and pilot corpus section. |
+
+### N4 — P3: Body-level entity reuse across splits (documented limitation)
+
+| Finding | Resolution |
+|---------|------------|
+| Same fictional entities ("Vornholt Pass", "Greycloak Workshop", etc.) appear in tuning and held-out bodies | README "Scope disclosure — SMOKE TEST ONLY" explicitly states: body names and shared perturbation syntax cross nominal splits despite salted candidate-ID/name disjointness. Split check establishes field-level disjointness only. |
+
+### v0.3 Structural Changes (R1–R3 from prior assignment)
+
+| # | Change | Resolution |
+|---|--------|------------|
+| R1 | Candidate-typing separate task with `CandidateTypeLabels` (7 uppercase role tags) distinct from `DocumentTypeLabels` | `protocol.TaskCandidateType`, `protocol.CandidateTypeLabels`, propagated through protocol/loader/runner/baseline/scoring/validate/CLI. `TestPerfectPredictionAllTasksAllSplits` proves macro-F1=1.0 reachable on all 4 tasks and both splits. |
+| R2 | Entity/alias disjointness enforced; template-family grouping respected | `loader.VerifySplitIndependence` checks normalized entity-name/alias, group-ID, and template-family disjointness with per-dimension flags. Corpus salt-suffixes all names. |
+| R3 | Candidate exercise relabeled `supplied-pool-stress-test`; discovery baseline added | `candidateex.Kind = "supplied-pool-stress-test"` with explicit provenance. New `discovery` package: evidence-only regex baseline (heading/wikilink/definition), never reads fixture Candidates/ExpectedLabel, gold joined at scoring, reports `missedEntities`. |
+| — | Calibration split: ChoiceConfidence vs MaxProbability tables never blended | `CalibrationReport.ChoiceConfidence` and `CalibrationReport.MaxProbability` separate populations; Brier from distributions only. `TestCalibrationSeparatesConfidenceFromMaxProbability`, `TestCalibrationMixedPresenceCounterexample`. |
+
+### Quality Gates (v0.3)
+
+| Check | Result |
+|-------|--------|
+| `gofmt -l .` | Clean |
+| `go vet ./...` | Clean |
+| `go test -race -count=1 ./...` | 11 packages pass |
+| Byte-reproducible reports | Verified by running reproduction twice and comparing deterministic projections |
+
+---
+
+## v0.2.0 — review-driven correction pass (preserved from prior commit)
 
 Supersedes v0.1.0. The v0.1 corpus, manifest, eval-report, and decisions
 remain in git history as commit `5f4d8ab` (same tree as `672c893`); they
@@ -52,7 +114,7 @@ finding, the resolution, and the test that demonstrates the fix.
 | `eval-report.json` embedded the entire corpus (18k lines) | Replaced with `ManifestSummary` (counts only). Per-fixture predictions live in `predictions.jsonl` (replay input/output) when supplied |
 | README claimed `boundary "concurrency is bounded to 1 by Config.HTTPClient"` | Removed; runner and adapters expose caller responsibility |
 
-### Additional changes beyond the review catalog
+### Additional changes beyond the review catalog (v0.2)
 
 * New `validate` package with a shared semantic validator used by both
   the live adapters and the JSONL replay path. The validator enforces

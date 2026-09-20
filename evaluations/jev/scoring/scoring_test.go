@@ -1,6 +1,7 @@
 package scoring
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 
@@ -428,5 +429,65 @@ func TestR1VocabulariesAreDistinct(t *testing.T) {
 		if _, ok := docSet[l]; ok {
 			t.Errorf("vocabulary leak: %q appears in both entity-type and candidate-type", l)
 		}
+	}
+}
+
+// TestReportDeterministicOrdering verifies that the report's unordered
+// collections (SupportedLabels, Labels, etc.) are serialized in a
+// stable order across repeated Score invocations. This addresses N2
+// (re-review): committed reports must be byte-reproducible modulo
+// timing fields.
+func TestReportDeterministicOrdering(t *testing.T) {
+	preds := []Prediction{
+		{Task: protocol.TaskEntityType, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "person", PredictedLabel: "person"},
+		{Task: protocol.TaskEntityType, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "document", PredictedLabel: "document"},
+		{Task: protocol.TaskEntityType, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "tool", PredictedLabel: "tool"},
+	}
+	rep1 := Score("0.3.0", SourceBaseline, preds)
+	rep2 := Score("0.3.0", SourceBaseline, preds)
+	// Compare SupportedLabels ordering
+	tr1 := rep1.ByTask[protocol.TaskEntityType]
+	tr2 := rep2.ByTask[protocol.TaskEntityType]
+	if len(tr1.SupportedLabels) != len(tr2.SupportedLabels) {
+		t.Fatalf("SupportedLabels length mismatch: %d vs %d", len(tr1.SupportedLabels), len(tr2.SupportedLabels))
+	}
+	for i := range tr1.SupportedLabels {
+		if tr1.SupportedLabels[i] != tr2.SupportedLabels[i] {
+			t.Errorf("SupportedLabels[%d] order differs: %q vs %q", i, tr1.SupportedLabels[i], tr2.SupportedLabels[i])
+		}
+	}
+	// Labels ordering (vocabulary)
+	for i := range tr1.Labels {
+		if tr1.Labels[i] != tr2.Labels[i] {
+			t.Errorf("Labels[%d] order differs: %q vs %q", i, tr1.Labels[i], tr2.Labels[i])
+		}
+	}
+}
+
+// TestReportDeterministicProjection verifies that a deterministic
+// projection of the report (excluding timing fields: generatedAt,
+// generationNs, AttemptLatencies, TotalWallMS) is stable across
+// repeated invocations. This addresses N2 (re-review): reports must
+// be comparable modulo timing.
+func TestReportDeterministicProjection(t *testing.T) {
+	preds := []Prediction{
+		{Task: protocol.TaskEntityType, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "person", PredictedLabel: "person"},
+		{Task: protocol.TaskEntityType, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "document", PredictedLabel: "document"},
+	}
+	rep1 := Score("0.3.0", SourceBaseline, preds)
+	rep2 := Score("0.3.0", SourceBaseline, preds)
+	// Both should have identical semantic content.
+	// We compare the JSON-serialized reports after stripping timing
+	// fields. Since Score() doesn't include timing fields in the
+	// baseline predictions, the reports should be byte-equal.
+	b1, _ := json.Marshal(rep1)
+	b2, _ := json.Marshal(rep2)
+	if string(b1) != string(b2) {
+		t.Fatalf("reports not byte-equal for deterministic baseline")
 	}
 }

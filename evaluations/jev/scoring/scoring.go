@@ -17,6 +17,7 @@
 package scoring
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
@@ -378,6 +379,7 @@ func scoreTask(protocolVersion string, source Source, preds []Prediction, vocabu
 			supported = append(supported, l)
 		}
 	}
+	sort.Strings(supported)
 	tr.SupportedLabels = supported
 	// Gate eligibility: macro-F1 ≥ 0.90 only meaningful if every vocabulary
 	// label has at least one gold-observed case. Unsupported-acceptance

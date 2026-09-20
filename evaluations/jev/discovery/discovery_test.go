@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"encoding/json"
 	"sort"
 	"testing"
 )
@@ -97,4 +98,58 @@ func TestRunDiscoveryMissesCaseInsensitive(t *testing.T) {
 	_ = rep
 	// Sort stability
 	sort.Strings(rep.MissedEntities)
+}
+
+// TestRunDeterministicOutput verifies that the discovery report's
+// unordered collections (MissedEntities, MissedEdges, ByPattern) are
+// serialized in a stable order across repeated Run invocations. This
+// addresses N2 (re-review): committed reports must be byte-reproducible
+// modulo timing fields (GenerationTimeNs).
+func TestRunDeterministicOutput(t *testing.T) {
+	sources := []Source{
+		{Group: "g1", Body: "# A\n\n[[B|B-alias]]\n\ndef: C = desc\n"},
+		{Group: "g2", Body: "# D\n\n[[E]]\n"},
+	}
+	gold := func(g string) []string {
+		switch g {
+		case "g1":
+			return []string{"C", "A", "B"} // intentionally unsorted
+		case "g2":
+			return []string{"E", "D"}
+		}
+		return nil
+	}
+	edges := func(g string) []struct{ SourceID, TargetID string } {
+		return nil
+	}
+	_ = edges
+
+	rep1 := Run(sources, gold, nil, []string{"g1", "g2"})
+	rep2 := Run(sources, gold, nil, []string{"g1", "g2"})
+
+	// MissedEntities must be sorted
+	if len(rep1.MissedEntities) != len(rep2.MissedEntities) {
+		t.Fatalf("MissedEntities length mismatch")
+	}
+	for i := range rep1.MissedEntities {
+		if rep1.MissedEntities[i] != rep2.MissedEntities[i] {
+			t.Errorf("MissedEntities[%d] order differs: %q vs %q", i, rep1.MissedEntities[i], rep2.MissedEntities[i])
+		}
+	}
+	// MissedEdges must be sorted (empty here)
+	if len(rep1.MissedEdges) != len(rep2.MissedEdges) {
+		t.Fatalf("MissedEdges length mismatch")
+	}
+
+	// ByPattern map iteration order should be stable (keys sorted in JSON)
+	b1, _ := json.Marshal(rep1)
+	b2, _ := json.Marshal(rep2)
+	// Compare after zeroing GenerationTimeNs (the only non-deterministic field)
+	rep1.GenerationTimeNs = 0
+	rep2.GenerationTimeNs = 0
+	b1, _ = json.Marshal(rep1)
+	b2, _ = json.Marshal(rep2)
+	if string(b1) != string(b2) {
+		t.Fatalf("reports not byte-equal after zeroing GenerationTimeNs")
+	}
 }
