@@ -1,0 +1,179 @@
+{
+  "protocolVersion": "0.3.0",
+  "generatedAt": "2026-09-20T13:59:44.913924Z",
+  "fixtureFile": "review-pilot/fixtures.jsonl",
+  "fixtureCount": 24,
+  "splitCounts": {
+    "tuning": 24,
+    "heldOut": 0,
+    "total": 24
+  },
+  "taskCounts": {
+    "entityType": 6,
+    "candidateType": 0,
+    "relationship": 6,
+    "claimSupport": 6,
+    "total": 24
+  },
+  "sourceGroupCount": 24,
+  "reviewStatusCount": {
+    "unreviewed": 24
+  },
+  "challengeCount": {
+    "adversarial-instruction": 2,
+    "competing-candidates": 2,
+    "conflicting-sources": 3,
+    "irrelevant-context": 2,
+    "missing-evidence": 4,
+    "rename": 4,
+    "reversed-direction": 1,
+    "straightforward-positive": 6
+  },
+  "sha256FixtureFile": "8773ea44e6ba5f9249a840cffd233c812b613c0a86e4cd05d78562674b19c422",
+  "sha256Manifest": "",
+  "fixtureHashes": [
+    {
+      "id": "rp-et-001",
+      "sha256": "600735550bff503804637046282bf413dfff2e101c9e3f1433f23d9651b097a4",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-et-002",
+      "sha256": "9a5e77042f18b21c21aade0ea311d78ae548687e8d82f7523d6edcf4db72fad6",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-et-003",
+      "sha256": "6e7ac6c64d882f4e26f5fbe9614dec13183cbfe4fec8f5741504ad18aabc5a57",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-et-004",
+      "sha256": "8f65f839c2ca817668a670f916ce75fc47fb9269240efd961d1b3b65be7a315d",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-et-005",
+      "sha256": "92b948e7f2e1e0cc89fbc272892925844a6c94af30185cc5b414209352e96874",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-et-006",
+      "sha256": "205cd1ea1928c678c747117e620633302e5fdc2eb77e7df1ae14f67aeb19d455",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-ct-007",
+      "sha256": "a01f4070ca8ee2d1a2dd6e5a9782b81bd842f2e2754f8f9acbd437e490b5e567",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-ct-008",
+      "sha256": "bbeaa5aeba27ae3e6dac39f8632b7bdd7bd555251f500f446ccf93c74326abcb",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-ct-009",
+      "sha256": "8024848c8c3bd2adcf7456007e3b053c541f0c5f05d7dc26b91560a6667857cc",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-ct-010",
+      "sha256": "7eda325102abe6021bf665315a235b471e4b99a933d1b61a155d95f4dff9b282",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-ct-011",
+      "sha256": "5b7951831d03c7f5ebae1fccd6b26737986177c5cb4ac6390a00e38a1fdf85ef",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-ct-012",
+      "sha256": "fbad8bac97b7cbeedb2c876720b317ba3e8558595be02a8635e2ed1e99c055d2",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-rel-013",
+      "sha256": "2cc6ecaaf711e796ae145e135ad58301281816d0025418cdef29ca3ff877b106",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-rel-014",
+      "sha256": "ec67db4aa2eef71f8c9f7c712a51aa35798d264d254ebad9d8663d5f8047ba80",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-rel-015",
+      "sha256": "d5ed2b7062cd389f7eca1a5bd3ec58ab12e1b16dbc0be7d6cc1e67bdbb4711e2",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-rel-016",
+      "sha256": "20ef0c871228e797daccfd50fb337fb6eb8f20c2dab46f57885d2598172a02be",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-rel-017",
+      "sha256": "32b9e0082ded14157de8f8e89786a3149b387af901f1acc056f6383c2cd59339",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-rel-018",
+      "sha256": "9f2e9703361ab89b679814c1a19f76bf4fc61dba4faf74cc6dfbf973d01c958d",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-cs-019",
+      "sha256": "f7457fe8fa87cd3d49724e6bf74624d4c35d0a11dec24514a676bb5c99c0c65d",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-cs-020",
+      "sha256": "759de39a46aaca485bd82b1d098d55bf8133effe87716f20801fbf4127d4468b",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-cs-021",
+      "sha256": "9f14f62b5cfb5bd8c51527ad75a2afb09e785aa66ebb716b8b6ba1499c6279f9",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-cs-022",
+      "sha256": "fa8529b3c2c8ee3f1b95d2cc6665736f7de06128f4b401c65e1e46417d68a736",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-cs-023",
+      "sha256": "2086a9c0f9bf9a12c5dacb25bcc4b56a561eeeb7a5c2b246c8d8e92318cd07af",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-cs-024",
+      "sha256": "00f2c3ade23b4b34698ecb0b60bc7806778e2eabd4f6945c8bdee95e6edb91af",
+      "split": "tuning"
+    }
+  ],
+  "splitIndependences": [
+    {
+      "split": "tuning",
+      "sourceGroupCount": 24,
+      "independent": true,
+      "entityDisjoint": true,
+      "templateFamilyDisjoint": true
+    },
+    {
+      "split": "held-out",
+      "sourceGroupCount": 0,
+      "independent": true,
+      "entityDisjoint": true,
+      "templateFamilyDisjoint": true
+    },
+    {
+      "split": "reserved",
+      "sourceGroupCount": 0,
+      "independent": true,
+      "entityDisjoint": true,
+      "templateFamilyDisjoint": true
+    }
+  ]
+}
