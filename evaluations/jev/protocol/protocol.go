@@ -246,11 +246,13 @@ type Fixture struct {
 	EdgeTargetID        string              `json:"edgeTargetId,omitempty"`
 	Excerpts            []Excerpt           `json:"excerpts"`
 	Candidates          []Candidate         `json:"candidates"`
-	CandidateGeneration string              `json:"candidateGeneration"` // how candidates were produced
+	CandidateGeneration string              `json:"candidateGeneration"`       // how candidates were produced
+	CandidateSource     string              `json:"candidateSource,omitempty"` // free-text provenance for Candidates list (not silently dropped)
 	AllowedLabels       []string            `json:"allowedLabels"`
 	ExpectedLabel       string              `json:"expectedLabel"`
 	SupportingSpans     []EvidenceSpan      `json:"supportingSpans"`
 	Rationale           string              `json:"rationale"`
+	RationaleEvidence   string              `json:"rationaleEvidence,omitempty"` // quoted evidence span or explicit-absence justification for the proposed label (not silently dropped)
 	ChallengeCategories []ChallengeCategory `json:"challengeCategories"`
 	Split               Split               `json:"split"`
 	Author              string              `json:"author"`

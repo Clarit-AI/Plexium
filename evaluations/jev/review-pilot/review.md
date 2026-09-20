@@ -573,6 +573,58 @@ the agent provenance stays.
 - This packet prepares human review; it cannot authorize or run a
   study by itself.
 
+## Unresolved adjudications (NOT eligible for measured accuracy until resolved)
+
+These cases have a defensible proposed gold, but the interpretation
+rests on a convention or directionality decision a human adjudicator
+must ratify. The proposed labels are kept at `reviewStatus:
+"unreviewed"`; this packet is **not** a measured-accuracy claim on
+these specific cases. The cases below are marked NOT eligible for
+measured accuracy until the human adjudicates them AND the underlying
+convention / protocol gap is resolved.
+
+| Fixture | Task | Proposed gold | Pending human decision |
+| --- | --- | --- | --- |
+| `rp-et-001` | entity-type | `place` | subject-vs-document typing convention: is a field-notes document about a place typed `place` (subject-typed) or `document`? |
+| `rp-et-006` | entity-type | `document` | same convention question; current packet splits with `rp-et-001` |
+| `rp-et-002` | entity-type | `project` | "dominance" rule: when body mixes crew, place, and project content equally, which wins? |
+| `rp-et-004` | entity-type | `document` | missing-evidence default: is the deterministic-baseline fallback label (`document`) admissible as proposed gold, or should the case use an explicit abstain? |
+| `rp-ct-010` | candidate-type | `PERSON` | same missing-evidence default question; fallback `PERSON` is the deterministic baseline's first vocabulary label, not evidence-grounded |
+| `rp-rel-013` | relationship | `used-by` | `used-by` directionality convention: does the predicate read "source is used by target" (current reading) or the reverse? |
+| `rp-rel-016` | relationship | `used-by` | same `used-by` directionality question |
+
+**Action required from human adjudicator:**
+
+- Pick the subject-vs-document convention (then re-confirm rp-et-001
+  and rp-et-006 against it).
+- Pick the dominance rule for rp-et-002 (or re-define what "project"
+  means in mixed-content bodies).
+- Confirm or reject the missing-evidence default for rp-et-004 and
+  rp-ct-010 (see Protocol gap below).
+- Confirm the `used-by` directionality for rp-rel-013 and rp-rel-016
+  (the protocol `PredicateLabels` list does not specify direction).
+
+**Affected cases are NOT eligible for measured accuracy** until the
+human ratifies the convention. Authorship (`agent:minimaxM3-tuning
+-author-v1`) is preserved; `reviewStatus` stays `unreviewed`. No silent
+relabel.
+
+## Protocol gap (informational)
+
+The- current protocol vocabulary for `entity-type` and `candidate-type`
+lacks an explicit abstain label analogous to
+`insufficient-evidence` for `claim-support` or
+`no-supported-relationship` for `relationship`. Missing-evidence cases
+(rp-et-004, rp-ct-010) currently use the deterministic-baseline
+fallback label (`document` / `PERSON`, the first vocabulary entry)
+) as proposed gold. This is a **protocol gap, not a justification**:
+the baseline fallback is not evidence-grounded gold. Resolving this
+gap requires either (a) adding an explicit abstain label to
+`DocumentTypeLabels` / `CandidateTypeLabels`, or (b) clarifying that
+the baseline fallback IS admissible as proposed gold for
+missing-evidence cases. This packet does NOT add such a label and
+does NOT change the vocab. Future protocol-version bump may address.
+
 ## How to regenerate the manifest
 
 The manifest is committed alongside the fixtures. To regenerate

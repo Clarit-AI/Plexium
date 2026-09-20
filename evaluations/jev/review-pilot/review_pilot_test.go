@@ -4,7 +4,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -184,5 +186,71 @@ func TestReviewPilotManifest(t *testing.T) {
 	}
 	if got := m.TaskCounts.Total; got != 24 {
 		t.Errorf("manifest TaskCounts.Total = %d, want 24", got)
+	}
+}
+
+// TestReviewPilotMetadataRoundtrip is the P1-1 regression: the
+// CandidateSource and RationaleEvidence JSON fields must survive
+// loader roundtrip (raw read -> Unmarshal -> Marshal -> re-read).
+// Before the fix, these fields were absent from protocol.Fixture
+// and encoding/json silently discarded them on Unmarshal.
+func TestReviewPilotMetadataRoundtrip(t *testing.T) {
+	fxPath, mfPath := paths(t)
+	rawBytes, err := os.ReadFile(fxPath)
+	if err != nil {
+		t.Fatalf("read raw: %v", err)
+	}
+	// Parse each line as raw JSON, compare CandidateSource and
+	// RationaleEvidence values against the loader's parsed Fixture.
+	dec := json.NewDecoder(bytes.NewReader(rawBytes))
+	var rawLines [][]byte
+	for {
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatalf("decode raw: %v", err)
+		}
+		rawLines = append(rawLines, raw)
+	}
+	if len(rawLines) != 24 {
+		t.Fatalf("raw line count = %d, want 24", len(rawLines))
+	}
+	loaded, err := loader.Load(fxPath, mfPath)
+	if err != nil {
+		t.Fatalf("loader.Load: %v", err)
+	}
+	if len(loaded.Fixtures) != 24 {
+		t.Fatalf("loaded fixture count = %d, want 24", len(loaded.Fixtures))
+	}
+	for i, f := range loaded.Fixtures {
+		var rawMap map[string]any
+		if err := json.Unmarshal(rawLines[i], &rawMap); err != nil {
+			t.Fatalf("unmarshal raw line %d: %v", i, err)
+		}
+		rawCandSrc, _ := rawMap["candidateSource"].(string)
+		rawRatEv, _ := rawMap["rationaleEvidence"].(string)
+		if f.CandidateSource != rawCandSrc {
+			t.Errorf("fixture %s: CandidateSource lost in roundtrip; raw=%q got=%q", f.ID, rawCandSrc, f.CandidateSource)
+		}
+		if f.RationaleEvidence != rawRatEv {
+			t.Errorf("fixture %s: RationaleEvidence lost in roundtrip; raw=%q got=%q", f.ID, rawRatEv, f.RationaleEvidence)
+		}
+		// Roundtrip via Marshal -> Unmarshal must also preserve the values.
+		remarshaled, err := json.Marshal(f)
+		if err != nil {
+			t.Fatalf("marshal fixture %s: %v", f.ID, err)
+		}
+		var reparsed protocol.Fixture
+		if err := json.Unmarshal(remarshaled, &reparsed); err != nil {
+			t.Fatalf("unmarshal remarshal %s: %v", f.ID, err)
+		}
+		if reparsed.CandidateSource != f.CandidateSource {
+			t.Errorf("fixture %s: remarshal CandidateSource mismatch", f.ID)
+		}
+		if reparsed.RationaleEvidence != f.RationaleEvidence {
+			t.Errorf("fixture %s: remarshal RationaleEvidence mismatch", f.ID)
+		}
 	}
 }
