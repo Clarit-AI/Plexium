@@ -18,3 +18,7 @@
 .dolt/
 *.db
 .beads-credential-key
+
+# KHA-287 probe local captures (re-run the probe to regenerate)
+probes/kha-287/evidence/
+probes/kha-287/evidence-pre-fix/

@@ -78,6 +78,7 @@ func init() {
 	syncCmd.Flags().Bool("dry-run", false, "Preview without writing changes")
 	syncCmd.Flags().Bool("ci", false, "CI mode: exit non-zero if stale pages found")
 	syncCmd.Flags().Bool("regenerate", false, "Regenerate stale wiki pages via LLM provider cascade")
+	syncCmd.Flags().Bool("mark-reviewed", false, "Advance validated freshness without an LLM call (explicit debt mark — use only when wiki content has been verified manually)")
 
 	// lint flags
 	lintCmd.Flags().Bool("deterministic", false, "Run deterministic checks only (link/orphan/staleness validation)")
@@ -420,10 +421,14 @@ var syncCmd = &cobra.Command{
 
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		regenerate, _ := cmd.Flags().GetBool("regenerate")
+		markReviewed, _ := cmd.Flags().GetBool("mark-reviewed")
 		outputJSON, _ := cmd.Flags().GetBool("output-json")
 
 		if dryRun && regenerate {
 			return fmt.Errorf("cannot combine --dry-run with --regenerate")
+		}
+		if regenerate && markReviewed {
+			return fmt.Errorf("cannot combine --regenerate with --mark-reviewed")
 		}
 
 		cfg, err := config.LoadFromDir(repoRoot)
@@ -432,10 +437,11 @@ var syncCmd = &cobra.Command{
 		}
 
 		syncOpts := plexiumsync.Options{
-			RepoRoot:   repoRoot,
-			Config:     cfg,
-			DryRun:     dryRun,
-			Regenerate: regenerate,
+			RepoRoot:     repoRoot,
+			Config:       cfg,
+			DryRun:       dryRun,
+			Regenerate:   regenerate,
+			MarkReviewed: markReviewed,
 		}
 
 		if regenerate {
@@ -461,9 +467,13 @@ var syncCmd = &cobra.Command{
 			fmt.Printf("Source files checked: %d\n", result.SourceFilesChecked)
 			fmt.Printf("Stale pages found:   %d\n", result.StalePages)
 			fmt.Printf("Hashes updated:      %d\n", result.HashesUpdated)
+			fmt.Printf("Validated updated:   %d\n", result.ValidatedUpdated)
 			fmt.Printf("Nav recompiled:      %v\n", result.NavRecompiled)
 			if result.PagesRegenerated > 0 {
 				fmt.Printf("Pages regenerated:   %d\n", result.PagesRegenerated)
+			}
+			if result.PagesMarkedReviewed > 0 {
+				fmt.Printf("Pages marked reviewed: %d\n", result.PagesMarkedReviewed)
 			}
 			if len(result.RegenerationErrors) > 0 {
 				fmt.Printf("Regeneration errors: %d\n", len(result.RegenerationErrors))
@@ -476,6 +486,10 @@ var syncCmd = &cobra.Command{
 				for _, p := range result.PagesAffected {
 					fmt.Printf("  - %s\n", p)
 				}
+			}
+			if result.NoProviderReason != "" {
+				fmt.Println()
+				fmt.Printf("Note: %s\n", result.NoProviderReason)
 			}
 		}
 

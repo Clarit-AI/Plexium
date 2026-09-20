@@ -66,10 +66,16 @@ func TestContract_ManifestStructFields(t *testing.T) {
 func TestContract_SourceFileStructFields(t *testing.T) {
 	sfType := reflect.TypeOf(manifest.SourceFile{})
 
+	// KHA-287: ValidatedHash and LastValidatedAt track the freshness state
+	// separately from the observed Hash. They are added to SourceFile so
+	// sync can distinguish "the source file looks like X" from "the wiki
+	// page has been validated against X".
 	expectedFields := map[string]string{
 		"Path":                "string",
 		"Hash":                "string",
 		"LastProcessedCommit": "string",
+		"ValidatedHash":       "string",
+		"LastValidatedAt":     "string",
 	}
 
 	for name, expectedType := range expectedFields {
@@ -80,7 +86,8 @@ func TestContract_SourceFileStructFields(t *testing.T) {
 				"SourceFile.%s type changed", name)
 		}
 	}
-	assert.Equal(t, len(expectedFields), sfType.NumField())
+	assert.Equal(t, len(expectedFields), sfType.NumField(),
+		"SourceFile field count changed — review downstream consumers")
 }
 
 func TestContract_UnmanagedEntryStructFields(t *testing.T) {

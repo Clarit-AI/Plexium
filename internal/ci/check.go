@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/Clarit-AI/Plexium/internal/config"
@@ -19,12 +20,17 @@ type WikiDebtEntry struct {
 
 // CheckResult is the output of a CI check.
 type CheckResult struct {
-	Commit           string          `json:"commit"`
-	BaseSHA          string          `json:"baseSha"`
-	HeadSHA          string          `json:"headSha"`
-	ChangedFiles     []string        `json:"changedFiles"`
-	SourceFiles      []string        `json:"sourceFiles"`
-	WikiUpdated      bool            `json:"wikiUpdated"`
+	Commit       string   `json:"commit"`
+	BaseSHA      string   `json:"baseSha"`
+	HeadSHA      string   `json:"headSha"`
+	ChangedFiles []string `json:"changedFiles"`
+	SourceFiles  []string `json:"sourceFiles"`
+	WikiUpdated  bool     `json:"wikiUpdated"`
+	// WikiRelevant is true when at least one changed wiki file is mapped
+	// (via the manifest's SourceFiles) to a changed source file, OR when
+	// an explicit debt mark covers the changed sources. KHA-287 / F7:
+	// a bare wiki edit must not satisfy a source change.
+	WikiRelevant     bool            `json:"wikiRelevant"`
 	WikiDebt         []WikiDebtEntry `json:"wikiDebt"`
 	UntrackedChanges []string        `json:"untrackedChanges"`
 	Passes           bool            `json:"passes"`
@@ -66,7 +72,8 @@ func (c *CICheck) Run(baseSHA, headSHA string) (*CheckResult, error) {
 	}
 
 	// 3. Check if wiki was updated in the same range
-	result.WikiUpdated = c.hasWikiChanges(changedFiles)
+	wikiFiles := c.collectWikiFiles(changedFiles)
+	result.WikiUpdated = len(wikiFiles) > 0
 
 	// 4. For each source file, check if it has a wiki mapping
 	manifestPath := manifest.DefaultPath(c.repoRoot)
@@ -82,6 +89,12 @@ func (c *CICheck) Run(baseSHA, headSHA string) (*CheckResult, error) {
 		result.Passes = false
 		return result, nil
 	}
+
+	// KHA-287 / F7: was `WikiUpdated` ever enough? No — an unrelated
+	// wiki edit must not satisfy a source change. We now distinguish
+	// "wiki file in the diff" (WikiUpdated) from "staged wiki file is
+	// mapped to a source file in the diff" (WikiRelevant).
+	result.WikiRelevant = c.isWikiRelevant(wikiFiles, result.SourceFiles, m)
 
 	// Check each source file for wiki mapping
 	var untracked []string
@@ -112,11 +125,21 @@ func (c *CICheck) Run(baseSHA, headSHA string) (*CheckResult, error) {
 	result.DebtCount = len(result.WikiDebt)
 
 	// 6. Determine pass/fail
-	if result.WikiUpdated {
+	switch {
+	case result.WikiRelevant:
+		// Source change is paired with a relevant wiki change.
 		result.Passes = true
-	} else {
-		// Check debt threshold from config
-		threshold := 0 // default: no debt allowed
+	case result.WikiUpdated:
+		// Wiki changed but none of the changes are relevant to the
+		// source changes. Strict fail unless debt allows it.
+		threshold := 0
+		if c.cfg != nil && c.cfg.Enforcement.DebtThreshold > 0 {
+			threshold = c.cfg.Enforcement.DebtThreshold
+		}
+		result.Passes = result.DebtCount <= threshold
+	default:
+		// No wiki change at all — same logic as before.
+		threshold := 0
 		if c.cfg != nil && c.cfg.Enforcement.DebtThreshold > 0 {
 			threshold = c.cfg.Enforcement.DebtThreshold
 		}
@@ -124,6 +147,78 @@ func (c *CICheck) Run(baseSHA, headSHA string) (*CheckResult, error) {
 	}
 
 	return result, nil
+}
+
+// collectWikiFiles returns the subset of files that live under the
+// configured wiki root.
+func (c *CICheck) collectWikiFiles(files []string) []string {
+	wikiRoot := ".wiki"
+	if c.cfg != nil && c.cfg.Wiki.Root != "" {
+		wikiRoot = c.cfg.Wiki.Root
+	}
+	var out []string
+	for _, f := range files {
+		if strings.HasPrefix(f, wikiRoot+"/") {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// isWikiRelevant reports whether at least one changed wiki file is
+// mapped to a changed source file, either directly via the manifest or
+// via a basename heuristic for new pages not yet in the manifest.
+func (c *CICheck) isWikiRelevant(wikiFiles, sourceFiles []string, m *manifest.Manifest) bool {
+	if len(wikiFiles) == 0 || len(sourceFiles) == 0 {
+		return false
+	}
+
+	wikiRoot := ".wiki"
+	if c.cfg != nil && c.cfg.Wiki.Root != "" {
+		wikiRoot = c.cfg.Wiki.Root
+	}
+
+	wikiToSources := make(map[string]map[string]bool)
+	for _, page := range m.Pages {
+		if page.WikiPath == "" {
+			continue
+		}
+		key := filepath.ToSlash(filepath.Join(wikiRoot, page.WikiPath))
+		set := wikiToSources[key]
+		if set == nil {
+			set = make(map[string]bool)
+		}
+		for _, sf := range page.SourceFiles {
+			set[sf.Path] = true
+		}
+		wikiToSources[key] = set
+	}
+
+	sourceSet := make(map[string]bool)
+	for _, s := range sourceFiles {
+		sourceSet[s] = true
+	}
+
+	for _, wf := range wikiFiles {
+		normalized := filepath.ToSlash(wf)
+		if sources, ok := wikiToSources[normalized]; ok {
+			for s := range sources {
+				if sourceSet[s] {
+					return true
+				}
+			}
+		}
+		base := filepath.Base(normalized)
+		stem := strings.TrimSuffix(base, filepath.Ext(base))
+		for s := range sourceSet {
+			sourceBase := filepath.Base(s)
+			sourceStem := strings.TrimSuffix(sourceBase, filepath.Ext(sourceBase))
+			if stem != "" && stem == sourceStem {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ToJSON formats the result as JSON.

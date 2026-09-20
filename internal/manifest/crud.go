@@ -154,8 +154,17 @@ func (m *Manager) RemoveUnmanaged(wikiPath string) error {
 	return m.Save(manifest)
 }
 
-// DetectStalePages returns all pages where source files have changed since last processed.
-// Compares stored hashes against current file content hashes.
+// DetectStalePages returns all pages where source files have changed since
+// the wiki page text was last validated against them.
+//
+// For each source file, we compare the current file hash to ValidatedHash.
+// If ValidatedHash is empty (legacy v1 manifest), the page is treated as
+// never-validated and is flagged stale so the operator regenerates or marks
+// the page reviewed. The legacy Hash field is intentionally ignored here:
+// keeping a separate observed-vs-validated distinction is what stops a plain
+// plexium sync from advancing freshness without proof of wiki refresh.
+//
+// A page is stale if any of its source files is stale.
 func (m *Manager) DetectStalePages(hashFn func(path string) (string, error)) ([]PageEntry, error) {
 	manifest, err := m.Load()
 	if err != nil {
@@ -175,13 +184,64 @@ func (m *Manager) DetectStalePages(hashFn func(path string) (string, error)) ([]
 				stale = append(stale, page)
 				break
 			}
-			if currentHash != sf.Hash {
+			baseline := sf.ValidatedHash
+			if baseline == "" {
+				// Empty ValidatedHash means "never validated". Treat as
+				// stale so the user must regenerate or mark-reviewed the
+				// page to advance freshness. This is the v1→v2 migration:
+				// pages written by older plexium versions will need one
+				// explicit validation step.
+				stale = append(stale, page)
+				break
+			}
+			if currentHash != baseline {
 				stale = append(stale, page)
 				break
 			}
 		}
 	}
 	return stale, nil
+}
+
+// MarkPageValidated records that the given wiki page's content has been
+// validated against the current source-file hashes. Each SourceFile in the
+// page is updated with ValidatedHash set to its observed Hash and
+// LastValidatedAt set to the supplied timestamp. Caller is responsible for
+// persisting the manifest afterwards (or for invoking Save themselves when
+// running outside this method).
+//
+// Returns true if the page was found and updated, false if no page with the
+// given wiki path exists in the manifest. An error is returned only when
+// loading the manifest fails.
+func (m *Manager) MarkPageValidated(wikiPath, validatedAt string) (bool, error) {
+	manifest, err := m.Load()
+	if err != nil {
+		return false, err
+	}
+
+	for i, page := range manifest.Pages {
+		if page.WikiPath != wikiPath {
+			continue
+		}
+		// Take a copy so we don't mutate the in-memory page while iterating.
+		updated := page
+		for j, sf := range updated.SourceFiles {
+			// Promote the most recently observed hash (sf.Hash) to the
+			// validated slot. If sf.Hash is empty (legacy data), leave
+			// the validated slot empty so the next detection still flags
+			// the page as stale.
+			if sf.Hash != "" {
+				updated.SourceFiles[j].ValidatedHash = sf.Hash
+				updated.SourceFiles[j].LastValidatedAt = validatedAt
+			}
+		}
+		manifest.Pages[i] = updated
+		if err := m.Save(manifest); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 // UpdatePublishTimestamp updates the lastPublishTimestamp to now.

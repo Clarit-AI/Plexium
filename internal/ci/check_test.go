@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Clarit-AI/Plexium/internal/config"
+	"github.com/Clarit-AI/Plexium/internal/manifest"
 )
 
 func TestCICheck_IsSourceFile(t *testing.T) {
@@ -135,5 +136,59 @@ func TestCICheck_FilterSourceFiles(t *testing.T) {
 	}
 	if !found["cmd/plexium/main.go"] {
 		t.Error("expected cmd/plexium/main.go in filtered results")
+	}
+}
+
+// TestCICheck_IsWikiRelevant_RelevantViaManifest covers the direct
+// manifest mapping path: a wiki page in the manifest that points at a
+// staged source file is considered relevant.
+func TestCICheck_IsWikiRelevant_RelevantViaManifest(t *testing.T) {
+	c := NewCICheck("/tmp", nil)
+	m := &manifest.Manifest{
+		Version: 2,
+		Pages: []manifest.PageEntry{
+			{
+				WikiPath:  "modules/auth.md",
+				Ownership: "managed",
+				SourceFiles: []manifest.SourceFile{
+					{Path: "src/auth.go", Hash: "h", ValidatedHash: "h"},
+				},
+			},
+		},
+	}
+	if !c.isWikiRelevant(
+		[]string{".wiki/modules/auth.md"},
+		[]string{"src/auth.go"},
+		m,
+	) {
+		t.Error("expected wikiRelevant=true via manifest mapping")
+	}
+}
+
+// TestCICheck_IsWikiRelevant_RelevantViaHeuristic covers the basename
+// match fallback for new pages not yet in the manifest.
+func TestCICheck_IsWikiRelevant_RelevantViaHeuristic(t *testing.T) {
+	c := NewCICheck("/tmp", nil)
+	m := &manifest.Manifest{Version: 1, Pages: nil}
+	if !c.isWikiRelevant(
+		[]string{".wiki/modules/auth.md"},
+		[]string{"src/auth.go"},
+		m,
+	) {
+		t.Error("expected wikiRelevant=true via basename heuristic")
+	}
+}
+
+// TestCICheck_IsWikiRelevant_UnrelatedCovered confirms the F7 finding:
+// an unrelated wiki edit must NOT satisfy a source change.
+func TestCICheck_IsWikiRelevant_UnrelatedCovered(t *testing.T) {
+	c := NewCICheck("/tmp", nil)
+	m := &manifest.Manifest{Version: 1, Pages: nil}
+	if c.isWikiRelevant(
+		[]string{".wiki/onboarding.md", ".wiki/Home.md"},
+		[]string{"src/auth.go"},
+		m,
+	) {
+		t.Error("expected wikiRelevant=false for unrelated wiki files")
 	}
 }

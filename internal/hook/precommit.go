@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Clarit-AI/Plexium/internal/config"
+	"github.com/Clarit-AI/Plexium/internal/manifest"
 )
 
 // PreCommitHook checks if wiki was updated when source files changed.
@@ -62,19 +63,45 @@ func (h *PreCommitHook) Run(stagedFiles []string) (*HookResult, error) {
 
 	result.FilesChanged = sourceFiles
 
-	// Check if any .wiki/ files are staged
-	result.WikiUpdated = h.hasWikiChanges(stagedFiles)
+	// KHA-287 / F7: "wiki updated" used to mean "any wiki file is staged".
+	// That let an unrelated wiki edit satisfy a source change. Now we
+	// distinguish "wiki file is staged" (WikiUpdated) from "staged wiki
+	// file is mapped to a staged source file" (WikiRelevant). Only when
+	// WikiRelevant is true does the hook allow the commit when strictness
+	// would otherwise block.
+	wikiFiles := h.collectWikiFiles(stagedFiles)
+	result.WikiFiles = wikiFiles
+	result.WikiUpdated = len(wikiFiles) > 0
+	result.WikiRelevant = h.isWikiRelevant(wikiFiles, sourceFiles)
 
-	if result.WikiUpdated {
+	// Explicit debt mark bypasses the relevance check entirely. The
+	// operator is asserting they will document the change manually.
+	if h.hasExplicitDebtMark() {
 		result.Allowed = true
 		result.Strictness = h.strictness()
+		result.Reason = "explicit debt mark present (PLEXIUM_WIKI_DEBT or PLEXIUM_BYPASS_HOOK)"
 		return result, nil
 	}
 
-	// Wiki NOT updated — apply strictness
+	if result.WikiUpdated && result.WikiRelevant {
+		result.Allowed = true
+		result.Strictness = h.strictness()
+		result.Reason = "staged wiki change is mapped to a staged source change"
+		return result, nil
+	}
+
+	// Wiki NOT updated (or unrelated) — apply strictness
 	strictness := h.strictness()
 	result.Strictness = strictness
-	result.Reason = fmt.Sprintf("%d source file(s) changed but .wiki/ not updated", len(sourceFiles))
+	switch {
+	case result.WikiUpdated && !result.WikiRelevant:
+		result.Reason = fmt.Sprintf(
+			"%d source file(s) changed and %d wiki file(s) are staged, but no staged wiki file is mapped (via the manifest's SourceFiles) to any staged source file",
+			len(sourceFiles), len(wikiFiles),
+		)
+	default:
+		result.Reason = fmt.Sprintf("%d source file(s) changed but .wiki/ not updated", len(sourceFiles))
+	}
 
 	switch strictness {
 	case "strict":
@@ -124,16 +151,112 @@ func (h *PreCommitHook) filterSourceFiles(files []string) []string {
 
 // hasWikiChanges checks if any .wiki/ files are in the staged set.
 func (h *PreCommitHook) hasWikiChanges(files []string) bool {
+	return len(h.collectWikiFiles(files)) > 0
+}
+
+// collectWikiFiles returns the subset of the staged files that live under
+// the configured wiki root.
+func (h *PreCommitHook) collectWikiFiles(files []string) []string {
 	wikiRoot := ".wiki"
 	if h.cfg != nil && h.cfg.Wiki.Root != "" {
 		wikiRoot = h.cfg.Wiki.Root
 	}
+	var out []string
 	for _, f := range files {
 		if strings.HasPrefix(f, wikiRoot+"/") || f == wikiRoot {
-			return true
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// isWikiRelevant reports whether at least one staged wiki file is mapped
+// (via the manifest's SourceFiles) to a staged source file. New wiki
+// files not yet in the manifest are considered relevant only if their
+// path matches the wiki-path convention for a staged source file
+// (e.g., src/foo.go ↔ wiki/modules/foo.md / wiki/foo.md / wiki/src/foo.md).
+//
+// If the manifest cannot be loaded we conservatively return false: an
+// unrelated wiki edit must not silently satisfy a source change.
+func (h *PreCommitHook) isWikiRelevant(wikiFiles, sourceFiles []string) bool {
+	if len(wikiFiles) == 0 || len(sourceFiles) == 0 {
+		return false
+	}
+	mgr, err := manifest.NewManager(manifest.DefaultPath(h.repoRoot))
+	if err != nil {
+		return false
+	}
+	m, err := mgr.Load()
+	if err != nil {
+		return false
+	}
+
+	wikiRoot := ".wiki"
+	if h.cfg != nil && h.cfg.Wiki.Root != "" {
+		wikiRoot = h.cfg.Wiki.Root
+	}
+
+	// Build the set of source-file paths each staged wiki page maps to.
+	wikiToSources := make(map[string]map[string]bool)
+	for _, page := range m.Pages {
+		if page.WikiPath == "" {
+			continue
+		}
+		// Normalize the wiki path the same way staged paths look.
+		key := filepath.ToSlash(filepath.Join(wikiRoot, page.WikiPath))
+		set := wikiToSources[key]
+		if set == nil {
+			set = make(map[string]bool)
+		}
+		for _, sf := range page.SourceFiles {
+			set[sf.Path] = true
+		}
+		wikiToSources[key] = set
+	}
+
+	// Staged source files as a set.
+	sourceSet := make(map[string]bool)
+	for _, s := range sourceFiles {
+		sourceSet[s] = true
+	}
+
+	for _, wf := range wikiFiles {
+		normalized := filepath.ToSlash(wf)
+		// Direct manifest mapping.
+		if sources, ok := wikiToSources[normalized]; ok {
+			for s := range sources {
+				if sourceSet[s] {
+					return true
+				}
+			}
+		}
+		// Heuristic: a brand-new wiki page (not in manifest) is relevant
+		// to a staged source file when its basename matches the source
+		// file's basename. This catches `src/auth.go` + `wiki/modules/
+		// auth-module.md` style conventions without requiring an explicit
+		// manifest entry yet. Conservative: only when a candidate match
+		// exists by stem.
+		base := filepath.Base(normalized)
+		stem := strings.TrimSuffix(base, filepath.Ext(base))
+		for s := range sourceSet {
+			sourceBase := filepath.Base(s)
+			sourceStem := strings.TrimSuffix(sourceBase, filepath.Ext(sourceBase))
+			if stem != "" && stem == sourceStem {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// hasExplicitDebtMark reports whether the operator has explicitly marked
+// this commit as a wiki-debt acknowledgement. Two env vars are honoured:
+// PLEXIUM_BYPASS_HOOK=1 (legacy bypass) and PLEXIUM_WIKI_DEBT=1 (the
+// debt-mark that KHA-287 introduces). The CI checker treats both the
+// same way.
+func (h *PreCommitHook) hasExplicitDebtMark() bool {
+	return os.Getenv("PLEXIUM_BYPASS_HOOK") == "1" ||
+		os.Getenv("PLEXIUM_WIKI_DEBT") == "1"
 }
 
 // strictness returns the enforcement strictness level.
