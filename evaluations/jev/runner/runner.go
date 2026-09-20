@@ -42,13 +42,19 @@ type ReplayConfig struct {
 	Fixture []protocol.Fixture // authoritative fixture corpus
 }
 
-// RunBaseline produces one baseline Prediction per fixture. The baseline
-// does not record confidence, latency, or cost; the scorer is responsible
-// for not fabricating them.
-func RunBaseline(fixtures []protocol.Fixture) []scoring.Prediction {
+// RunBaseline produces one baseline Prediction per fixture using the
+// supplied baseline version. The baseline does not record confidence,
+// latency, or cost; the scorer is responsible for not fabricating
+// them.
+//
+// baseline.BaselineV2 is the recorded v0.4 protocol baseline (explicit
+// abstention on typing tasks); baseline.BaselineLegacy is the v0.3
+// default-fallback baseline. Select explicitly; callers that pass the
+// zero value default to v0.4 (see cli/jev-eval for the -baseline flag).
+func RunBaseline(fixtures []protocol.Fixture, version baseline.BaselineVersion) []scoring.Prediction {
 	out := make([]scoring.Prediction, 0, len(fixtures))
 	for _, f := range fixtures {
-		label, abstained := baseline.Predict(f.Task, baseline.Wrap(f.Candidates))
+		label, abstained := baselinePredict(version, f.Task, baseline.Wrap(f.Candidates))
 		out = append(out, scoring.Prediction{
 			Source:         scoring.SourceBaseline,
 			FixtureID:      f.ID,
@@ -62,6 +68,21 @@ func RunBaseline(fixtures []protocol.Fixture) []scoring.Prediction {
 		})
 	}
 	return out
+}
+
+// baselinePredict dispatches to the named baseline. An empty version
+// (zero value) defaults to v0.4 — the current protocol baseline.
+func baselinePredict(version baseline.BaselineVersion, task protocol.Task, list baseline.Shortlist) (string, bool) {
+	switch version {
+	case baseline.BaselineLegacy:
+		return baseline.Predict(task, list)
+	case baseline.BaselineV2, "":
+		return baseline.PredictV2(task, list)
+	}
+	// Unknown version: fall back to the v0.4 baseline; the caller can
+	// surface the version selection in the report and review it
+	// without breaking the runnable path.
+	return baseline.PredictV2(task, list)
 }
 
 // ReplayEntry is one observation read from a recorded JSONL stream. The

@@ -3,6 +3,7 @@ package runner
 import (
 	"testing"
 
+	"github.com/Clarit-AI/Plexium/evaluations/jev/baseline"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/protocol"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/scoring"
 )
@@ -22,7 +23,7 @@ func sampleFixtures() []protocol.Fixture {
 }
 
 func TestRunBaselineProducesOnePerFixture(t *testing.T) {
-	preds := RunBaseline(sampleFixtures())
+	preds := RunBaseline(sampleFixtures(), baseline.BaselineV2)
 	if len(preds) != 2 {
 		t.Fatalf("expected 2 predictions, got %d", len(preds))
 	}
@@ -38,15 +39,44 @@ func TestRunBaselineProducesOnePerFixture(t *testing.T) {
 }
 
 func TestRunBaselineDoesNotInventPredictions(t *testing.T) {
-	preds := RunBaseline(sampleFixtures())
-	if preds[0].PredictedLabel != "document" {
-		t.Errorf("expected document, got %q", preds[0].PredictedLabel)
+	preds := RunBaseline(sampleFixtures(), baseline.BaselineV2)
+	if preds[0].PredictedLabel != "insufficient-evidence" {
+		t.Errorf("v0.4 baseline expected insufficient-evidence for entity-type, got %q", preds[0].PredictedLabel)
+	}
+	if !preds[0].Abstained {
+		t.Errorf("v0.4 entity-type baseline should abstain")
 	}
 	if preds[1].PredictedLabel != "insufficient-evidence" {
-		t.Errorf("expected insufficient-evidence, got %q", preds[1].PredictedLabel)
+		t.Errorf("expected insufficient-evidence for claim-support, got %q", preds[1].PredictedLabel)
 	}
 	if !preds[1].Abstained {
 		t.Errorf("claim-support baseline should abstain")
+	}
+}
+
+func TestRunBaselineLegacyDefaultFallback(t *testing.T) {
+	// Legacy baseline must keep its v0.3 semantics: entity-type →
+	// "document" (default fallback, NOT abstention); claim-support →
+	// "insufficient-evidence".
+	preds := RunBaseline(sampleFixtures(), baseline.BaselineLegacy)
+	if preds[0].PredictedLabel != "document" {
+		t.Errorf("legacy entity-type baseline expected document, got %q", preds[0].PredictedLabel)
+	}
+	if preds[0].Abstained {
+		t.Errorf("legacy entity-type baseline should NOT abstain")
+	}
+	if preds[1].PredictedLabel != "insufficient-evidence" {
+		t.Errorf("legacy claim-support baseline expected insufficient-evidence, got %q", preds[1].PredictedLabel)
+	}
+}
+
+func TestRunBaselineEmptyVersionDefaultsToV2(t *testing.T) {
+	// An empty (zero) version must default to v0.4 abstaining so that
+	// older call-sites and CLI invocations pick up the current protocol
+	// baseline rather than the legacy default fallback.
+	preds := RunBaseline(sampleFixtures(), "")
+	if preds[0].PredictedLabel != "insufficient-evidence" {
+		t.Errorf("zero-value version must default to v0.4 (insufficient-evidence), got %q", preds[0].PredictedLabel)
 	}
 }
 

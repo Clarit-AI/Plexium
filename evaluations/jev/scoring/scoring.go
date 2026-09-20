@@ -88,6 +88,11 @@ type Report struct {
 	FailureCount          int                                             `json:"failureCount"`
 	RetryCount            int                                             `json:"retryCount"`
 	ConfidenceCalibration *CalibrationReport                              `json:"calibration,omitempty"`
+	// BaselineVersion tags which deterministic baseline produced this
+	// report. Set by callers (e.g. cmd/jev-eval) so the runnable
+	// baseline selection is recorded alongside the protocol version;
+	// empty for replay / other sources that do not use a baseline.
+	BaselineVersion string `json:"baselineVersion,omitempty"`
 }
 
 // TaskReport contains metrics for one task over a fixed partition (either
@@ -551,15 +556,22 @@ func isAbstainLabel(label string) bool {
 
 // isAbstainExpected reports whether the supplied gold label is one of the
 // abstain-class labels for the task.
+//
+// v0.4 protocol: both typing tasks (entity-type, candidate-type)
+// admit `insufficient-evidence` as an explicit abstention in their
+// closed vocabularies, so the negative-class denominator is computed
+// for them as well. Without this, a model that answers a concrete
+// label for a typing case whose gold is `insufficient-evidence` is
+// not counted in `UnsupportedAccept.Numerator` for that task —
+// the harmful-acceptance gate cannot be measured end-to-end against
+// v0.4 fixtures (rp-et-002, rp-et-004, rp-ct-010).
 func isAbstainExpected(t protocol.Task, label string) bool {
 	if !isAbstainLabel(label) {
 		return false
 	}
-	// The abstain labels live in different vocabularies per task; we still
-	// return true when label is in the abstain set, but the scorer only
-	// counts them where the task vocabulary includes them.
 	switch t {
-	case protocol.TaskRelationship, protocol.TaskClaimSupport:
+	case protocol.TaskEntityType, protocol.TaskCandidateType,
+		protocol.TaskRelationship, protocol.TaskClaimSupport:
 		return true
 	}
 	return false

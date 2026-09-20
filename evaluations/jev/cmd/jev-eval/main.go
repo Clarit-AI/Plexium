@@ -15,8 +15,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/Clarit-AI/Plexium/evaluations/jev/baseline"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/discovery"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/loader"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/protocol"
@@ -33,8 +35,14 @@ func main() {
 		outPath      = flag.String("out", "-", "report output path; - for stdout")
 		rawPredsPath = flag.String("raw-predictions", "", "optional JSONL file for raw per-case predictions (offline replay only)")
 		strict       = flag.Bool("strict", true, "exit non-zero if manifest drift or split independence fail")
+		baselineName = flag.String("baseline", string(baseline.BaselineV2), "deterministic baseline version: "+string(baseline.BaselineV2)+" (v0.4 abstaining, default) | "+string(baseline.BaselineLegacy)+" (v0.3 default-fallback)")
 	)
 	flag.Parse()
+
+	baselineVersion, err := parseBaselineVersion(*baselineName)
+	if err != nil {
+		die("baseline: %v", err)
+	}
 
 	loaded, err := loader.Load(*fixturesPath, *manifestPath)
 	if err != nil {
@@ -52,8 +60,14 @@ func main() {
 	}
 	loaded.Manifest.SplitIndependences = indep
 
-	baselinePreds := runner.RunBaseline(loaded.Fixtures)
+	baselinePreds := runner.RunBaseline(loaded.Fixtures, baselineVersion)
 	baselineReport := scoring.Score(loaded.Manifest.ProtocolVersion, scoring.SourceBaseline, baselinePreds)
+	baselineReport.BaselineVersion = string(baselineVersion)
+	if *rawPredsPath != "" {
+		if err := writeRawPredictions(*rawPredsPath, baselinePreds); err != nil {
+			die("raw baseline predictions: %v", err)
+		}
+	}
 
 	// Discovery baseline: evidence-only deterministic extraction from raw
 	// source text. This never reads fixture Candidates/ExpectedLabel/GoldEntities.
@@ -192,6 +206,24 @@ func parseCoveragePolicy(s string) (runner.CoveragePolicy, error) {
 		return runner.CoverageFirstWins, nil
 	}
 	return "", fmt.Errorf("unknown coverage policy %q", s)
+}
+
+// parseBaselineVersion maps the -baseline flag value to a known
+// baseline.BaselineVersion. An empty value defaults to v0.4
+// (current protocol). Unknown values are rejected at the CLI
+// boundary rather than silently falling back, so the runnable
+// baseline selection is always recorded honestly on the report.
+func parseBaselineVersion(s string) (baseline.BaselineVersion, error) {
+	trimmed := strings.TrimSpace(s)
+	switch trimmed {
+	case "":
+		return baseline.BaselineV2, nil
+	case string(baseline.BaselineV2):
+		return baseline.BaselineV2, nil
+	case string(baseline.BaselineLegacy), "v0.3", "legacy":
+		return baseline.BaselineLegacy, nil
+	}
+	return "", fmt.Errorf("unknown baseline version %q (use %q or %q)", s, baseline.BaselineV2, baseline.BaselineLegacy)
 }
 
 func readReplay(path string) ([]runner.ReplayEntry, error) {

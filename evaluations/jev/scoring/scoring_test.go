@@ -503,3 +503,133 @@ func TestReportDeterministicProjection(t *testing.T) {
 		t.Fatalf("reports not byte-equal for deterministic baseline")
 	}
 }
+
+// v0.4 regression: typing-task abstention is counted in the
+// UnsupportedAccept denominator. Without this, a model that
+// answers a concrete label for a typing case whose gold is
+// `insufficient-evidence` is not counted in the negative-class
+// denominator (the harmful-acceptance gate cannot be measured
+// end-to-end against the v0.4 fixtures rp-et-002 / rp-et-004 /
+// rp-ct-010).
+//
+// For each task: one negative case (gold=abstain) with a concrete
+// prediction plus one positive case (gold=concrete, predicted=gold)
+// reports UnsupportedAccept {Numerator:1, Denominator:1, IsApplicable:true}.
+// A pure-abstain negative (gold=abstain, predicted=abstain) reports
+// {Numerator:0, Denominator:1, IsApplicable:true}. Failure on a
+// negative case does NOT increment UnsupportedAccept.
+func TestV0D4AbstentionDenominatorEntityType(t *testing.T) {
+	// 1 negative concrete + 1 positive correct → 1/1.
+	rep := Score("0.4.0", SourceDecisions, []Prediction{
+		{Task: protocol.TaskEntityType, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "insufficient-evidence", PredictedLabel: "document"},
+		{Task: protocol.TaskEntityType, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "person", PredictedLabel: "person"},
+	})
+	tr := rep.ByTask[protocol.TaskEntityType]
+	if tr.UnsupportedAccept == nil || !tr.UnsupportedAccept.IsApplicable {
+		t.Fatalf("v0.4: UnsupportedAccept must be applicable for entity-type, got %+v", tr.UnsupportedAccept)
+	}
+	if tr.UnsupportedAccept.Numerator != 1 || tr.UnsupportedAccept.Denominator != 1 {
+		t.Fatalf("v0.4: expected 1/1 (1 negative concrete + 1 positive correct), got %v", tr.UnsupportedAccept)
+	}
+
+	// 1 abstaining negative → 0/1.
+	rep = Score("0.4.0", SourceDecisions, []Prediction{
+		{Task: protocol.TaskEntityType, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "insufficient-evidence", PredictedLabel: "insufficient-evidence", Abstained: true},
+	})
+	tr = rep.ByTask[protocol.TaskEntityType]
+	if tr.UnsupportedAccept.Numerator != 0 || tr.UnsupportedAccept.Denominator != 1 {
+		t.Fatalf("v0.4: abstaining negative should be 0/1, got %v", tr.UnsupportedAccept)
+	}
+
+	// Failure on a negative must NOT increment the numerator.
+	rep = Score("0.4.0", SourceDecisions, []Prediction{
+		{Task: protocol.TaskEntityType, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "insufficient-evidence", PredictedLabel: "document", ErrorMessage: "transport timeout"},
+	})
+	tr = rep.ByTask[protocol.TaskEntityType]
+	if tr.UnsupportedAccept.Numerator != 0 {
+		t.Fatalf("v0.4: failure on abstain-expected must NOT count as unsupported acceptance, got %v", tr.UnsupportedAccept)
+	}
+}
+
+func TestV0D4AbstentionDenominatorCandidateType(t *testing.T) {
+	rep := Score("0.4.0", SourceDecisions, []Prediction{
+		{Task: protocol.TaskCandidateType, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "insufficient-evidence", PredictedLabel: "PERSON"},
+		{Task: protocol.TaskCandidateType, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "ORGANIZATION", PredictedLabel: "ORGANIZATION"},
+	})
+	tr := rep.ByTask[protocol.TaskCandidateType]
+	if tr.UnsupportedAccept == nil || !tr.UnsupportedAccept.IsApplicable {
+		t.Fatalf("v0.4: UnsupportedAccept must be applicable for candidate-type, got %+v", tr.UnsupportedAccept)
+	}
+	if tr.UnsupportedAccept.Numerator != 1 || tr.UnsupportedAccept.Denominator != 1 {
+		t.Fatalf("v0.4: expected 1/1, got %v", tr.UnsupportedAccept)
+	}
+
+	rep = Score("0.4.0", SourceDecisions, []Prediction{
+		{Task: protocol.TaskCandidateType, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "insufficient-evidence", PredictedLabel: "insufficient-evidence", Abstained: true},
+	})
+	tr = rep.ByTask[protocol.TaskCandidateType]
+	if tr.UnsupportedAccept.Numerator != 0 || tr.UnsupportedAccept.Denominator != 1 {
+		t.Fatalf("v0.4: abstaining negative should be 0/1, got %v", tr.UnsupportedAccept)
+	}
+}
+
+func TestV0D4AbstentionDenominatorRelationship(t *testing.T) {
+	// Relationship negative label is no-supported-relationship
+	// (distinct from insufficient-evidence).
+	rep := Score("0.4.0", SourceDecisions, []Prediction{
+		{Task: protocol.TaskRelationship, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "no-supported-relationship", PredictedLabel: "used-by"},
+		{Task: protocol.TaskRelationship, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "related-to", PredictedLabel: "related-to"},
+	})
+	tr := rep.ByTask[protocol.TaskRelationship]
+	if tr.UnsupportedAccept == nil || !tr.UnsupportedAccept.IsApplicable {
+		t.Fatalf("v0.4: UnsupportedAccept must be applicable for relationship, got %+v", tr.UnsupportedAccept)
+	}
+	if tr.UnsupportedAccept.Numerator != 1 || tr.UnsupportedAccept.Denominator != 1 {
+		t.Fatalf("v0.4: expected 1/1, got %v", tr.UnsupportedAccept)
+	}
+
+	rep = Score("0.4.0", SourceDecisions, []Prediction{
+		{Task: protocol.TaskRelationship, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "insufficient-evidence", PredictedLabel: "insufficient-evidence", Abstained: true},
+	})
+	tr = rep.ByTask[protocol.TaskRelationship]
+	if tr.UnsupportedAccept.Numerator != 0 || tr.UnsupportedAccept.Denominator != 1 {
+		t.Fatalf("v0.4: abstaining negative should be 0/1, got %v", tr.UnsupportedAccept)
+	}
+}
+
+func TestV0D4AbstentionDenominatorClaimSupport(t *testing.T) {
+	// Regression preservation: claim-support behavior is unchanged
+	// from v0.3 (insufficient-evidence already counted as negative).
+	rep := Score("0.4.0", SourceDecisions, []Prediction{
+		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "insufficient-evidence", PredictedLabel: "supported"},
+		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "supported", PredictedLabel: "supported"},
+	})
+	tr := rep.ByTask[protocol.TaskClaimSupport]
+	if tr.UnsupportedAccept == nil || !tr.UnsupportedAccept.IsApplicable {
+		t.Fatalf("expected applicable UnsupportedAccept for claim-support")
+	}
+	if tr.UnsupportedAccept.Numerator != 1 || tr.UnsupportedAccept.Denominator != 1 {
+		t.Fatalf("expected 1/1, got %v", tr.UnsupportedAccept)
+	}
+
+	rep = Score("0.4.0", SourceDecisions, []Prediction{
+		{Task: protocol.TaskClaimSupport, Split: protocol.SplitHeldOut,
+			ExpectedLabel: "insufficient-evidence", PredictedLabel: "insufficient-evidence", Abstained: true},
+	})
+	tr = rep.ByTask[protocol.TaskClaimSupport]
+	if tr.UnsupportedAccept.Numerator != 0 || tr.UnsupportedAccept.Denominator != 1 {
+		t.Fatalf("abstaining negative should be 0/1, got %v", tr.UnsupportedAccept)
+	}
+}
