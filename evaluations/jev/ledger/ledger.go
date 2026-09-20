@@ -112,7 +112,7 @@ type Entry struct {
 	Task            string    `json:"task"`        // task name (entity-type, relationship, etc.)
 	SourceGroup     string    `json:"sourceGroup"` // source group ID
 	Amount          MicroUnit `json:"amount"`      // signed: positive=reserve/credit, negative=settle/debit
-	Balance         MicroUnit `json:"balance"`     // running balance after this entry
+	Balance         MicroUnit `json:"balance"`     // running balance after this entry (or sentinel; see Overflow)
 	TokensIn        int64     `json:"tokensIn"`    // estimated or actual input tokens
 	TokensOut       int64     `json:"tokensOut"`   // estimated or actual output tokens
 	RateIn          MicroUnit `json:"rateIn"`      // micro-units per 1M input tokens (0 if unknown)
@@ -137,6 +137,13 @@ type Entry struct {
 	ActualCost           MicroUnit `json:"actualCost,omitempty"`           // billed cost in micro-units
 	MismatchReason       string    `json:"mismatchReason,omitempty"`       // rate-mismatch | token-mismatch
 	ReservationTerminal  bool      `json:"reservationTerminal,omitempty"`  // marks the reservation as terminal/disputed
+	// F2: Aggregate overflow marker. When true, the addition this entry
+	// represents would overflow MaxMicroUnits; the Balance field is
+	// set to the documented sentinel (MaxMicroUnits) rather than a
+	// false exact aggregate. The reservation referenced by RefID is
+	// terminal and the ledger is halted durable. Replay derives halt
+	// from this flag independently of the init-entry Halted marker.
+	Overflow bool `json:"overflow,omitempty"`
 }
 
 // ManifestKey is a digest used to detect manifest/model drift between
@@ -304,8 +311,16 @@ func Open(cfg LedgerConfig) (*Ledger, error) {
 		// never lands — without this derivation, a reopen would observe
 		// init.Halted=false and resume new spending despite a billing
 		// anomaly on durable record.
+		// F2: An Overflow=true entry on either anomaly branch also
+		// independently forces halted=true. The Overflow marker is the
+		// canonical signal that the aggregate became unrepresentable;
+		// the init-entry Halted flag is a redundant secondary signal.
 		for _, e := range l.entries {
 			if e.Type == EntryMismatch {
+				l.halted = true
+				break
+			}
+			if e.Overflow {
 				l.halted = true
 				break
 			}
@@ -581,11 +596,23 @@ func (l *Ledger) validateEntry(e Entry) error {
 	if e.Type != EntryReservation && e.Type != EntrySettlement && e.Type != EntryAdjustment && e.Type != EntryInit && e.Type != EntryMismatch {
 		return fmt.Errorf("invalid entry type %q", e.Type)
 	}
-	// Mismatch entries are evidence-only: their Amount may be 0 when the
-	// existing reservation already covers the conservative exposure; we
-	// only enforce positivity for active ledger entries.
-	if e.Type != EntryInit && e.Type != EntryMismatch && e.Amount == 0 {
-		return errors.New("entry amount is zero")
+	// Allowed Amount=0 cases:
+	//   - EntryInit: header carries Amount=0 by convention.
+	//   - EntryMismatch: evidence-only; Amount=0 means no overrun (delta=0).
+	//   - EntryReservation: zero-token reservations are a legitimate
+	//     tracking edge case.
+	//   - EntrySettlement: F1 settlement entry records the release
+	//     (= reserved - actual); a full-cost settle releases 0 (actual
+	//     exactly consumes the reservation).
+	// Adjustments and other movement entries must always carry a
+	// non-zero Amount.
+	switch e.Type {
+	case EntryInit, EntryMismatch, EntryReservation, EntrySettlement:
+		// Amount may be 0 by design.
+	default:
+		if e.Amount == 0 {
+			return errors.New("entry amount is zero")
+		}
 	}
 	if e.Type != EntryInit && e.Balance < 0 {
 		return errors.New("entry balance is negative")
@@ -795,16 +822,23 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 		if delta < 0 {
 			delta = 0
 		}
-		// Overflow check (fail-closed) BEFORE appending evidence. If
-		// checked-add would overflow MaxMicroUnits, return the error
-		// without appending or mutating balance. Already-persisted
-		// entries (the reservation itself) are not dropped — the
-		// mismatch evidence simply does not get written for an
-		// overflow that cannot be represented.
+		// F2: Checked-add for overflow. The actual billing must NOT be
+		// discarded even when the aggregate is unrepresentable. On
+		// overflow we still persist an immutable mismatch entry
+		// carrying the actual rate/tokens/cost and an Overflow=true
+		// marker (Balance uses the documented MaxMicroUnits sentinel
+		// rather than a false exact aggregate), we mark the
+		// reservation terminal, and we latch a durable halt. No
+		// reservation succeeds afterwards; no Available is reported
+		// other than 0.
+		var overflow bool
+		var newBalance MicroUnit
 		if delta > MaxMicroUnits-l.balance {
-			return 0, &LedgerError{Code: LedgerCodeOverflow, Message: fmt.Sprintf("mismatch delta %d would overflow global balance %d", delta, l.balance)}
+			overflow = true
+			newBalance = MaxMicroUnits
+		} else {
+			newBalance = l.balance + delta
 		}
-		newBalance := l.balance + delta
 		// Append the mismatch evidence first (durable, before error return).
 		mismatchEntry := Entry{
 			ID:                   fmt.Sprintf("mis-%s-%d", l.cfg.RunID, time.Now().UnixNano()),
@@ -833,6 +867,7 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 			ActualCost:           actualCost,
 			MismatchReason:       reason,
 			ReservationTerminal:  true,
+			Overflow:             overflow,
 		}
 		if err := l.appendEntry(mismatchEntry); err != nil {
 			return 0, err
@@ -851,6 +886,12 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 		if !rateMismatch {
 			errCode = LedgerCodeTokenMismatch
 		}
+		if overflow {
+			// Surface overflow as the error code so callers can distinguish
+			// representational exhaustion from a normal mismatch.
+			errCode = LedgerCodeOverflow
+			return 0, &LedgerError{Code: errCode, Message: fmt.Sprintf("%s for reservation %q; actual billed %d OVERFLOWS global balance; overflow evidence persisted; ledger halted", reason, refID, actualCost)}
+		}
 		return 0, &LedgerError{Code: errCode, Message: fmt.Sprintf("%s for reservation %q; mismatch evidence persisted; ledger halted", reason, refID)}
 	}
 
@@ -867,6 +908,18 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 	if actualCost > reservedAmount {
 		// Overrun: record an adjustment entry for the excess, then return error.
 		overrun := actualCost - reservedAmount
+		// F2: Checked-add for overflow. Same safety contract as mismatch
+		// path: never discard the actual overrun, never return before
+		// halt, never report a false exact aggregate. Use MaxMicroUnits
+		// as documented Balance sentinel when checked-add overflows.
+		var overflow bool
+		var newBalance MicroUnit
+		if overrun > MaxMicroUnits-l.balance {
+			overflow = true
+			newBalance = MaxMicroUnits
+		} else {
+			newBalance = l.balance + overrun
+		}
 		adjEntry := Entry{
 			ID:          fmt.Sprintf("adj-%s-%d", l.cfg.RunID, time.Now().UnixNano()),
 			Type:        EntryAdjustment,
@@ -877,18 +930,19 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 			Task:        res.Task,
 			SourceGroup: res.SourceGroup,
 			Amount:      overrun,
-			Balance:     l.balance + overrun,
+			Balance:     newBalance,
 			TokensIn:    actualTokensIn,
 			TokensOut:   actualTokensOut,
 			RateIn:      actualRateIn,
 			RateOut:     actualRateOut,
 			Notes:       fmt.Sprintf("overrun for settled reservation %q", refID),
 			RefID:       refID,
+			Overflow:    overflow,
 		}
 		if err := l.appendEntry(adjEntry); err != nil {
 			return 0, err
 		}
-		l.balance += overrun
+		l.balance = newBalance
 		l.lastEntry++
 
 		// L3: Latch halted flag — no further reservations or settlements permitted.
@@ -902,10 +956,28 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 			}
 		}
 
-		return 0, &LedgerError{Code: LedgerCodeCapExceeded, Message: fmt.Sprintf("actual cost %d exceeds reservation %d by %d (ledger halted)", actualCost, reservedAmount, overrun)}
+		errCode := LedgerCodeCapExceeded
+		if overflow {
+			errCode = LedgerCodeOverflow
+			return 0, &LedgerError{Code: errCode, Message: fmt.Sprintf("overrun %d for reservation %q OVERFLOWS global balance; overflow evidence persisted; ledger halted", overrun, refID)}
+		}
+		return 0, &LedgerError{Code: errCode, Message: fmt.Sprintf("actual cost %d exceeds reservation %d by %d (ledger halted)", actualCost, reservedAmount, overrun)}
 	}
 
-	// Settlement entry (negative amount = debit).
+	// F1: Normal settlement releases ONLY the unused reservation headroom
+	// (reserved - actual). The actual billed cost stays charged toward
+	// the authorized cap so the cap can be enforced across repeated
+	// paid requests. Full-cost settle leaves balance unchanged
+	// (release = 0); zero-cost settle releases the full reservation;
+	// partial settle retains actualCost (release = reserved - actual).
+	// The aggregate balance invariant is:
+	//   balance = sum of (full unresolved reservation) +
+	//             sum of (max(reserved, actual) for terminal/disputed) +
+	//             sum of (actual billed for normally-settled).
+	release := reservedAmount - actualCost
+	if release < 0 {
+		release = 0
+	}
 	settleEntry := Entry{
 		ID:          fmt.Sprintf("set-%s-%d", l.cfg.RunID, time.Now().UnixNano()),
 		Type:        EntrySettlement,
@@ -915,13 +987,13 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 		Model:       l.cfg.Model,
 		Task:        res.Task,
 		SourceGroup: res.SourceGroup,
-		Amount:      -actualCost,
-		Balance:     l.balance - actualCost,
+		Amount:      -release,
+		Balance:     l.balance - release,
 		TokensIn:    actualTokensIn,
 		TokensOut:   actualTokensOut,
 		RateIn:      actualRateIn,
 		RateOut:     actualRateOut,
-		Notes:       fmt.Sprintf("settlement for reservation %q", refID),
+		Notes:       fmt.Sprintf("settlement for reservation %q; release=%d actual=%d", refID, release, actualCost),
 		RefID:       refID,
 	}
 
@@ -929,12 +1001,13 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 		return 0, err
 	}
 
-	l.balance -= actualCost
+	l.balance -= release
 	l.lastEntry++
 
-	// Return the remaining unreserved amount (reservation - actual).
-	remaining := reservedAmount - actualCost
-	return remaining, nil
+	// Return the released (unspent) headroom; for full-cost this is 0,
+	// for zero-cost this is the full reservation. Overrun path returns
+	// above with no release.
+	return release, nil
 }
 
 // estimateCost computes the ceiling cost in micro-units.

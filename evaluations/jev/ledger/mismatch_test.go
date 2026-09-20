@@ -784,24 +784,24 @@ func TestMismatchMultiOutstandingPreservesOtherExposure(t *testing.T) {
 		t.Fatalf("expected duplicate-settle for terminal resA, got %v", err)
 	}
 
-	// resB reconciles safely via standard settle debit. After settle B
-	// actual=3000 (matches reservation): balance = 8000 - 3000 = 5000.
-	// A's conservative 5000 stays recorded via the mismatch entry.
+	// resB reconciles safely. F1 invariant: full-cost settle releases 0,
+	// retains actual 3000; balance stays at 8000 (A conservative 5000 +
+	// B retained 3000). The settlement entry's Amount is 0 (no release).
 	remaining, err := l2.Settle(context.Background(), resB, 3000, 1000, 500, 1_000_000, 1_000_000)
 	if err != nil {
 		t.Fatalf("resB pre-halt settle should succeed: %v", err)
 	}
 	if remaining != 0 {
-		t.Fatalf("expected remaining 0 (actual==reserved), got %d", remaining)
+		t.Fatalf("expected remaining 0 (release=0 for full-cost settle), got %d", remaining)
 	}
-	if l2.Balance() != 5000 {
-		t.Fatalf("after settling resB at full reservation, balance should be 5000 (A conservative), got %d", l2.Balance())
+	if l2.Balance() != 8000 {
+		t.Fatalf("after full-cost settle of resB, balance should stay at 8000 (A conservative 5000 + B retained 3000), got %d", l2.Balance())
 	}
 }
 
-// E1: Below-reservation mismatch with two outstanding must stay at 6000
-// (no release below the reservation), then B settles per existing debit
-// semantics (balance 6000 - 3000 = 3000).
+// E1 + F1: Below-reservation mismatch with two outstanding must stay
+// at 6000 (no release below the reservation). Settling B at full cost
+// releases 0 and retains B's actual 3000; balance stays at 6000.
 func TestMismatchBelowReservationWithTwoOutstandingPreservesExposure(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/test-ledger.jsonl"
@@ -849,14 +849,14 @@ func TestMismatchBelowReservationWithTwoOutstandingPreservesExposure(t *testing.
 		}
 	}
 
-	// Settle B per existing refund semantics: debit by actual. B's actual
-	// is 3000 (matches reservation). balance = 6000 - 3000 = 3000.
+	// F1: Settle B at full cost. release = 3000 - 3000 = 0. B's actual 3000
+	// retained against the cap. balance stays at 6000.
 	_, err = l.Settle(context.Background(), resB, 3000, 1000, 500, 1_000_000, 1_000_000)
 	if err != nil {
 		t.Fatalf("resB settle failed: %v", err)
 	}
-	if l.Balance() != 3000 {
-		t.Fatalf("after settling resB at full reservation, balance should be 3000 (A conservative 3000 max(1500,3000)=3000), got %d", l.Balance())
+	if l.Balance() != 6000 {
+		t.Fatalf("after full-cost settle of resB, balance should stay at 6000, got %d", l.Balance())
 	}
 }
 
@@ -877,13 +877,14 @@ func TestMismatchWithPriorSettledAndThirdOutstandingPreservesExposure(t *testing
 	if err != nil {
 		t.Fatalf("Reserve A failed: %v", err)
 	}
-	// Settle A cleanly at its full reservation (no mismatch).
+	// F1: Settle A cleanly at its full reservation (no mismatch).
+	// Full-cost settle retains actual 3000 against the cap.
 	_, err = l.Settle(context.Background(), resA, 3000, 1000, 500, 1_000_000, 1_000_000)
 	if err != nil {
 		t.Fatalf("Settle A failed: %v", err)
 	}
-	if l.Balance() != 0 {
-		t.Fatalf("after settling A, balance should be 0, got %d", l.Balance())
+	if l.Balance() != 3000 {
+		t.Fatalf("after settling A at full cost, balance should be 3000 (A actual retained), got %d", l.Balance())
 	}
 
 	// Now reserve B and C.
@@ -895,8 +896,8 @@ func TestMismatchWithPriorSettledAndThirdOutstandingPreservesExposure(t *testing
 	if err != nil {
 		t.Fatalf("Reserve C failed: %v", err)
 	}
-	if l.Balance() != 6000 {
-		t.Fatalf("setup: B+C balance 6000, got %d", l.Balance())
+	if l.Balance() != 9000 {
+		t.Fatalf("setup: A retained 3000 + B+C reserve 6000 = 9000, got %d", l.Balance())
 	}
 
 	// Mismatch B at actual=5000 (delta=2000, reserved=3000).
@@ -904,9 +905,9 @@ func TestMismatchWithPriorSettledAndThirdOutstandingPreservesExposure(t *testing
 	if !IsLedgerCode(err, LedgerCodeRateMismatch) {
 		t.Fatalf("expected rate-mismatch on B, got %v", err)
 	}
-	// Balance = 0 (after A settle) + 6000 (B+C reserve) + 2000 (B delta) = 8000.
-	if l.Balance() != 8000 {
-		t.Fatalf("balance should be 8000 (A settled 0 + B conservative 5000 + C reserved 3000), got %d", l.Balance())
+	// Balance = 3000 (A retained) + 6000 (B+C reserve) + 2000 (B delta) = 11000.
+	if l.Balance() != 11000 {
+		t.Fatalf("balance should be 11000 (A retained 3000 + B conservative 5000 + C reserved 3000), got %d", l.Balance())
 	}
 
 	// Verify C's outstanding reservation entry is preserved.
@@ -924,22 +925,24 @@ func TestMismatchWithPriorSettledAndThirdOutstandingPreservesExposure(t *testing
 		t.Fatal("C reservation entry must be preserved")
 	}
 
-	// resC settles cleanly (pre-halt, non-terminal).
+	// F1: resC settles cleanly at full cost. release=0; balance stays at 11000.
 	_, err = l.Settle(context.Background(), resC, 3000, 1000, 500, 1_000_000, 1_000_000)
 	if err != nil {
 		t.Fatalf("resC settle failed: %v", err)
 	}
-	// After settling C: balance = 8000 - 3000 = 5000 (B conservative).
-	if l.Balance() != 5000 {
-		t.Fatalf("after settling C, balance should be 5000 (B conservative 5000), got %d", l.Balance())
+	if l.Balance() != 11000 {
+		t.Fatalf("after full-cost settle of resC, balance should stay at 11000, got %d", l.Balance())
 	}
 }
 
-// E1: Overflow fails closed without dropping evidence. With reserve B at
-// small amount near the cap, mismatch A at MaxMicroUnits must detect
-// checked-add overflow and return LedgerCodeOverflow without mutating
-// balance or appending the mismatch entry. Already-persisted evidence
-// (the reservation entries) is not dropped.
+// E1 + F2: Overflow records evidence + halt + sentinel. With reserve B
+// at small amount, mismatch A at MaxMicroUnits must detect
+// checked-add overflow and return LedgerCodeOverflow. The actual
+// billing MUST be durably recorded on a mismatch entry with
+// Overflow=true marker (Balance field uses MaxMicroUnits sentinel
+// rather than a false exact aggregate). Reservation marked
+// terminal. Ledger halted. Available = 0. Replay derives halt from
+// the Overflow marker.
 func TestMismatchOverflowFailsClosedWithoutDroppingEvidence(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/test-ledger.jsonl"
@@ -987,32 +990,55 @@ func TestMismatchOverflowFailsClosedWithoutDroppingEvidence(t *testing.T) {
 		t.Fatalf("expected overflow code, got %v", err)
 	}
 
-	// Balance unchanged.
-	if l.Balance() != balanceBefore {
-		t.Fatalf("balance must be unchanged on overflow, got %d (want %d)", l.Balance(), balanceBefore)
+	// F2: Balance is the documented sentinel MaxMicroUnits (not false exact).
+	if l.Balance() != MaxMicroUnits {
+		t.Fatalf("balance must be MaxMicroUnits sentinel on overflow, got %d (want %d)", l.Balance(), MaxMicroUnits)
 	}
 
-	// Reservation entries not dropped (no mismatch entry appended).
-	mismatchEntries := 0
-	reservationEntriesAfter := 0
-	for _, e := range l.Entries() {
-		switch e.Type {
-		case EntryMismatch:
-			mismatchEntries++
-		case EntryReservation:
-			reservationEntriesAfter++
+	// F2: Halted durable.
+	if !l.Halted() {
+		t.Fatal("ledger must be halted on overflow")
+	}
+	if l.Available() != 0 {
+		t.Fatalf("available must be 0 on overflow, got %d", l.Available())
+	}
+
+	// F2: Mismatch evidence persisted with Overflow=true marker.
+	var mismatchOverflow *Entry
+	for i := range l.entries {
+		e := &l.entries[i]
+		if e.Type == EntryMismatch && e.RefID == resA {
+			mismatchOverflow = e
+			break
 		}
 	}
-	if mismatchEntries != 0 {
-		t.Fatalf("no mismatch entry should be appended on overflow, got %d", mismatchEntries)
+	if mismatchOverflow == nil {
+		t.Fatal("mismatch evidence must be persisted on overflow (was previously dropped)")
+	}
+	if !mismatchOverflow.Overflow {
+		t.Fatal("mismatch entry must carry Overflow=true marker")
+	}
+	if mismatchOverflow.ActualCost != MaxMicroUnits {
+		t.Fatalf("mismatch ActualCost must record the actual bill %d, got %d", MaxMicroUnits, mismatchOverflow.ActualCost)
+	}
+
+	// Reservation entries preserved across overflow.
+	reservationEntriesAfter := 0
+	for _, e := range l.Entries() {
+		if e.Type == EntryReservation {
+			reservationEntriesAfter++
+		}
 	}
 	if reservationEntriesAfter != reservationEntriesBefore {
 		t.Fatalf("reservation entries must be preserved across overflow, got %d (want %d)", reservationEntriesAfter, reservationEntriesBefore)
 	}
 
-	// resB can still settle (no halt was latched on overflow).
+	// F2: resB pre-halt in-flight settle reconciles; ledger remains halted.
 	_, err = l.Settle(context.Background(), resB, 4, 1, 1, 1_000_000, 1_000_000)
 	if err != nil {
-		t.Fatalf("resB settle failed (overflow should not latch halt): %v", err)
+		t.Fatalf("resB pre-halt in-flight settle should reconcile: %v", err)
+	}
+	if !l.Halted() {
+		t.Fatal("ledger must remain halted after in-flight reconciliation")
 	}
 }

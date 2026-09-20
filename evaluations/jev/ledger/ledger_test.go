@@ -101,22 +101,24 @@ func TestReserveSettleRoundTrip(t *testing.T) {
 		t.Fatalf("balance after reserve: %d", l.Balance())
 	}
 
-	// Settle with actual cost less than reservation.
+	// Settle with actual cost less than reservation. F1: actual cost is
+	// retained against the cap; only the unused headroom (release) is
+	// returned. release = reserved - actual = 3000 - 1200 = 1800.
 	remaining, err := l.Settle(context.Background(), resID, 1200, 800, 400, 1_000_000, 1_000_000)
 	if err != nil {
 		t.Fatalf("Settle failed: %v", err)
 	}
 	if remaining != 1800 {
-		t.Fatalf("expected remaining 1800, got %d", remaining)
+		t.Fatalf("expected remaining 1800 (release), got %d", remaining)
 	}
-	// Balance = reserved - settled = 3000 - 1200 = 1800
-	if l.Balance() != 1800 {
-		t.Fatalf("balance after settle: %d", l.Balance())
+	// Balance = reserved - release = 3000 - 1800 = 1200 (actual retained).
+	if l.Balance() != 1200 {
+		t.Fatalf("balance after settle: %d (want 1200 = actual retained)", l.Balance())
 	}
 
-	// Available should be cap - balance = 10_000_000 - 1800 = 9_998_200
-	if l.Available() != 9_998_200 {
-		t.Fatalf("available after settle: %d", l.Available())
+	// Available should be cap - balance = 10_000_000 - 1200 = 9_998_800
+	if l.Available() != 9_998_800 {
+		t.Fatalf("available after settle: %d (want 9_998_800)", l.Available())
 	}
 }
 
