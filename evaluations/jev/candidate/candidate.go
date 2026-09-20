@@ -30,7 +30,15 @@ const MaxDirectedEdgeCandidates = 24
 
 // PoolEntry is one entry in the candidate pool a source-group contributes.
 // Indexes are stable per source-group so candidate IDs survive across runs.
+//
+// ID, when non-empty, is the opaque identifier the shortlist preserves;
+// it carries no ranker role tag and no gold label. When ID is empty, the
+// shortlist assigns an ID of "role:index" where role is the ranker's
+// matched tag ("title", "alias", "wikilink"). The harness convention is
+// to ALWAYS supply ID for the candidate-generation exercise so classifier
+// inputs see only opaque tokens.
 type PoolEntry struct {
+	ID       string
 	Index    int
 	Title    string
 	Aliases  []string
@@ -41,8 +49,10 @@ type PoolEntry struct {
 // fixture's source group.
 type Pool []PoolEntry
 
-// Index returns the candidate's stable ID, the prefix being the role tag so
-// downstream reviewers can tell at a glance how a candidate was surfaced.
+// CandidateID returns the candidate's stable ID. Callers that supply a
+// non-empty PoolEntry.ID receive that ID on the shortlist; the
+// "role:index" form is reserved for callers that do not supply an ID.
+// Classifier-facing code should always supply an opaque ID.
 func CandidateID(role string, idx int) string {
 	return role + ":" + itoa(idx)
 }
@@ -222,8 +232,12 @@ func truncateAndWrap(scored []scoredCandidate, cap int, note string) Shortlist {
 		GeneratedBy:    "deterministic-title-alias-wikilink",
 	}
 	for _, s := range scored {
+		id := s.entry.ID
+		if id == "" {
+			id = CandidateID(s.role, s.entry.Index)
+		}
 		out.Candidates = append(out.Candidates, protocol.Candidate{
-			ID:    CandidateID(s.role, s.entry.Index),
+			ID:    id,
 			Title: s.entry.Title,
 			Alias: firstAlias(s.entry),
 			Role:  s.role,

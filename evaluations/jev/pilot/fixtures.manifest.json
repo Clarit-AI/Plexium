@@ -1,1756 +1,2172 @@
 {
-  "protocolVersion": "0.1.0",
-  "generatedAt": "2026-09-20T04:48:56.411783Z",
+  "protocolVersion": "0.2.0",
+  "generatedAt": "2026-09-20T05:33:21.705239Z",
   "fixtureFile": "pilot/fixtures.jsonl",
-  "fixtureCount": 342,
+  "fixtureCount": 425,
   "splitCounts": {
-    "tuning": 98,
-    "heldOut": 244,
-    "total": 342
+    "tuning": 156,
+    "heldOut": 269,
+    "total": 425
   },
   "taskCounts": {
-    "entityType": 105,
-    "relationship": 62,
-    "claimSupport": 175,
-    "total": 342
+    "entityType": 133,
+    "relationship": 100,
+    "claimSupport": 192,
+    "total": 425
   },
-  "sourceGroupCount": 35,
+  "sourceGroupCount": 41,
   "reviewStatusCount": {
-    "unreviewed": 342
+    "unreviewed": 425
   },
   "challengeCount": {
-    "adversarial-instruction": 35,
-    "conflicting-sources": 35,
-    "irrelevant-context": 35,
-    "misleading-numbers-dates": 35,
-    "missing-evidence": 35,
-    "rename": 35,
-    "reversed-direction": 27,
-    "straightforward-positive": 105
+    "adversarial-instruction": 32,
+    "conflicting-sources": 32,
+    "irrelevant-context": 32,
+    "misleading-numbers-dates": 32,
+    "missing-evidence": 64,
+    "rename": 32,
+    "reversed-direction": 32,
+    "straightforward-negative": 32,
+    "straightforward-positive": 137
   },
-  "sha256FixtureFile": "3ae065e8ac80e9014ee3ea8185b78257b5714f44c0bcd9417a040a339507eac6",
+  "sha256FixtureFile": "365b5002511bd3778c0cc9653b4c80e35fc57972b3773fd1952257defbda8a7c",
   "sha256Manifest": "",
   "fixtureHashes": [
     {
-      "id": "sg-papers-001.entity-type.base",
-      "sha256": "d1b57e78453a3a75bba5fc23207afce523f119300e5b5f8abb4edf91693b72bf",
+      "id": "sg-001-entitytype-base",
+      "sha256": "7196e4bf2f457a5c3b159b0a4411fadade9cf819264bbe1e58f1a154773c438a",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-001.relationship.base",
-      "sha256": "4f016b2dc488402ec5cdff4edac005abcb582ec8914b78b3a8686ccf48743a06",
+      "id": "sg-001-candidate-typing",
+      "sha256": "e435b7961503ed0ab2d433290c3ec7b81c1eb69eb4e5232dd9cac6ac72ed96a6",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-001.claim.base",
-      "sha256": "b21ab53858fdb5b49c4bb58935965c5419135cbc9f05c3741c5d259d3cb1e16d",
+      "id": "sg-001-rel-base",
+      "sha256": "f7069c4d817612e8f021766a454a875ba2522469810475050e4a378d229c89ca",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-001.entity-type.missing-evidence",
-      "sha256": "f256503ed625c5f232ed095fca1d19d0a7fae281e170b565533259aa913a5133",
+      "id": "sg-001-rel-reverse",
+      "sha256": "45b361de250c6252cf5e1e6663b1d52eb874757da52e5cd3268d662c996214eb",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-001.claim.conflicting",
-      "sha256": "d4724b2837e1ded3d17d12c0e83f64041c831eb44a518d5d2bd7cd66becede8f",
+      "id": "sg-001-claim-base",
+      "sha256": "69b3f7e1a51db827f4b11fa16f02a1a7d21f3ca66ae3ed73a0dd797e2b800bfe",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-001.claim.adversarial",
-      "sha256": "4aaf0b2e0ec44afc683e40cd3be234deb2ed08a6a8aab2233a16a9c39fe5ca12",
+      "id": "sg-001-claim-insufficient",
+      "sha256": "c588e85c35170b7030abb37ff91483e8e0181d1dd999238ddeff4c67fa019326",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-001.claim.irrelevant",
-      "sha256": "6d9565876403593acff07654ad0d60e0e0fa6f62676cd7424f9e40e01c44a88c",
+      "id": "sg-001-entitytype-missing",
+      "sha256": "d9f8c190af9180add9ebb82007cb3031620379fd0a32d868173e12797cc0fdc6",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-001.claim.number-trap",
-      "sha256": "b279a5161048d42433d941d23f2674a757e22604aaa36fa900306ca7280aac6d",
+      "id": "sg-001-entitytype-rename",
+      "sha256": "c63f096d7ba9c81f7af2a4de7f77b94f79907a5387954fab751fe38825adf797",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-001.entity-type.rename",
-      "sha256": "81339bdea1c02ffab8fe16b2e086a0f661a8cc92495d7a5c398cadfc0bbe8794",
+      "id": "sg-001-claim-adversarial",
+      "sha256": "fa5ca90fc2b503e6dc7fecb079958473be9b0d4c71267d63704ac6235b6e9e31",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-001.relationship.reversed",
-      "sha256": "54217d1421271ad54c417bfc4bcff24532f52101d0427d8da5fa2c4bb5838efc",
+      "id": "sg-001-claim-irrelevant",
+      "sha256": "1fb4c592fcf04c07fdbe16a16579658b0bf4bd069a207d397788ae592e073bae",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-002.entity-type.base",
-      "sha256": "26a8cac00b48dd5b8ca7c82ce6a8ff39ea6e24fd6e273c5fa55700d8ecd60d82",
+      "id": "sg-001-claim-numbers",
+      "sha256": "84d4a08101f3d91ee94a16f9de6ced679da9dd831887a6c577446793043617ec",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-002.relationship.base",
-      "sha256": "ce84f5fa52301c888afc6ddd46776a8ea3c1dd4d9f5d7293aa185dcab96bd6d9",
+      "id": "sg-001-claim-noprec",
+      "sha256": "950ed2faa36348d756a1f7bf49d9d00fa5a8f368a037f2979109ba2da03787f5",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-002.claim.base",
-      "sha256": "7529650db54c287512e4da3ce630c2064d151a4339a7711747f4b906e5e85343",
+      "id": "sg-001-rel-none",
+      "sha256": "52cbd95c89e08da366788be42f89fda0aff4fd6b08a0730e2cf4a4ec4ead9f60",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-002.entity-type.missing-evidence",
-      "sha256": "d030f20ec183dd93deb4e4c59139c6f1b234df4ccfa1303220642242e86e7910",
+      "id": "sg-002-entitytype-base",
+      "sha256": "d8beb38dd20f64c153a06fdb38ff7ebd49eed11bf9fae834caedbba48b184ea8",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-002.claim.conflicting",
-      "sha256": "a1d63a94f9a1f049530c559140264416b390d17908bb83f9b9bda3ef28921563",
+      "id": "sg-002-candidate-typing",
+      "sha256": "7b1f40d4c35a49a54f78d708f3e3d0faaa9595561261889f2ae85eee06ade7e1",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-002.claim.adversarial",
-      "sha256": "ecb9968ef974c8c1b378d2a3a12f4bb6951f668c04432f556134813a5e39457b",
+      "id": "sg-002-rel-base",
+      "sha256": "cf5613251b7ef86c525e695308768eba05c708ccae48fb780756efd6739bb91d",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-002.claim.irrelevant",
-      "sha256": "42ecd9a61f8dca22952d2a6256b9d22a0b986fa7425fd692ba42e7cf9c7b935e",
+      "id": "sg-002-rel-reverse",
+      "sha256": "7ecb0312ec0c386672c9d8145d25f8227b8425334e55cf0d0b4ee5c0459f0eed",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-002.claim.number-trap",
-      "sha256": "260357b27ee4826b827a9407db8b22c214502eb6d94b38b5cfb22117b39dcd81",
+      "id": "sg-002-claim-base",
+      "sha256": "b1ac0347f2d60482a3b2ea67af41abd7a3cec03f73a97690bc65fff239a54400",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-002.entity-type.rename",
-      "sha256": "47c5b45fbaa59e013a62239cece0cd38d85207538e7c4079d46d228b62c67f30",
+      "id": "sg-002-claim-insufficient",
+      "sha256": "196624f6c3c14f92fabdb13194e0579515e38fc32dc9964e7fe810276c570e48",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-002.relationship.reversed",
-      "sha256": "03b54ad58eb8be2644fa55c9ed233408505bc7ebd639ffb78bb444e9cce44f13",
+      "id": "sg-002-entitytype-missing",
+      "sha256": "aaf4869e183cd9a676a8a7ec9f070d669cc188ca89f96351dfc1e725de8f6b2d",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-003.entity-type.base",
-      "sha256": "9f906a7e32d3cd5e4332db43effb6f53816fbb5426da77a0cae606e03ddf9bf6",
+      "id": "sg-002-entitytype-rename",
+      "sha256": "bef2544f0f857a9ce83241ee6236cddc70e6ba8c5245e89396506bda316061a2",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-003.relationship.base",
-      "sha256": "003f644a862cc454a4e6aa46189d902592239dcd0d5cf1e5eecd7916aebf67f3",
+      "id": "sg-002-claim-adversarial",
+      "sha256": "feec614f618f641b2cb2a867c6ec132e9069f4fb2ff649096e57841c359df1c1",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-003.claim.base",
-      "sha256": "b483c7e690e1d31e7791d42bbba16319356e3317357db558b4cfa24ea96517df",
+      "id": "sg-002-claim-irrelevant",
+      "sha256": "40f00ebf998f78d67e1e93369a20a6fd7aa3b728f84370eef4f9aaaec2ecee47",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-003.entity-type.missing-evidence",
-      "sha256": "f38f3a2fbd8f9cae659a2681b6886b962c7c4dd14c551baabec9e7bf01548478",
+      "id": "sg-002-claim-numbers",
+      "sha256": "57932f7345cd535bee0e3a9c7915124fa01824dd0e0000c9268db092424983fd",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-003.claim.conflicting",
-      "sha256": "6011651a2d797f032a2d4ea209567c759826f6794f7caf0c329b44a291969f77",
+      "id": "sg-002-claim-noprec",
+      "sha256": "08366df7e8193d67248065974658cd3ab43c64dc4386d0c157eebe8070c87a3e",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-003.claim.adversarial",
-      "sha256": "0dcf3429e0a75e02243b3965a4519996008dadd34d751e16ddc9f63e8eb4f6c4",
+      "id": "sg-002-rel-none",
+      "sha256": "a13821b5b67f9805c395fb7d3398b9024c4ff5f3c911debe21ecda7bc5a302a4",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-003.claim.irrelevant",
-      "sha256": "89b77ebaf009ee15f8c2da677cbe2cf8d51affed3f74cc0c27782a802a57d057",
+      "id": "sg-003-entitytype-base",
+      "sha256": "9db1074f9f04e026ab9b5b7cf2bf65a567a38c92c3ea8818a0092450e876535e",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-003.claim.number-trap",
-      "sha256": "4bc401807c326b8ec83280cbd07c10c949cd013e87ebf0f09700f232b4053617",
+      "id": "sg-003-candidate-typing",
+      "sha256": "4b25e2dd0d37ef56e76a886c85b083914cc99d64b184ea44b1bd7f4a88fe4ff2",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-003.entity-type.rename",
-      "sha256": "bbeb6034c2b9e83b520b9b42af5862f6bf5d0a7775e27c47ccbcf436a01db7e4",
+      "id": "sg-003-rel-base",
+      "sha256": "c470af285ece068332bdb7fbda9c700c2ce26dde67cf02af85a065d6b6ceb1d7",
       "split": "tuning"
     },
     {
-      "id": "sg-papers-003.relationship.reversed",
-      "sha256": "2fc438eef9876a8c7bb0995061a49460922d4bb62efe8c68c256f09b52bd73d9",
+      "id": "sg-003-rel-reverse",
+      "sha256": "88a4175171595c9293ee1216293d43161c5af516502d591f29d887658e6d0e60",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-001.entity-type.base",
-      "sha256": "b06b40f9eed56dd07750ff8c423f5890e71e0db32f8f0f38ff9b1bc579a42406",
+      "id": "sg-003-claim-base",
+      "sha256": "82c29f76506074f09f74ce6a85cb6a8f88919849d08c56fbacaba37660a2ef7b",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-001.relationship.base",
-      "sha256": "b44feb822e14f399cc326cedf787f9bb47ea3dbeab41e51fb406fa6bf4f8776e",
+      "id": "sg-003-claim-insufficient",
+      "sha256": "f42d647a288f87b4cd2015405c7cc49fb0ec77c7b092a964353bdf60fe7e82a9",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-001.claim.base",
-      "sha256": "9a6eddc7f2a5b52231cdb46aa2ca41b16365978694b53b9d915f4565762677fc",
+      "id": "sg-003-entitytype-missing",
+      "sha256": "999a49ffe9a6e8947147fcf6c9f950e8484cf8470e70a96b17ffe41498c1a8a9",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-001.entity-type.missing-evidence",
-      "sha256": "f7779934a660ad19783ee3489274653345f49258a9aa51bacefe184e550220ad",
+      "id": "sg-003-entitytype-rename",
+      "sha256": "923a09a05a73830a662a0ebc8f4a9f70c2224f95f1117730203b41f989ab10c0",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-001.claim.conflicting",
-      "sha256": "1d3c46c67e14cd181adb7fd9732af88681cbe3cc8d8add6bfb959fa9f4bc131d",
+      "id": "sg-003-claim-adversarial",
+      "sha256": "53c9e2104a967ea10077927e3bd148f53727877aa73f7c0d900cbea1acdd7c5f",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-001.claim.adversarial",
-      "sha256": "6753d8e28f3c4ecfdeb9b69f47d588a60f01a8548b297218ed989a6ec0ca02a1",
+      "id": "sg-003-claim-irrelevant",
+      "sha256": "110799bbc74decbde4c44b522040a4e1c44ced042ff4290c047e28ecc86c2b79",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-001.claim.irrelevant",
-      "sha256": "139a1f47d630587b22e7e459b200f7b1cf777617fdc0ce44a9987c5c1ca2e570",
+      "id": "sg-003-claim-numbers",
+      "sha256": "75d4e6d735a22ca38273369b1d01e0b458cbc0be3bc504923f0aae3f81b0c761",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-001.claim.number-trap",
-      "sha256": "94742510b4d8c3dbc2f2a1f51dd2fa771590a8d26a9cf21c0c1fec3020dd3448",
+      "id": "sg-003-claim-noprec",
+      "sha256": "892badd628511cd0f2c0ba28e60416d7546870ee18aaf4fbf70d3fd9e1160abc",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-001.entity-type.rename",
-      "sha256": "4bc348dd7841972bd035cc2a09bc1d4a15b3cb7081215a2375d161f2b095b9fb",
+      "id": "sg-003-rel-none",
+      "sha256": "431cc1f6f4acd496203a9231acd3f3f7e2f59eb2604e9eb681079de798e4cd8d",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-001.relationship.reversed",
-      "sha256": "84a82b95347d0fee304cddb5e605e08ffe35d88acaea24a326a8c178a4e36b5e",
+      "id": "sg-004-entitytype-base",
+      "sha256": "7577173be35f09e95895606e8f52e8dd02a76083a9f3350592c4bef3b2f57d35",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-002.entity-type.base",
-      "sha256": "65cc9fa3125e4266f8e19a79e73339644676f95afa0c870d8de173ba85bf084d",
+      "id": "sg-004-candidate-typing",
+      "sha256": "092aca745dd96e93d9fd861cbfe8979874ec967a0f7881a568ad53b5de1e1f42",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-002.relationship.base",
-      "sha256": "21fbec32d5a3a0ec1bbce162ffdb15c244f7fc41df6f2d6417b89cd7a40ac557",
+      "id": "sg-004-rel-base",
+      "sha256": "cde2425f944c2d05679c8464faed89f616d7a5602b83403f4a1f206d48c1afff",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-002.claim.base",
-      "sha256": "efe8bee2d314951275b2d9938cddd8cbcc1d541ac844761f163c0bbd79fdb8f7",
+      "id": "sg-004-rel-reverse",
+      "sha256": "af3454e4136673f2146b282abeb5953686f094a3efcabfed4cbc6999adfb2845",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-002.entity-type.missing-evidence",
-      "sha256": "a4961f975e554e77bf2b6ae50c136dbe018c9a62879ab487d8a2f7b0a906dc38",
+      "id": "sg-004-claim-base",
+      "sha256": "4e6a125271e19056b2dcffd9611798f649c1cb068393d56d9cde49d17284a035",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-002.claim.conflicting",
-      "sha256": "e307ebdcb02593de2ed22cd58ac919da3276db76d68f3ded284279301a2665ff",
+      "id": "sg-004-claim-insufficient",
+      "sha256": "148613086ace2da8083fc36865515f00e9cf407ec7dd99f0a28b607e22c412c2",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-002.claim.adversarial",
-      "sha256": "ea7bd5405b4e558cb3a5e5efcccc643c94b52db06f3354ef3a1f958f0191f2a3",
+      "id": "sg-004-entitytype-missing",
+      "sha256": "9a4e1d2fb1c9599c18095f001e1889b8478d971dd9949962809ca3f7c2378024",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-002.claim.irrelevant",
-      "sha256": "80562ba499b750cc42617bf7ce5a566752e241c33bfc598581052c78d8515ac2",
+      "id": "sg-004-entitytype-rename",
+      "sha256": "ecd5ff4bf11c20a6d4f979c3f7c802f02b2d7a8ef07e2e1e2ad3655f14dc3519",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-002.claim.number-trap",
-      "sha256": "ada9092e104ef93a9eb77c6b304b5e51763cfc5e8efa10f0b640861062e26b44",
+      "id": "sg-004-claim-adversarial",
+      "sha256": "f5fec8dd41da492a6610c56e72799f4c0fa978b53218cd519e25977614c1a456",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-002.entity-type.rename",
-      "sha256": "294971cdf8115729466f12a10579fbd7bdfbe2c522656b5411e6fd0670af2e7d",
+      "id": "sg-004-claim-irrelevant",
+      "sha256": "8b021cb7f965a9d9b57b6b28e142885f7351c3756c745f9fe85307010b8970ef",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-002.relationship.reversed",
-      "sha256": "9b8ec7030285a38653bae3e7f7b2eac821a9f6483776cb089d17377f4134ea08",
+      "id": "sg-004-claim-numbers",
+      "sha256": "f4bb3c6d1383b456810fbd5224dddfff1d7d731b2fdb0c06d8195735726a9eb3",
       "split": "tuning"
     },
     {
-      "id": "sg-tools-003.entity-type.base",
-      "sha256": "9007eb174c7f155e75f72a6e672e4c411d0fa7ac8e1b85fce447bae343298069",
-      "split": "held-out"
+      "id": "sg-004-claim-noprec",
+      "sha256": "3d4fcc547377c9b9344445f6e11bf180064834c18f223a44dd0c064c734f9bef",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-003.relationship.base",
-      "sha256": "e065602be5430e2406bdc69e912c784ca35c49771ff68b5c694d9c51d2a9ff5c",
-      "split": "held-out"
+      "id": "sg-004-rel-none",
+      "sha256": "ae15895ddd3be51a8650da4837f510ac9f94a5156914004395e204af41829b54",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-003.claim.base",
-      "sha256": "6dc65c65aec232f6486e405a7b2b64fd8b0435a0087575427713b70716b9a7c1",
-      "split": "held-out"
+      "id": "sg-005-entitytype-base",
+      "sha256": "d0652535ee8545d96f4cc04def74701add657f547dc54d93c47c226aef37c841",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-003.entity-type.missing-evidence",
-      "sha256": "d115a31401a728e7fb540e104391d37d8eb45a976b2a222bfb048ab0ccefb8f7",
-      "split": "held-out"
+      "id": "sg-005-candidate-typing",
+      "sha256": "f95bfdb2b24abdf310a02ef30ae13e98e44a4093fefeefd022dfeda54bdc5141",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-003.claim.conflicting",
-      "sha256": "13b3a7acd316fd32bbc4fd0423dd7faa1fbd4b524d1765d0c0567811e23412a8",
-      "split": "held-out"
+      "id": "sg-005-rel-base",
+      "sha256": "2da66dfc8e03db101b37834f4a40b1c90142925a62ccafb6cb736ce9734a534f",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-003.claim.adversarial",
-      "sha256": "61e85bb9b3dd50411dbf83fbdb74608b040bbbf783d56496d40f5d6fdb86d50a",
-      "split": "held-out"
+      "id": "sg-005-rel-reverse",
+      "sha256": "72220c5b33fbb15af26c7ccbd3fdaa0be82da65192c67fc07cf74c256852999d",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-003.claim.irrelevant",
-      "sha256": "9ab170fa669e568ec3ec7d0b7a6713c34e376c98e7c615cd94f54527985ccf0d",
-      "split": "held-out"
+      "id": "sg-005-claim-base",
+      "sha256": "81cfa1d211b9d0c29a3db77c6ecb660371498649fbbbf56195cb5410450c2b92",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-003.claim.number-trap",
-      "sha256": "7adc262ddd265fee2f33ef25239492dd73da0f54476af21bdf0858cefd05350f",
-      "split": "held-out"
+      "id": "sg-005-claim-insufficient",
+      "sha256": "7748b2d0c97ec8343efacaa89cc7d4ff09dd46dc37e135ab275130f31622e50d",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-003.entity-type.rename",
-      "sha256": "faa7a762c9ea30710c96d84d4d9f46ddbd65035601c6744acb928c5389f6927f",
-      "split": "held-out"
+      "id": "sg-005-entitytype-missing",
+      "sha256": "8b3e18f6509fe796e8b392847bd46a85b8a0e7d36b6a197acbbb20242461f71c",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-004.entity-type.base",
-      "sha256": "d39fedb804aa8e23893c75e521abfc228298715b7187f24607bd156fb524fd48",
-      "split": "held-out"
+      "id": "sg-005-entitytype-rename",
+      "sha256": "41293ff01398c791463bf7cb04e78f9aba79cf90a9b7438dc4c1b847755fc2d1",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-004.relationship.base",
-      "sha256": "d9446b50fa6a7a4582b247230fd63c2a91f986b17078acd06e5a8f5722c049c9",
-      "split": "held-out"
+      "id": "sg-005-claim-adversarial",
+      "sha256": "3dc6e76b7f8489433c8f083e201818ae92fd6922ef1a93d7050e8e63553874f8",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-004.claim.base",
-      "sha256": "a1ec2d81bbfbc085bdae476931c6c6e5e0430d76fb076a3b97b89c266affa393",
-      "split": "held-out"
+      "id": "sg-005-claim-irrelevant",
+      "sha256": "68229b78c8e6332f8ec5b11aa4637beefb23a89d0ee15ce658803ba5d7c8b926",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-004.entity-type.missing-evidence",
-      "sha256": "f11cdca02a66fb7cffa1bd7845814ea1b1b6b97e30b2c9c0778925960ec01432",
-      "split": "held-out"
+      "id": "sg-005-claim-numbers",
+      "sha256": "c5c40ab803d7973bce41adbbb58e1d6f1f10c3caafedf23b3c4c5e1702c83879",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-004.claim.conflicting",
-      "sha256": "f0c572d3123ff17663f3260a71b375f634d3caf2a6d01caf11cfc10194d63a04",
-      "split": "held-out"
+      "id": "sg-005-claim-noprec",
+      "sha256": "eaef5ce0fdd4378bcea651f6089821df8368923ae94383a7ca4cc904aff9246d",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-004.claim.adversarial",
-      "sha256": "83cd293f96f6b497906b71e7f320eeaf42d5bd3e7b6dd708f7ff2446c086cd98",
-      "split": "held-out"
+      "id": "sg-005-rel-none",
+      "sha256": "30e005395b79babd602be4fdab766fe10e78bcaa94b016e378e2014f2ce2072a",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-004.claim.irrelevant",
-      "sha256": "19fdc18e430f43691729bbb17c576614de7b0778e727c455ef3a2818a63b0f28",
-      "split": "held-out"
+      "id": "sg-006-entitytype-base",
+      "sha256": "0164f485b5403f75f6b1f0203ab14efc2783df609f478f8ed228df7985edced3",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-004.claim.number-trap",
-      "sha256": "73a001da3868f1e6ca20b898712bfb1d674559dbb2c7bb9fdaad8dd31e42b662",
-      "split": "held-out"
+      "id": "sg-006-candidate-typing",
+      "sha256": "481f2d5b7f5eff56354cd049dbd465f6ebee7fa53eeb5af207055692cecb6020",
+      "split": "tuning"
     },
     {
-      "id": "sg-tools-004.entity-type.rename",
-      "sha256": "689b451f5c7ac1cbc60a643871d80d20dde58906ffad64c73f80e0c22fa4d086",
-      "split": "held-out"
+      "id": "sg-006-rel-base",
+      "sha256": "0b602eb24b4c94b1957a906febd05055b3e952e7358754ccac7d2a2feb1979af",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-006-rel-reverse",
+      "sha256": "b92eb87cc02b16932bc62d22d608f97f711086bab486bdf6eafb88ec0eb0a189",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-006-claim-base",
+      "sha256": "5c741fd7bbdd5f75bcd69692c29fee0a4ffc313c637a823eaa1918c90ce47121",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-006-claim-insufficient",
+      "sha256": "252c398d7bbbc7a8f31071cdd192e9c062b95b27f7522905786b99fe290ce8df",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-006-entitytype-missing",
+      "sha256": "5f4fdb9219094cd651975153fe597e4ba3224f3d461f7c60720ef0133eeedf55",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-006-entitytype-rename",
+      "sha256": "ecfe95d209504c183c87f56002c4d9af3a72fb26800891271c83f2ad4d39e197",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-006-claim-adversarial",
+      "sha256": "dabf7ec7220d4f1312d68ea9cacb9e2f00cc0d60999e7a7f16a2d717c5534b3e",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-006-claim-irrelevant",
+      "sha256": "388d0a59db12c79d78a01f27cf73343a5358d65fcff7ca4c96a3b81e49d5dca2",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-006-claim-numbers",
+      "sha256": "40a7ec8bb0d162c4d731d1a52292229a6d0b2ff0c109ebabfa69cdf4f112a9c1",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-006-claim-noprec",
+      "sha256": "d1417ae8c8457f07cec948a627c4b4829ead9f2a0824eddec76846f6bbe4ca6e",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-006-rel-none",
+      "sha256": "967f659a39bf72ad56b1908226acd89ac17093deece0b11b02347c00b6ccfc33",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-007-entitytype-base",
+      "sha256": "ea95789601a63df7fec53e1c54356535585af47aba2a0743e5eaad4b9684bec6",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-007-candidate-typing",
+      "sha256": "883b31630a4cd712f3d3aeaed7e7093a1d5eebf5766782685cb6ade006a362ea",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-007-rel-base",
+      "sha256": "8f3464ed7afeb26a993bc79ec6feb7a708bf4d0339584fef1bf114495cd69a24",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-007-rel-reverse",
+      "sha256": "bd4c9654fb83eeff3f19f926827d00fe48350d74fa3d061c6778729844a7ccb0",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-007-claim-base",
+      "sha256": "49401029d93b488de73d2bacc0e4304707979b546683c0faa0826e5492a068d1",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-007-claim-insufficient",
+      "sha256": "19f06394cfd1fd6a0d11e72af0dfa710aa3a48330b115bef9d0b3584bd761d74",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-007-entitytype-missing",
+      "sha256": "18a8de894e1bd404e26a265192b53bc59baa5f0eb974469a7729a114fcab1886",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-007-entitytype-rename",
+      "sha256": "1c5aa1d88f340ce0b46b152585b7bf66346535da76ea0d1a9e049d56f0da54ef",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-007-claim-adversarial",
+      "sha256": "b422c68b0b74f7c28ac8185a6ed11c2f7764eb3cc7bcbcc5c12e94d27df8b00a",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-007-claim-irrelevant",
+      "sha256": "bb43277771088433c39eb39e45baf4b522f7e34abe01346a5591e5061bd5ad5d",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-007-claim-numbers",
+      "sha256": "25f9c71c478a78108ea26d996c51476e04779d1c5aec06f51f966c6dcf06af13",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-007-claim-noprec",
+      "sha256": "683bed19af32ede07ebb5ba8c581c1047f274bee980d4d6e5a5e1b8b87cec5f5",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-007-rel-none",
+      "sha256": "5a178430edde9beb575cfd465f95fd352bdead56035e2ecfb231e6aea4b18505",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-008-entitytype-base",
+      "sha256": "f496e417843234b27a86160d84bc3a7addab737ba8e101bb21fa58482507685c",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-008-candidate-typing",
+      "sha256": "d43efff3447b6ae0d808eccb91853a8bd481f8bdf1ea5ee35be9fcf42f4b6123",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-008-rel-base",
+      "sha256": "461349024fb319102197f32b003123df387c173bbbda30e66e9dad87ccedcba0",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-008-rel-reverse",
+      "sha256": "3c95a1989568992a74a495c4da9039e803aa221500c803e4d77a6c871197ae89",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-008-claim-base",
+      "sha256": "7936299aadbd064227ef6d9c0061f12c4d2dde069fc8d876b12fc773024cb86d",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-008-claim-insufficient",
+      "sha256": "8ae0f61384a32d37e3645d37a78543c0381592e7b838a896112b9e46ee15d715",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-008-entitytype-missing",
+      "sha256": "c30850847c6b3aaa0c58860adc2774ed2b84d32d583a50ffd0235c53a203c8de",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-008-entitytype-rename",
+      "sha256": "e284b0ea77d8f68e467a24c5f4041d972c1a708e49e5fa712adee359ddad8621",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-008-claim-adversarial",
+      "sha256": "b48a0b9ef4cfb2eaafee0aefa9918b923709fe1434d1c62e13e4dbbe7541befe",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-008-claim-irrelevant",
+      "sha256": "677295443efdd6b85b7adaa0cfdd065b8dffd68279f787e19a98bdadb311b0bd",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-008-claim-numbers",
+      "sha256": "da905439c26d8a2a06267514233392458c5cf12352fdb749b72c7c33559a5f9d",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-008-claim-noprec",
+      "sha256": "91e4f98ee71ead3b54e5cee33b9b5b7c05344ca68c1cea382f7eef724d73f066",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-008-rel-none",
+      "sha256": "5367f00f91dbde52a2ef3194090e2820219fd2a8c5ff6767763bb332d145840a",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-009-entitytype-base",
+      "sha256": "2fc3bc83ebc6f566b52a5aa1c041587c36e2029c661c4caf648b9314a11221d4",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-009-candidate-typing",
+      "sha256": "af1ee9b7639144d0b6617bd54b80d7f817d134208c30d9c370738f3a3d9c14b7",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-009-rel-base",
+      "sha256": "34be7afcc8673af8f2439727749e9718d90a20461bb55cbf8f2597e10ca78b1f",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-009-rel-reverse",
+      "sha256": "27c2b8dbf00df174321551d18a03f13f38ac0e06bedb6ecd7b852e0b15b8a000",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-009-claim-base",
+      "sha256": "940881e76e25d2a9f42487199804df5b082ee68b0b3e671189f10433d8a41516",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-009-claim-insufficient",
+      "sha256": "87dc5e7b51da5b9405218dc8d1d13ef9fdbf7eb24f9e32f3db42de7287e371f7",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-009-entitytype-missing",
+      "sha256": "db64d0c71d33ab7705aad3557450d43511436b030a97c78aa2b974c827c8b875",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-009-entitytype-rename",
+      "sha256": "2ebf1d793b0f4f489dc7433827098a88de4213478ccb4f0e887eb262ddb3f8b9",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-009-claim-adversarial",
+      "sha256": "ea4c11f112d4a63970b98b888669ea1ca9b894b75359e04a618a6b6d97d70458",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-009-claim-irrelevant",
+      "sha256": "b37dcf415060dcd62303566157543eb1e63d8da8cfd0f49c5a34fa8942ca22f4",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-009-claim-numbers",
+      "sha256": "f0be03c4d9482f585b512ca4545b01940c8529cac15360f89bd9699c4b892924",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-009-claim-noprec",
+      "sha256": "6822a2a4b6463134b1c4991ad58231d6a1a32ab0babc4a180dc7fa73b46e25fe",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-009-rel-none",
+      "sha256": "5c91ca323312503480d8ebcb810c6b262d3d6a265d7b9b34c1be79a737fe3a56",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-010-entitytype-base",
+      "sha256": "59ce6a93a2c072b768d71c62bad7cdca8aa26956d350d60b081cd2aad2b86d4e",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-010-candidate-typing",
+      "sha256": "da4d98d762027881b2dff692d41139b02fa40824d53d5514eb625d8ca5a22ad2",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-010-rel-base",
+      "sha256": "a42650e943969153b210409d9947dc9cba8430f94bdb793e8ebf500f70c89c62",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-010-rel-reverse",
+      "sha256": "add7b05a57ef5f02f3a82e2eaaaad284e7e7bc8e89b68a104dfdb07c1f99bb25",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-010-claim-base",
+      "sha256": "5d2eb58fd536bdd4ee90ef89efa0da6c1ca36916299c8517f8a190ef590f731b",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-010-claim-insufficient",
+      "sha256": "dbae8b9bf68dd02ff697ffb965a5eadc4b73d779c5a65a4f6330367a8c6ff410",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-010-entitytype-missing",
+      "sha256": "ef9c376e02d175c7e991fe82ed4139f662f13515c4a0d5f24fc9236bb188603f",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-010-entitytype-rename",
+      "sha256": "6c299a3f0ecf88558eec6ec3ad5ead1764e2a877beb83767b3909592a7a178a1",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-010-claim-adversarial",
+      "sha256": "b1b8221a3d466914d5592263eb7c6ff966fe41aca219170e4de8476377aeaf72",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-010-claim-irrelevant",
+      "sha256": "e94357243bc480c899402dcf5c331510f1e492be521cfc9b80a0dd4abc84b3d1",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-010-claim-numbers",
+      "sha256": "61b7ef9cee6d7a8ef0d259b2d1d83e5681909d2ba3a61f46f8c00eb709e5103e",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-010-claim-noprec",
+      "sha256": "3933e60f4e89f85fb14c5ea4a00032888d15af7708bb0ff53cba52117f05c9e7",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-010-rel-none",
+      "sha256": "bae2d2df31f4c771e18e1d83a47ae3fcde8a2050d62eb4cd6660fd5eda1d24f8",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-011-entitytype-base",
+      "sha256": "91f2edd26ea66819c5f68d6341c360fa43abf1fda4912950201e5d11e26e958c",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-011-candidate-typing",
+      "sha256": "f791716f42b3275827e56453853e41b75d79da517159d14e6590112aef283152",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-011-rel-base",
+      "sha256": "11b5679eed0cece0e75691181efbc7c74b906dfcc94504629c6faf49e526836b",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-011-rel-reverse",
+      "sha256": "a0947f798584b1b9ca7be7c2ab2cfe3986a25266546a36316d896062e232e679",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-011-claim-base",
+      "sha256": "6775e001834a307c649d8b8a83dbaf0ef0ea55e196cd4abc7527a0bc2d029b36",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-011-claim-insufficient",
+      "sha256": "242ae86a3382fc9faa52cd8acb04f386ec90a0c5a7e406abab503ea3c7c5b4b1",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-011-entitytype-missing",
+      "sha256": "346685193aa3a5c1fc04fb2d07ae1cc89b1889d7fc08eb5d94c5bfc9e30f56ee",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-011-entitytype-rename",
+      "sha256": "770695245d23f4305b93451b324a63fa2727cd02c0fee51421df3d3b4b8ce4e3",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-011-claim-adversarial",
+      "sha256": "82eededfa036952f52ac4fd3eb6ee5356d46752fd9555ce923f8e903cf242302",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-011-claim-irrelevant",
+      "sha256": "20c4a6677652e73995b5fc9731a71aa3fe4a690d1bab3beda3d3fa06ede86364",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-011-claim-numbers",
+      "sha256": "d27c973cf2190e7cd08ede1902500f5eaa7c2a786dd36434acfbe2c1c541af53",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-011-claim-noprec",
+      "sha256": "c041b6f048ecc9135f36ec6d0128e2062971efbbc796ca1c94ec1b9d3edb5155",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-011-rel-none",
+      "sha256": "1aa9a2e33f1f0c505f751ed518d339a4079021156b1b0688c55cdf54650398cb",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-012-entitytype-base",
+      "sha256": "4a5071a6609dc3d8b44a18ed8e65a9284bb93ea2b444ada789f1a8c0a8ec9f1c",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-012-candidate-typing",
+      "sha256": "a4588ccec852e1285d98198b4cad1afb00583ca262b14d1edbc61198d9817beb",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-012-rel-base",
+      "sha256": "0c3338aabd8297156b56da69697355ee418c7e059a105baa6a8f466bb7d4b703",
+      "split": "tuning"
+    },
+    {
+      "id": "sg-012-rel-reverse",
+      "sha256": "60a6ecf5ff1279f10c1941734ff835eeaee3d754004fa5caf91532cc5f33151b",
+      "split": "tuning"
     },
     {
-      "id": "sg-people-001.entity-type.base",
-      "sha256": "9ecc7b936ee24ac2e74b6f8d882d0a9f0274c077605ea03ad628addd2803105d",
+      "id": "sg-012-claim-base",
+      "sha256": "cc675d18398af92db8e62c3bece83b3eba30892b7a7277cfb83f25bb5b095720",
       "split": "tuning"
     },
     {
-      "id": "sg-people-001.relationship.base",
-      "sha256": "3dc91fa7929c1eaed9b39002d623d2831f7175ddbbebdf8f48a6886a3860ebd6",
+      "id": "sg-012-claim-insufficient",
+      "sha256": "5628e937eb8e1f475aad001ab178673ccde6be95905c3583e657217f8678d762",
       "split": "tuning"
     },
     {
-      "id": "sg-people-001.claim.base",
-      "sha256": "e86bf377d6c5466e57356a6f2f62ce4fbd0355c4018f3f2a7a6ff9625df7e2c7",
+      "id": "sg-012-entitytype-missing",
+      "sha256": "2dd7113aba4246f7a0a99804333b9e665c64219e278e3c387be55d0e6a48fc3c",
       "split": "tuning"
     },
     {
-      "id": "sg-people-001.entity-type.missing-evidence",
-      "sha256": "4bc38e0d1e1e32a1120f502e6ada73e7c09fab11d51010c4a6fb0e124e92ec65",
+      "id": "sg-012-entitytype-rename",
+      "sha256": "6ed1f8bb34a88e38bc22ca72813931cef056438589e13a9b7d9a90e375d9fab2",
       "split": "tuning"
     },
     {
-      "id": "sg-people-001.claim.conflicting",
-      "sha256": "6a1afafbddaebea358731ada92896c57ce169d56305805a8f314cc35225d2e14",
+      "id": "sg-012-claim-adversarial",
+      "sha256": "9d002af4fadb8e7f5fe39d3f7734698fd1d12d33d1b7ffaeffff5081982866aa",
       "split": "tuning"
     },
     {
-      "id": "sg-people-001.claim.adversarial",
-      "sha256": "567d9de1b87a1242f2ea3375ad2275346881550bb8ec36b424f739159ef402a3",
+      "id": "sg-012-claim-irrelevant",
+      "sha256": "e58388bda29d88b1dbe20c8fb2c8aba371778798bd6d46f36eb6fc844c81f4e1",
       "split": "tuning"
     },
     {
-      "id": "sg-people-001.claim.irrelevant",
-      "sha256": "e7e1538ae9b7704077018ea5d79cbf1c711c78c782d0f166bbbe4b7b9e1ab4f2",
+      "id": "sg-012-claim-numbers",
+      "sha256": "943401ad1c9dcdb4c6edff1953c2ff4d52432af7eab566bc7245ad1708999734",
       "split": "tuning"
     },
     {
-      "id": "sg-people-001.claim.number-trap",
-      "sha256": "543e7f2c02ff20f1e873c9921ed855af9c071d8a11a9363cfc18a967d2224aa8",
+      "id": "sg-012-claim-noprec",
+      "sha256": "8d513b1588fadd03eec8ffef1022bf9ef48133a2f2ef52df83950b4596a4e4db",
       "split": "tuning"
     },
     {
-      "id": "sg-people-001.entity-type.rename",
-      "sha256": "5200fa9cd68db25965ee9d6e3ea0dc9b9718896c5672b92100d740923acc26e4",
+      "id": "sg-012-rel-none",
+      "sha256": "ea601db360bd7d908eea1213f90ef951f5f912ee1e4503c4bdd66d821f2ea098",
       "split": "tuning"
     },
     {
-      "id": "sg-people-002.entity-type.base",
-      "sha256": "a852552b4a6593a1ed1636b6986caa52452f9a4614cd6348161ef52b334ea29c",
+      "id": "sg-013-entitytype-base",
+      "sha256": "7f0387bd3abbbbd00106e10f34aff29a933a23a2465bd8e9efaab670b6611e59",
       "split": "held-out"
     },
     {
-      "id": "sg-people-002.relationship.base",
-      "sha256": "e9a2d0010408aa04cc5dd6539ff28864b01237da31cf51e4045250bfbc934da2",
+      "id": "sg-013-candidate-typing",
+      "sha256": "59356d9882663b891b8109f1fc71ccaa449d6dafe70af9b0229780b7ca6a8291",
       "split": "held-out"
     },
     {
-      "id": "sg-people-002.claim.base",
-      "sha256": "fa34f0bb2077bc86f6f58f524a711992470742c0e5e240d61028eb39230225ff",
+      "id": "sg-013-rel-base",
+      "sha256": "020a4131d65fc3bd8ae12934c510061b17def68b7da3595a90131e550b3b3d66",
       "split": "held-out"
     },
     {
-      "id": "sg-people-002.entity-type.missing-evidence",
-      "sha256": "e5751ee43dc5d07856cd37d603142a284963264e7c8c6548c7536f46b6679fb8",
+      "id": "sg-013-rel-reverse",
+      "sha256": "d50d42bf1dcd060b03cceece9d01606b587b2f3bdb1a554c35ae681508913934",
       "split": "held-out"
     },
     {
-      "id": "sg-people-002.claim.conflicting",
-      "sha256": "061a0c3fcbed916dc917a253f9a57da25542346a45b4212c7da9b8ae7626739b",
+      "id": "sg-013-claim-base",
+      "sha256": "7fa3cdc2e24fe7dbd5767c5741530856b7084ebb348cdc4613c6070d033ee265",
       "split": "held-out"
     },
     {
-      "id": "sg-people-002.claim.adversarial",
-      "sha256": "fe75287ff6146055f2e9d4f2f08b64e775e5a84b57b85dd346f253ae55407ca5",
+      "id": "sg-013-claim-insufficient",
+      "sha256": "99b5bf7a7d4472803c10c55dbc3539813878a71ca62b2b0986dfe749568ac294",
       "split": "held-out"
     },
     {
-      "id": "sg-people-002.claim.irrelevant",
-      "sha256": "bb09ea225336fd17749dda9ae530e4a401e2a6734403d67a549514844ce5e4d7",
+      "id": "sg-013-entitytype-missing",
+      "sha256": "a600a68bbec1d7e15136981acc7c8bd2b16d95b639a6a871d1fc773cadd9789a",
       "split": "held-out"
     },
     {
-      "id": "sg-people-002.claim.number-trap",
-      "sha256": "b9e1cf025f39e7e5f2a640047454ac75c8a58a1374fe8f123baf4290aab3f0d3",
+      "id": "sg-013-entitytype-rename",
+      "sha256": "e2eb264201ecf1e28d6d9c25dfe3057848dc63d4a3f4a9bed1207e7c1760d64c",
       "split": "held-out"
     },
     {
-      "id": "sg-people-002.entity-type.rename",
-      "sha256": "c4704284569ee067c76f763bc173077714e035b2b6a637dcd470645a9ba12ba0",
+      "id": "sg-013-claim-adversarial",
+      "sha256": "c127f27752631fd76f796ab7c96e8e17e2c4cb6f9b17d12236a6d2eb66799358",
       "split": "held-out"
     },
     {
-      "id": "sg-people-002.relationship.reversed",
-      "sha256": "5f837d22e422c65c17564bb6583b7b22601b36f6c0fd6453c7448feb4731209e",
+      "id": "sg-013-claim-irrelevant",
+      "sha256": "d4fa1ef0ee090422c80ce18d2e47a697fb2d32146a23607748bcc42aceea1507",
       "split": "held-out"
     },
     {
-      "id": "sg-people-003.entity-type.base",
-      "sha256": "eacafacfa19e66d4bd032494f4289f5cbe71ea9ccb13bc7a02f74bb1be8e5b80",
+      "id": "sg-013-claim-numbers",
+      "sha256": "c592903f7c03e3b12063dbbb15cdf3a8197b1c6ac61fccac269fc3e5f02dbde0",
       "split": "held-out"
     },
     {
-      "id": "sg-people-003.relationship.base",
-      "sha256": "44fac7e0b865f99fb72656259b0f43daa1127b50e2041937b248121eefac602f",
+      "id": "sg-013-claim-noprec",
+      "sha256": "13db571e17eb7d4ed42d59552748f33f9e80b69b23bf02ed628845f2c769f175",
       "split": "held-out"
     },
     {
-      "id": "sg-people-003.claim.base",
-      "sha256": "7f9a42f7c9838e4cfae271fa0cd8216d7c74a78d30471715b6eee46452501ebe",
+      "id": "sg-013-rel-none",
+      "sha256": "1223c906f9ba4b83342f4cc8866e5876ace3e6fb848f40b9bec752251ae2c4d6",
       "split": "held-out"
     },
     {
-      "id": "sg-people-003.entity-type.missing-evidence",
-      "sha256": "6d4497ef75c9775606cb05e6b6edf3fdacc95a935f5e44db89742bd8d558a91f",
+      "id": "sg-014-entitytype-base",
+      "sha256": "5b70450a22ee09821b2a38375e5ad14b7e5f55835745f74e504ee70e56514610",
       "split": "held-out"
     },
     {
-      "id": "sg-people-003.claim.conflicting",
-      "sha256": "aca8b5b72f38dec641474cecdb9de5ae44cb5f6b70788cde6ea5d34a8a302811",
+      "id": "sg-014-candidate-typing",
+      "sha256": "b09ccd4532d590d32d903756efa67e3e0cd44a3b79eb9d7d2c5e6cd7ce3cdd3c",
       "split": "held-out"
     },
     {
-      "id": "sg-people-003.claim.adversarial",
-      "sha256": "ee9bfa573548d03946ccc5243478ac31506b0b727c9eb5e53c81a20784ded84c",
+      "id": "sg-014-rel-base",
+      "sha256": "e524ae45d6c2f15352e3e5d822206a98b1962a583866d9c5dbc6b8170790c57b",
       "split": "held-out"
     },
     {
-      "id": "sg-people-003.claim.irrelevant",
-      "sha256": "39840e895a275f655a46915e8d79b39813f34710fce4abc6f9c66d95111d0488",
+      "id": "sg-014-rel-reverse",
+      "sha256": "97e965c7d0ee44d98b3262f490d33c81536714a6b89dc28f7765b4406ecc347f",
       "split": "held-out"
     },
     {
-      "id": "sg-people-003.claim.number-trap",
-      "sha256": "b0e0680d0cf8addabe1db68fc7139db8399abc4ea83cc2e0cb6d25c2b11e7320",
+      "id": "sg-014-claim-base",
+      "sha256": "77fbf1f9368e48c4bf6cbc30b67fe6860c403278c7cc48edf8ec7d623ae87da7",
       "split": "held-out"
     },
     {
-      "id": "sg-people-003.entity-type.rename",
-      "sha256": "f110056399a931852b4d8035864f9fef9f1a068c655ba4b681f5e09f2ddc1910",
+      "id": "sg-014-claim-insufficient",
+      "sha256": "04ec5fffbee7cf82bb5aef2a89b0672b899285511b4a5c3b692f3ad901644824",
       "split": "held-out"
     },
     {
-      "id": "sg-people-003.relationship.reversed",
-      "sha256": "b4e0a30e1632dd5975731a9d6dbdcc76773f2e222e131174a6fb2f1ad8f4174c",
+      "id": "sg-014-entitytype-missing",
+      "sha256": "104887d74eab29235fd8a05078f4d538b6c624f0fde8ed24f81729d982a35092",
       "split": "held-out"
     },
     {
-      "id": "sg-events-001.entity-type.base",
-      "sha256": "67e872ec4ebf194502e823e572eb02768430d6104205ac8859315ddf3b04e5a9",
-      "split": "tuning"
+      "id": "sg-014-entitytype-rename",
+      "sha256": "4d5bb20a425284d36c8163444072c9d1bf367dc2ee1c84be7a15908d908db17e",
+      "split": "held-out"
     },
     {
-      "id": "sg-events-001.relationship.base",
-      "sha256": "d5f537563c4f596b1fd5aadbbde2c3e54fac7cb76e121445779327550c53d40f",
-      "split": "tuning"
+      "id": "sg-014-claim-adversarial",
+      "sha256": "d353195ead0f8b4610a16fac5e7d17a8e1df6cd17fd8eb38028d597014e0f21e",
+      "split": "held-out"
     },
     {
-      "id": "sg-events-001.claim.base",
-      "sha256": "cd36cc3864825cd809ace6ef5a53eda934b05c67ee79bfcfeb533acb8d64949b",
-      "split": "tuning"
+      "id": "sg-014-claim-irrelevant",
+      "sha256": "3a6927361c19b2b30216e6b54c2eb3e6669cdf7fb1a5824d31fcf7b4cdeffa4c",
+      "split": "held-out"
     },
     {
-      "id": "sg-events-001.entity-type.missing-evidence",
-      "sha256": "1c7b66855b411d8900ec43c0abdd4d3586b2ac49ee35ef2d3ff5369839f2fdb8",
-      "split": "tuning"
+      "id": "sg-014-claim-numbers",
+      "sha256": "e8d56eca042a55ece06163f6a6bd022ca47aed5633eb87eaf1134ae839e4ab05",
+      "split": "held-out"
     },
     {
-      "id": "sg-events-001.claim.conflicting",
-      "sha256": "b385e86aee84da0cdc49965f59c2365cc1981dbab2f2a771d02e1618f89be175",
-      "split": "tuning"
+      "id": "sg-014-claim-noprec",
+      "sha256": "a9df90276d91cf4af7ba3d70d8f6493e387896127facd6322bdd91639533b4ff",
+      "split": "held-out"
     },
     {
-      "id": "sg-events-001.claim.adversarial",
-      "sha256": "1ae32c6ac1ad8d149b1cc6a70332e9f9ea02c18cada7889c053bc1d005bde45d",
-      "split": "tuning"
+      "id": "sg-014-rel-none",
+      "sha256": "d78f527126c2347bc7ebb4206e53c7619559e2785d2571505b8cf8883f48e737",
+      "split": "held-out"
     },
     {
-      "id": "sg-events-001.claim.irrelevant",
-      "sha256": "2e236fe3d445457822ab61deb9e835e37af45e78382996e8e45db42752f22147",
-      "split": "tuning"
+      "id": "sg-015-entitytype-base",
+      "sha256": "e55ff0ec2ca373a19721748081636787b2c494900771872f87070e65acb50139",
+      "split": "held-out"
     },
     {
-      "id": "sg-events-001.claim.number-trap",
-      "sha256": "21a7ea3ba7b2863e7b3eaaa5cb8fa06575646858d93f4ef8f79b98cec6f563be",
-      "split": "tuning"
+      "id": "sg-015-candidate-typing",
+      "sha256": "6648001d8cd3abe1c49a24a47677232fb9ba137a5802cfb1391be694038444cb",
+      "split": "held-out"
     },
     {
-      "id": "sg-events-001.entity-type.rename",
-      "sha256": "e9c73e1b8db4e4dfcb01ae3472a1f922e8d6db63623cb2856ecd4b2939f95f8f",
-      "split": "tuning"
+      "id": "sg-015-rel-base",
+      "sha256": "d9074a44cda4ed8ee7073f6a6be0ce5294449414f6b40bf46545e7d51c6eca41",
+      "split": "held-out"
     },
     {
-      "id": "sg-events-001.relationship.reversed",
-      "sha256": "9e5f4d2af7eecfdb74c23970d67f3a2b01cdd9fc29dbc028f84cd1e4ad0c56b8",
-      "split": "tuning"
+      "id": "sg-015-rel-reverse",
+      "sha256": "e85c549d229c3505f9971cbf63fed4df6ac3fa9749efee5049f5cbb4e623b815",
+      "split": "held-out"
     },
     {
-      "id": "sg-events-002.entity-type.base",
-      "sha256": "415f56cff174b41722b38b63b3b0a24074ca42bbbcdf09126f673b42f0056842",
+      "id": "sg-015-claim-base",
+      "sha256": "71f1ea3089c4ea64d09efa044296652fa12c8ddc71dfb16c3d993587e1f265c5",
       "split": "held-out"
     },
     {
-      "id": "sg-events-002.relationship.base",
-      "sha256": "b333dcfc0b5c14f0563e53459a310731ec560cbfac7e7d9c199af26aec380a35",
+      "id": "sg-015-claim-insufficient",
+      "sha256": "f890e08099af1384e2197758ef0b899d3b4312c8e9242b7fa849f1aed99f7993",
       "split": "held-out"
     },
     {
-      "id": "sg-events-002.claim.base",
-      "sha256": "6dca8a941c22e3d5b23f215b7ffbcd96afa4563e17eea92564eca8484f03a209",
+      "id": "sg-015-entitytype-missing",
+      "sha256": "ab0b5da467804fe42e169a128f84921e637f128dcbdf8985d1b12bd38536e5d4",
       "split": "held-out"
     },
     {
-      "id": "sg-events-002.entity-type.missing-evidence",
-      "sha256": "792f9fe1ffaefbf0f44d9fb0b1b202572ee6748f69d82fa2e6809d06b6b134bb",
+      "id": "sg-015-entitytype-rename",
+      "sha256": "aa0c4a3b5b6a91a7689602dffdb939395c0f7aa83cc47328e7288a9c6ff1dcdc",
       "split": "held-out"
     },
     {
-      "id": "sg-events-002.claim.conflicting",
-      "sha256": "47a70784bd82f74a7b2fe08e2cc89b430481b96d99fe8bc0846a05e467f9fdfc",
+      "id": "sg-015-claim-adversarial",
+      "sha256": "53038732732e0f740b4b55a25ad2ff497782b217fdf7383b2e93584768999e52",
       "split": "held-out"
     },
     {
-      "id": "sg-events-002.claim.adversarial",
-      "sha256": "a710c7f461a1f0bde78a181a42675edec760fd9ea911db71ed4f9c5d3c1d5035",
+      "id": "sg-015-claim-irrelevant",
+      "sha256": "f092d952fbf04c200998dcb5fafa6631b826f335f2b0ff4eb21da30bebe7f23d",
       "split": "held-out"
     },
     {
-      "id": "sg-events-002.claim.irrelevant",
-      "sha256": "131e56eb9d13ec474b74ef702b233455ce2741ea00275498e4452e42f8e2356e",
+      "id": "sg-015-claim-numbers",
+      "sha256": "2ea6450b0560d5c095260935fbea7f4b886f6f30033dc79da61268e2ea394688",
       "split": "held-out"
     },
     {
-      "id": "sg-events-002.claim.number-trap",
-      "sha256": "ed1152f0698a5127bcc1a9637dae1706c05febf2d98e1d0935f00efa45ad0584",
+      "id": "sg-015-claim-noprec",
+      "sha256": "f97dfe979b518086794e980f9b993b3675c4a6005f44f35d087320fa01213ee6",
       "split": "held-out"
     },
     {
-      "id": "sg-events-002.entity-type.rename",
-      "sha256": "980f11a0db9cd37a6f62ac64ee02f70cb18a037aee53def3622557f7dcd63389",
+      "id": "sg-015-rel-none",
+      "sha256": "73211ad4d03a0fe4741703ea9ce14233a063ddc391ba5bd274c9eaeacbcd0f42",
       "split": "held-out"
     },
     {
-      "id": "sg-events-002.relationship.reversed",
-      "sha256": "b685a5038fb85bcb4778326c85b187a8edba1b0230f4dc939960b27d8be228fa",
+      "id": "sg-016-entitytype-base",
+      "sha256": "6eb2cb53c5553fe188d8fbe9f470417988d10b00850dc260ab868fc3b6f63948",
       "split": "held-out"
     },
     {
-      "id": "sg-events-003.entity-type.base",
-      "sha256": "3ed7548c473fd770c35f9b40f437f7a6d10d6fb3fd492ce0fa6561231e0021d4",
+      "id": "sg-016-candidate-typing",
+      "sha256": "1476931429296958decdbd6f9bb36038d214805c86bc18564c86afab05b4213f",
       "split": "held-out"
     },
     {
-      "id": "sg-events-003.relationship.base",
-      "sha256": "94695c92662dc316258458182fbe595ddc7c21debcde23bb6032d871ae908461",
+      "id": "sg-016-rel-base",
+      "sha256": "b7b36d67e71974d1eef1de448df08f81242238a88fc9eb7b1902c91c417594db",
       "split": "held-out"
     },
     {
-      "id": "sg-events-003.claim.base",
-      "sha256": "7c7b41d5e6c36de268c06be7d00452b4f17fc33850bf3842de8b47734baf3d72",
+      "id": "sg-016-rel-reverse",
+      "sha256": "e9188c3c6287cabb6f15c8648183d3006955a4296b654369f283a3e6fe13181e",
       "split": "held-out"
     },
     {
-      "id": "sg-events-003.entity-type.missing-evidence",
-      "sha256": "251ec8c20e787e48abf9f8a9ca4395590068560619edae9de97ce3fb7315e3ca",
+      "id": "sg-016-claim-base",
+      "sha256": "c2f4009c2c4c7718bc492cd17ab3948e7b11df21cea0283a88f050c33d914c75",
       "split": "held-out"
     },
     {
-      "id": "sg-events-003.claim.conflicting",
-      "sha256": "ee89c277aa597736a9f38d2d911715aefb19093604123aa35c522806e3015bdc",
+      "id": "sg-016-claim-insufficient",
+      "sha256": "30cdfe5737b94eb8fcc4837797e008ad71421ce46d81be193809a765fd97467d",
       "split": "held-out"
     },
     {
-      "id": "sg-events-003.claim.adversarial",
-      "sha256": "6a76fb6178a5083bd97f36cadd9afc934d556121f6d910bb0b3c8662c5d451ce",
+      "id": "sg-016-entitytype-missing",
+      "sha256": "51b28e1a765083c156ca9b892a8b07b1f9a31c64eb89f31d04898ea8a3a6d908",
       "split": "held-out"
     },
     {
-      "id": "sg-events-003.claim.irrelevant",
-      "sha256": "7a81b805c6634ac5ac08eca30ee74fc40d777781918682fe80e5f6335b658e97",
+      "id": "sg-016-entitytype-rename",
+      "sha256": "d0e73c7a7d4c7c5c8a7b606e233b055504aa591aed0b40d08b9ec1957bfff02e",
       "split": "held-out"
     },
     {
-      "id": "sg-events-003.claim.number-trap",
-      "sha256": "4a2a856817c7abbfd116675ae485a4a809da3285cfb24fd39b22c4a45e132607",
+      "id": "sg-016-claim-adversarial",
+      "sha256": "8ecf69e1c1e629f3ef6cab214067f92174982e01c3d019d957fa2da5303eeda9",
       "split": "held-out"
     },
     {
-      "id": "sg-events-003.entity-type.rename",
-      "sha256": "10a09525503526b4cf41116fb8f7daca3a00bbf25441d0e7ae54f2f2bed730fe",
+      "id": "sg-016-claim-irrelevant",
+      "sha256": "d15055d52bf799196df53079d700342336b6a7c0c919f12499ecea46e8acbf94",
       "split": "held-out"
     },
     {
-      "id": "sg-events-003.relationship.reversed",
-      "sha256": "3f7809c9143449ccddd2d5c4977e72330c0a860c3812e95bbb66f9d8e95fc403",
+      "id": "sg-016-claim-numbers",
+      "sha256": "6dab001574fb2c306382caf703cdfa6d6a376a7665384e2ab0d7d9af00920e91",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-001.entity-type.base",
-      "sha256": "a6c690925ba8bbd6794f63856d9c579d3291c22d1010add81718b43fca9fa789",
-      "split": "tuning"
+      "id": "sg-016-claim-noprec",
+      "sha256": "e9231224135e5cbbae535dfcb10b12298f907ed458b2de41df3909d20e037fbd",
+      "split": "held-out"
     },
     {
-      "id": "sg-projects-001.relationship.base",
-      "sha256": "868040f73a8094a0469dd46aa964924312cf2a02dab29ab28af642f1cf765d40",
-      "split": "tuning"
+      "id": "sg-016-rel-none",
+      "sha256": "eb319d300edb2475af2b8e0eb44b709243e3686f9cee69f8216c428aa1662691",
+      "split": "held-out"
     },
     {
-      "id": "sg-projects-001.claim.base",
-      "sha256": "7b6fe0041c18f02d7cd57293aa615a7cb14587a8ae0e81fed7daa9aad860b1c3",
-      "split": "tuning"
+      "id": "sg-017-entitytype-base",
+      "sha256": "eda3fa075d4ffab213569116ebd7d28d4b27c423b22c8209cc2a6277800e1168",
+      "split": "held-out"
     },
     {
-      "id": "sg-projects-001.entity-type.missing-evidence",
-      "sha256": "9433c64f028aadd674c472a2d8a4625141c5e2b5fdd39ab4b01db2c3892b246f",
-      "split": "tuning"
+      "id": "sg-017-candidate-typing",
+      "sha256": "8f8c2bc11e42539032bc473d5ceaa51d77503c7df1dbe38f7dd647b044275356",
+      "split": "held-out"
     },
     {
-      "id": "sg-projects-001.claim.conflicting",
-      "sha256": "094ba5f31df329b40e76ac5d22f955a48f72328a8052c027480dc3406dbc9f37",
-      "split": "tuning"
+      "id": "sg-017-rel-base",
+      "sha256": "834500468a2c99b92bee0264e3857516b4e374dfc8540780846a1c4b95c500a0",
+      "split": "held-out"
     },
     {
-      "id": "sg-projects-001.claim.adversarial",
-      "sha256": "601056180c954ef62421a1ea51722d77defcf6be93012ff39d961b500abfe7d0",
-      "split": "tuning"
+      "id": "sg-017-rel-reverse",
+      "sha256": "42beddec9f524c9b75baa31ce57307b6a363e35e75cfcd33511ccb1a30dffa59",
+      "split": "held-out"
     },
     {
-      "id": "sg-projects-001.claim.irrelevant",
-      "sha256": "66a444182db5fd372b0d6f214a75bb045d614ada1625ec5a4823116993c1eff3",
-      "split": "tuning"
+      "id": "sg-017-claim-base",
+      "sha256": "802b8c9111acdef1e52e1ffb9c4f7615735c8b27c98670781caf435aa7599cc0",
+      "split": "held-out"
     },
     {
-      "id": "sg-projects-001.claim.number-trap",
-      "sha256": "252828f45b9187dcedc71af98c833f6268b23f411e9fe1cf9c84112083782c81",
-      "split": "tuning"
+      "id": "sg-017-claim-insufficient",
+      "sha256": "e97442e3a9aa5c51d62431f4f68cec9f441964f33cfc1cb92ccde8da74ed0cdd",
+      "split": "held-out"
     },
     {
-      "id": "sg-projects-001.entity-type.rename",
-      "sha256": "e7f6e5f113e899fe1926d6f62374e408391c44ff7715a009e5020c02e1a0935a",
-      "split": "tuning"
+      "id": "sg-017-entitytype-missing",
+      "sha256": "7cfaca849df9047dbe77d88730e05eb4afefcfc8c660d4c7f8cee077a063d835",
+      "split": "held-out"
     },
     {
-      "id": "sg-projects-001.relationship.reversed",
-      "sha256": "d2dfbda94cb3fc24be49b53d9e9cd0749aa760749c32e29c69fe4c693356cdfa",
-      "split": "tuning"
+      "id": "sg-017-entitytype-rename",
+      "sha256": "72d5c02381a70f6c8b254061aa373e0ddd97d74c182138975ad8e013b061e9c2",
+      "split": "held-out"
     },
     {
-      "id": "sg-projects-002.entity-type.base",
-      "sha256": "6f33f90a1c8f9ab801a5ac960be144b36ce240dee7d5dec67727b9e0a40e9e99",
+      "id": "sg-017-claim-adversarial",
+      "sha256": "009b48b230df32780529e7d2e6d03b79603b5f999b4cbc3aa7428a3c78cab495",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-002.relationship.base",
-      "sha256": "5b4832de698906a171646f716c4210970416941f634f3d088b7988d5d03ef359",
+      "id": "sg-017-claim-irrelevant",
+      "sha256": "fbac48037088c6e344ef41c9377143c2d36babc0f64ddaf91ae1c24046e9a56c",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-002.claim.base",
-      "sha256": "85e05a6d0f993a35369675b1fe04a9148826402125fb9cd681c6f83a526cbc16",
+      "id": "sg-017-claim-numbers",
+      "sha256": "777978020f24155c6b6c82e99836bde72d82f8769c96a4313e53240adc6d6b76",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-002.entity-type.missing-evidence",
-      "sha256": "3f0d95ae6531006058c45f3aae21d79ff930ce7039f950ee8899271228bbecbb",
+      "id": "sg-017-claim-noprec",
+      "sha256": "2a5036de72c9b822133c01bf940a11640df552ac4623af70f556a706581992b0",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-002.claim.conflicting",
-      "sha256": "cfe0d094c4e7720327d9bf71730f11743c60deb2d3fe00aad7c4332485f23397",
+      "id": "sg-017-rel-none",
+      "sha256": "6a18e49fb89b4621b0d2b80e254fd522fcabd444409bbea6f8d169a205313cd1",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-002.claim.adversarial",
-      "sha256": "efb3197e24652aeca4da7bc422b5d0a9585e8b73a46f4bd9fcb78132fd12cf2c",
+      "id": "sg-018-entitytype-base",
+      "sha256": "b036508149453f9cdd6b699b236c258686aa52f94818c0b77779ef7fc8b22b78",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-002.claim.irrelevant",
-      "sha256": "8d170b4bced82eecbcde81c487c4bef4149d0e3be8cf97d37b3ecf6a8ff01ec5",
+      "id": "sg-018-candidate-typing",
+      "sha256": "73d40be8bfb154341c8addf52c7029b5f24d811b7cacd9be321d5940a19429f2",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-002.claim.number-trap",
-      "sha256": "cf9010036735150b9014388ec7c2d14a775b4e7dc2107b7c3e79b601cf76cb29",
+      "id": "sg-018-rel-base",
+      "sha256": "e0d78058b43fa5c1d4bde762cdbe974f5590ceccf306f6eae970e095b0170450",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-002.entity-type.rename",
-      "sha256": "46ebf2c7c10c59cbc8d5246caa549bf456ae97454db10c0f3ea97eedee10246a",
+      "id": "sg-018-rel-reverse",
+      "sha256": "fc26e7d9f77477d3f81dfb1ea4f7fa4876948793981fa2a9eb748a682a43f918",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-002.relationship.reversed",
-      "sha256": "a1cdef8b7a3a21c7a559cdd9b173c48c08a0a13e03dd7925c9d1af3d2c30bc5c",
+      "id": "sg-018-claim-base",
+      "sha256": "f110ccaf63b255cee7d9fc78ca369e8be851af464a6787cbb25858aae9d8ac72",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-003.entity-type.base",
-      "sha256": "7680aaa33f05296d849632ade3d7f9f5a474de35e5b81a88831bd2cdbd664897",
+      "id": "sg-018-claim-insufficient",
+      "sha256": "ac2713053430121918d7c6c1b8a920dab039e09b8172d5a5720353cd5683d7c4",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-003.relationship.base",
-      "sha256": "0848e23190a1cd46edf3a0025d6d2b036e188e1dc2b6010a8ed4cb473113fb38",
+      "id": "sg-018-entitytype-missing",
+      "sha256": "f472b9ea5b2f5a63a0501610d2621b0f370de05e19b7098a5ec2e65ff96b162e",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-003.claim.base",
-      "sha256": "0b8042c22d922cf19e34a8f6329c98b3b3cca3b210779292bd6672b66dec250a",
+      "id": "sg-018-entitytype-rename",
+      "sha256": "b9292cddb5a2bba64269bcbc06017a0eabd5fa38c8aaaece2fcdd218f6990334",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-003.entity-type.missing-evidence",
-      "sha256": "2ed93cfed8910fe5609005b5551692ba0808b00c91681dc1d1284d0d8d89b473",
+      "id": "sg-018-claim-adversarial",
+      "sha256": "0c3e7eac050580cfd054fb36b8ca0bf21c4d2f6495c5fc5a813e314aad45512b",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-003.claim.conflicting",
-      "sha256": "421280570ef6acf4210b963b254a0fa7b4bc06f64bddd8a05a5fad20369bf124",
+      "id": "sg-018-claim-irrelevant",
+      "sha256": "e42a14086629727d1b5b14e4cb5162ad3706a32f5815385a704520f9c9a94253",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-003.claim.adversarial",
-      "sha256": "5b2c17adabd99f60bf85d3a54dfafd68d2cd121b531acdb31ee1c1438c91b919",
+      "id": "sg-018-claim-numbers",
+      "sha256": "fdb7ee3988f22d6bad3a89648af18c80c1f4e1306b7dfce3dbcd081062fa2b07",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-003.claim.irrelevant",
-      "sha256": "c438c738b683fd10a0b8f23614487344bd20cda46fd54b41d281d7db5f5baf49",
+      "id": "sg-018-claim-noprec",
+      "sha256": "0d7786bc39afaa590937f2b20b16bc04b74c3d6b839a782639fbfff8e6703e0d",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-003.claim.number-trap",
-      "sha256": "3dfdace261c018ba75488bd9a7219d02568c3e64772a593022a8d0db4ca5b22b",
+      "id": "sg-018-rel-none",
+      "sha256": "86b487e9d913580fa1ffbc774d684598050842ba8fa4b2be15c39deaa8e849cc",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-003.entity-type.rename",
-      "sha256": "cdaa93fe84e17f19c81286cbc6d7668da15883b1910770eb98be47df812650f2",
+      "id": "sg-019-entitytype-base",
+      "sha256": "b405c281ac68768871f157ddaecc851cff067ba5287a3b52d29cb2ff472f7993",
       "split": "held-out"
     },
     {
-      "id": "sg-projects-003.relationship.reversed",
-      "sha256": "cc59e93682d20f396fcf0f653bfca323b08293efc7f71fc83614235e9c4c0f46",
+      "id": "sg-019-candidate-typing",
+      "sha256": "187a177bc2a3f41bcb19faaeac2213c17b2f58a790df0999a0b108f960691269",
       "split": "held-out"
     },
     {
-      "id": "sg-places-001.entity-type.base",
-      "sha256": "1c8ab4819468a51aa98aa4bfd0f2a013e05aca78fa1a32846b0decd057ac4f0f",
-      "split": "tuning"
+      "id": "sg-019-rel-base",
+      "sha256": "1dc1af9c1cbc4a27834d448a2f710d3fc5d09652ebb0f525737d69309c3eb4e3",
+      "split": "held-out"
     },
     {
-      "id": "sg-places-001.relationship.base",
-      "sha256": "83eecab9efd02402f546807391a2939ba3df3e1000f0351954986725d42cdee6",
-      "split": "tuning"
+      "id": "sg-019-rel-reverse",
+      "sha256": "5c98152cb878b9c55404d3297d4dd38dff558984444667379027805786d5b84e",
+      "split": "held-out"
     },
     {
-      "id": "sg-places-001.claim.base",
-      "sha256": "a454a13b7f32f86de67efab2019df12815a1a53c2108149b30188881cc1d59d7",
-      "split": "tuning"
+      "id": "sg-019-claim-base",
+      "sha256": "522b185728f0f97865d6dda2c35ef2aebafb682b9ffa53fbed658d4b95592c4d",
+      "split": "held-out"
     },
     {
-      "id": "sg-places-001.entity-type.missing-evidence",
-      "sha256": "320418a9cfbea3d6e89a2fe3574f65f5bd3a5cb2b80571358a88529ceb312684",
-      "split": "tuning"
+      "id": "sg-019-claim-insufficient",
+      "sha256": "8102e192d5ca5ccd452fbc26888ab135c4a5bea94a61ee9eb33dc971794168e8",
+      "split": "held-out"
     },
     {
-      "id": "sg-places-001.claim.conflicting",
-      "sha256": "4911e1ca552d032380f612735cb34d9d853f3ccb0fc0b460542cb6e3a848f404",
-      "split": "tuning"
+      "id": "sg-019-entitytype-missing",
+      "sha256": "d8eb06492d83154c2880aac1a516d12f76b42ea23637fbd79b79ae38a78fb405",
+      "split": "held-out"
     },
     {
-      "id": "sg-places-001.claim.adversarial",
-      "sha256": "b7389d267280c790990a717ab7e68992729605132dcb27eaeead85002f684c8b",
-      "split": "tuning"
+      "id": "sg-019-entitytype-rename",
+      "sha256": "5bb16284b68bf1dcbc2b82020fe52f2d4e74396d3eb4702db330606450fd249f",
+      "split": "held-out"
     },
     {
-      "id": "sg-places-001.claim.irrelevant",
-      "sha256": "f94f58586ce96854b11ee4813aae234c92e5580d47a4204cb43465eed626fc11",
-      "split": "tuning"
+      "id": "sg-019-claim-adversarial",
+      "sha256": "bd613afbcf894cf0eb731234efe386be8542c2c2eecbdd8702a4c429a58a2e3d",
+      "split": "held-out"
     },
     {
-      "id": "sg-places-001.claim.number-trap",
-      "sha256": "b3732b2f6a15cf2fea0509b6374833a5596d45396306b76c2cb0f08530bab2fb",
-      "split": "tuning"
+      "id": "sg-019-claim-irrelevant",
+      "sha256": "3ef073b8fc91c9a0ca3acf092d8beed627fb2d8237c5ee0a1f52a8646f829049",
+      "split": "held-out"
     },
     {
-      "id": "sg-places-001.entity-type.rename",
-      "sha256": "fd1ac743d5ea4f57068f0d4f12842bb616585817a2c615632b03714005453a1b",
-      "split": "tuning"
+      "id": "sg-019-claim-numbers",
+      "sha256": "a7cc76d84125db9d3dc8cc643b2bafddcfee0994ee4198d3540ff3966456305b",
+      "split": "held-out"
     },
     {
-      "id": "sg-places-001.relationship.reversed",
-      "sha256": "2a76c4e1d236751236f83918ab8b0bd78c872d7834fda9de53d5a8d238147e6b",
-      "split": "tuning"
+      "id": "sg-019-claim-noprec",
+      "sha256": "70777ad1940b66deaa0eb9c3b37f258b8223df1411a5d704ec8bd8f92bc73b1c",
+      "split": "held-out"
     },
     {
-      "id": "sg-places-002.entity-type.base",
-      "sha256": "c5b2b01205a9a85b932554f5d4a0da8b2786c25ec0fdc905b10a9529baabcc86",
+      "id": "sg-019-rel-none",
+      "sha256": "a9d6b5da7ab1fdeaa1b5e4da3477edd413fb9f563413ec8106a428b6b07b924b",
       "split": "held-out"
     },
     {
-      "id": "sg-places-002.relationship.base",
-      "sha256": "5ea9ad13a1612d29feb80f95a1feb13160bb458381694fd5b5a042f3a95a75a7",
+      "id": "sg-020-entitytype-base",
+      "sha256": "c3afda5dc4f7b060f9a94a2f824c85b8f1380cf131c65e372e36f2e71816ff22",
       "split": "held-out"
     },
     {
-      "id": "sg-places-002.claim.base",
-      "sha256": "a6eb1e5ae89c2719f8d3162fcf3d958438f89a5849bfe18e4004bbc1a71701c4",
+      "id": "sg-020-candidate-typing",
+      "sha256": "c9f83f73b7e8a99e8c1f39eae0a99a585adb1a69986c2efaea1211c222962516",
       "split": "held-out"
     },
     {
-      "id": "sg-places-002.entity-type.missing-evidence",
-      "sha256": "aa425f68da206d309eda717487977078877c95cb669f5fce2150050e0081da91",
+      "id": "sg-020-rel-base",
+      "sha256": "90144d1a5342608593281c88989ad191238f2462e8e869408f15740117c9a9eb",
       "split": "held-out"
     },
     {
-      "id": "sg-places-002.claim.conflicting",
-      "sha256": "fcb82f2383c1ad69b3d57fb1cf3ea75a7f367bb0bb4db5fa7faf9f36bd6ea099",
+      "id": "sg-020-rel-reverse",
+      "sha256": "2577f165f31fd5166db91990bcc9d90037d3d8307d2e45cb00f3cbadfeb7fbb8",
       "split": "held-out"
     },
     {
-      "id": "sg-places-002.claim.adversarial",
-      "sha256": "765476ee47ce033f47779515f8cb900bbdf7dbb015b7ccb620b151a74857b76b",
+      "id": "sg-020-claim-base",
+      "sha256": "507277855d6ab043e388e37de2292cd343f10fd734c82eee2e9cc5144ae4ae08",
       "split": "held-out"
     },
     {
-      "id": "sg-places-002.claim.irrelevant",
-      "sha256": "80b9bcc4e0ea4b4e8aebe4ce0e261bc02178073dcd45f29c1aa2f8f2649fa25a",
+      "id": "sg-020-claim-insufficient",
+      "sha256": "b882007f1d8551e24d68470ca7a39925569280e909eadd4cebfd871b34d6c479",
       "split": "held-out"
     },
     {
-      "id": "sg-places-002.claim.number-trap",
-      "sha256": "003fbce0a13cc2433dcda13e3d236ff569191cf969a20bc9c6e37728995e123f",
+      "id": "sg-020-entitytype-missing",
+      "sha256": "ea27f43fe139798ab85bf5768e66c35147eb8196e39632fffe57af250af50266",
       "split": "held-out"
     },
     {
-      "id": "sg-places-002.entity-type.rename",
-      "sha256": "692fdd356e231baf9a1c6c8e353b7e82317f225992877f6478f91ff1c458ac8b",
+      "id": "sg-020-entitytype-rename",
+      "sha256": "f2a7a91c866aa85c58cc8a4f7ea4face8afac9a31793ab13a0abcc008c3f9edb",
       "split": "held-out"
     },
     {
-      "id": "sg-places-002.relationship.reversed",
-      "sha256": "8784fe149cbbde5899a7951c242f6dd2cda3bd47b2298c6305275a006ceb7f3f",
+      "id": "sg-020-claim-adversarial",
+      "sha256": "86daec61e38de0aa6b2e5ed8cbec3b9aee15d91b8c43db509a5f3474c645ef93",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-004.entity-type.base",
-      "sha256": "6f62d726f5ca70394780a6951ecfef1c0bca1179ef74fb9713b902af1072afa8",
+      "id": "sg-020-claim-irrelevant",
+      "sha256": "eea28df9206ad31d7ab675ee33a4b3add4f53d0d418e3c45e672923cccee8255",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-004.relationship.base",
-      "sha256": "9d48e0bb08b6c14a1109137a680ab26887f37e8ed02cd408fb9ba2f2d1379790",
+      "id": "sg-020-claim-numbers",
+      "sha256": "45104f5235fd1932b7eb0dc785efe7361acd04d49a16a1003b489da93ee7d5a3",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-004.claim.base",
-      "sha256": "a3fb08bc59dcf6aa60f69ce7cf48605feb02e6381412ca45fa9a08ce6b8121f4",
+      "id": "sg-020-claim-noprec",
+      "sha256": "f1bfcc993f1decf6b55e19aaedbc4b0a9a41f144429e5b23d709e9249a029f5c",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-004.entity-type.missing-evidence",
-      "sha256": "8447cf2bda56c1b29c76bd709afc60c46ee741c5b34502d9352626b47a1040be",
+      "id": "sg-020-rel-none",
+      "sha256": "52093e7c3675b923047912e4dcfad6bc4a6b8ce301ea0d71e6f9cc3c4a5ed004",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-004.claim.conflicting",
-      "sha256": "53e6ab043e6803970d6d756b0c20b15ceea0a9c35cf8bb4803047906ec9c4b32",
+      "id": "sg-021-entitytype-base",
+      "sha256": "a160fcc40f6860298b75ea769619f97bf2ffc6a329a09f4a3c479f9585999c5b",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-004.claim.adversarial",
-      "sha256": "9a83386bc6e76922c5378f9b19c6451bcf0fa4853eeff8a4642719b6d632511c",
+      "id": "sg-021-candidate-typing",
+      "sha256": "556d2fc43819cd0212ae6d5b8a2e2af219ada066f77ebfdb25d3c67bc5584106",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-004.claim.irrelevant",
-      "sha256": "2518c2f8d73c2a1b040842de4f3ef4e50be7913bae2ac23f9e72ca0528d092bc",
+      "id": "sg-021-rel-base",
+      "sha256": "8583bc0011b3404770edffd2f04b61ff8428a6ba087163fac9bffdb731b0b4b5",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-004.claim.number-trap",
-      "sha256": "fdb86bbd86554f536f05839e89636b659e227743ec733e75c67cc9ee8cbb037a",
+      "id": "sg-021-rel-reverse",
+      "sha256": "3045746a484a405c350f2b73b3d199dec14ee93378e5910a2c2bcb5ebcd6fb44",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-004.entity-type.rename",
-      "sha256": "f2b92bd2645c6aaff04751062b3713f4d5e3e22616586b02820de07d8916f58d",
+      "id": "sg-021-claim-base",
+      "sha256": "dffbbcf3d1761a4b9291b82dd4dd89d8489270e345ce531f55b489e018986603",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-004.relationship.reversed",
-      "sha256": "e1074113c6369dd56a99dd456232a78e6e49492a78b51b4482c7ecc443206161",
+      "id": "sg-021-claim-insufficient",
+      "sha256": "c66865e20354393f6572a72a1755ba7c2ba46efcc13d408af19b76e411bdf596",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-005.entity-type.base",
-      "sha256": "e7bb80929fff11b1af3ddb781d2abe13b06a17df654bfde3ec8921d3fec37e35",
+      "id": "sg-021-entitytype-missing",
+      "sha256": "121fddcdb32786fe590418b25a3467f1cbdd31996299f257b3b45cf592ece04c",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-005.relationship.base",
-      "sha256": "da7deb94db578f71063e4c0cf3c48c8ac782e7c28405c6c333eab2dfae44e50d",
+      "id": "sg-021-entitytype-rename",
+      "sha256": "068a344188892f9de1aa2871253d9a0cb09d01ea52134b9e5cd6dba813aea2d9",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-005.claim.base",
-      "sha256": "299c0e2a906069d6a08f630b61d56db378a005671f68d84832e2567bc2fa4e3e",
+      "id": "sg-021-claim-adversarial",
+      "sha256": "c67633ab1e37e4ae5ce13fce99bfaa7917a9f1f5c5acd1de5e3f18c345b512b8",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-005.entity-type.missing-evidence",
-      "sha256": "276a8069452f8810d5c4175bbe0eb26f325b86e79ab3d3885838516e81cf8111",
+      "id": "sg-021-claim-irrelevant",
+      "sha256": "5a877dbce3f45e7f988534be448d77d5d47a442e4a4a719c24d74830583c8819",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-005.claim.conflicting",
-      "sha256": "99d95e0e6efa49404a0059310a5d3bf24d939d2b22193a13328ab9fe79a49d9e",
+      "id": "sg-021-claim-numbers",
+      "sha256": "fe8691ef8e986ad17ef8eae0e26d517de06248797b9199851de4b0bf5184044e",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-005.claim.adversarial",
-      "sha256": "fcfede0b4aaa0e8e194c56415f0f52c4dc99dff8a8386c2c094dc441b3f69817",
+      "id": "sg-021-claim-noprec",
+      "sha256": "44e95a88c0d0d17e13a537da84d4c27f06074dccee921bcbbb34020e5fc9f428",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-005.claim.irrelevant",
-      "sha256": "58a00bb172e11aaebd7e0a04ff8e467fe5f62c6869c1c23659ef145960ddd144",
+      "id": "sg-021-rel-none",
+      "sha256": "0b501d9c73cb9cb90645c0b68b9f6d14d29b991ce2faab33463ff7de87045af3",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-005.claim.number-trap",
-      "sha256": "e81bd36da0c81d9922b108b6890b5b592fb331d1d69b1ee659c838c29ec86b1f",
+      "id": "sg-022-entitytype-base",
+      "sha256": "d967b1e818a49b5c8a25a96854fda20658c7199c3917839a9b8076dfd9fb1c92",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-005.entity-type.rename",
-      "sha256": "e00c2fff1835caf8c810c5426b5df80c975496cba3fd8f3684e1781d8883b7e3",
+      "id": "sg-022-candidate-typing",
+      "sha256": "799b13c9d9e00e9df069a0afd58dd8113f75661b316e4e0204356fd4ac0cf237",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-005.relationship.reversed",
-      "sha256": "09a838152b99d61d2310d7649c2e88ed63728bf27a956024c896446f8701fc34",
+      "id": "sg-022-rel-base",
+      "sha256": "4cfa87b45327ce0be8077074001af54b166c6a6c31731c67e85b5944fa56a4eb",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-006.entity-type.base",
-      "sha256": "367bc4302202481ebcc9575e335cdaa1987da42acd76a46a1aeb4d9415db2ec1",
+      "id": "sg-022-rel-reverse",
+      "sha256": "5a9768184c26545e67f06c6c83a5b4749a13df1b552cf96d681f83cffeab64e8",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-006.relationship.base",
-      "sha256": "0b5e8fd6835483324d5ce0c1b042c6ad2805c0fdd5232f303ae07ff2134411d9",
+      "id": "sg-022-claim-base",
+      "sha256": "72e6830270c1061105ad45639ba21a327910f94cbf0472ebb76759a73d61f9c0",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-006.claim.base",
-      "sha256": "7332d548141cac46b344b5315d7beb58e2fb68001771746200d5da188fb9ad4e",
+      "id": "sg-022-claim-insufficient",
+      "sha256": "b5358ae4a5b33599712744110be7dad6f879b741fd6fe81e8b54ee8dd2be037d",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-006.entity-type.missing-evidence",
-      "sha256": "5cd57001a12474e795eacc031d774c7968071baf2a90cd77c72d35e50ee1092b",
+      "id": "sg-022-entitytype-missing",
+      "sha256": "2a629049da8e4635e15a246de9376ee3d88a8c9fd1a1db34ac5857ae714c5999",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-006.claim.conflicting",
-      "sha256": "116086fbe25ddb0af1543ebe428ff34b64597ca683ee920ea7b9dc050835e618",
+      "id": "sg-022-entitytype-rename",
+      "sha256": "14e0ff5ac699b057eb898ee19603d8f7dc42c3e3c6f038a1724e70959c991721",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-006.claim.adversarial",
-      "sha256": "8504ffa5f0e12daeefda83612f97dab8e0c12ee8e9a9ed12be3f548f07464bb3",
+      "id": "sg-022-claim-adversarial",
+      "sha256": "ab11abbcb24521e3f9fb921b282b6476cf3dd70b35457ab7e09a5ed2e4a118e4",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-006.claim.irrelevant",
-      "sha256": "531bcf8e68fba63546fb619c8e7ece2d668194645649d9b46266e2a8a92b3ac9",
+      "id": "sg-022-claim-irrelevant",
+      "sha256": "2fede36bc8cd848795f0b07f59b3dc9e0c5d8e02ef65d8a9f67f90c51cdf7212",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-006.claim.number-trap",
-      "sha256": "99ffdb325034aa8eadc0d3e20eae3aa1d14a06bae060bce03e878d07064fdc06",
+      "id": "sg-022-claim-numbers",
+      "sha256": "7228c6e0202e86052a04747b8b90c38a99812b92e2fbe7dd9eceac581dfbf3e4",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-006.entity-type.rename",
-      "sha256": "f385d0f82c56fc7408cd7c9085126c3f83e263709b4ca1093fc70fe5bc542fe6",
+      "id": "sg-022-claim-noprec",
+      "sha256": "fb5a8f0648e327753542014c9de28d2d6d860f98282f5369670946d2bfc8a860",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-006.relationship.reversed",
-      "sha256": "27196587aea44d2e84036045278fff791270b4c14dbe183362dd9f68c62f7af1",
+      "id": "sg-022-rel-none",
+      "sha256": "78c2e9ecc882b9b79fdc4b159fc02844a95e8d27fdc2f3db5e5f36f705f2866b",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-007.entity-type.base",
-      "sha256": "45b7bc8fbc33cd484c044164599490cd74a24a81b982004f2624878faabc8050",
+      "id": "sg-023-entitytype-base",
+      "sha256": "ef79b932206a6f80ecf66297bceca81c4f210570299ac91a7fc015ad1afb4417",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-007.relationship.base",
-      "sha256": "3fca215262855fcce0c97277350135bce7eb2985e48b18f886c4cb228f951654",
+      "id": "sg-023-candidate-typing",
+      "sha256": "5b63c3cdefcf2ea2a0aefd6879a2944429ae8de5d6344efa57bf2448d8e6844e",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-007.claim.base",
-      "sha256": "76dd9b699e82abc4fd1390b30d68407f666ac130d2540a4a720ae918e90908a7",
+      "id": "sg-023-rel-base",
+      "sha256": "75b22d14a53a85ded97a675341a4fe4756f4da2da1b39578938aed02e3a20c7f",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-007.entity-type.missing-evidence",
-      "sha256": "6dac66adada28630094e60735a45fafc2392228eabe5f4f399b9d9a7ae362c81",
+      "id": "sg-023-rel-reverse",
+      "sha256": "dd7b4d98a31b29d99fafd0bfba6fe73c091ca1ab8ccd9e5546521dbac79ab62e",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-007.claim.conflicting",
-      "sha256": "b7515630cf4609a35c9b56305d67b550d448a1a3982bff57110e97b158c2a9fe",
+      "id": "sg-023-claim-base",
+      "sha256": "1eff5326fc4490b2af91c7cae2c473332bf5e779a418d307894ae0af9a4bca1a",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-007.claim.adversarial",
-      "sha256": "ca9f7b6d42e44c4f5bbf2ae6abfe5e3f4c1e3eb3da102ed3d8b72cf1c12c9c9b",
+      "id": "sg-023-claim-insufficient",
+      "sha256": "41b4130f312280b6fcfd3fd53036f224fa38a92a8db4c8e5c84d44d3576ac800",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-007.claim.irrelevant",
-      "sha256": "14752c134b2934b47733e21b4899904a7d1a918adfe4e06c21677314463fc6c8",
+      "id": "sg-023-entitytype-missing",
+      "sha256": "76df714c8d04dbbe249770595328e1f1df2d1741026f02733fd9b901a0383447",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-007.claim.number-trap",
-      "sha256": "8601dcc2c696f82a65744a1fc01fd90e71a2a7e6cf92e60b8090f30eae5cc8c0",
+      "id": "sg-023-entitytype-rename",
+      "sha256": "9f2370bffd373cbb5211d4b48f2ca51ece125f880f2f85c30e32f1d606c56c72",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-007.entity-type.rename",
-      "sha256": "a2effac47c1d2c47f3ac7e884963ce78fb362f5ff6559da1c94853b2673fe4f4",
+      "id": "sg-023-claim-adversarial",
+      "sha256": "2821d9630e656282be5c4d8a58b1ecae5353ca08526fecfad36e06f2a54ab807",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-007.relationship.reversed",
-      "sha256": "9dc3ae2c2b074ef90540e77ece289ec7ff149360977682afc7e87f558e821a7e",
+      "id": "sg-023-claim-irrelevant",
+      "sha256": "ca0fcc4927e10ca033032460ac8f09db932c7020a7f27c33a3f71db79147a8c0",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-008.entity-type.base",
-      "sha256": "a6e07dce8eb3f1a6d7865c01c4166d4d67dfd5f3466e0a06105d9b3a16963c9d",
+      "id": "sg-023-claim-numbers",
+      "sha256": "2fff4c1c60bffc50638117a2b8183300bf213be1b48b2d7fcb4b6fda20218fe9",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-008.relationship.base",
-      "sha256": "96cf9f9877ee8bd1a11ed233ffd5b4f87cfce714cc1ca432ac4046fe7cf933a3",
+      "id": "sg-023-claim-noprec",
+      "sha256": "e4c511b5be806d736bc4c09e9cdfc71ddb99f60040ffef8d5b4e96b63a55c171",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-008.claim.base",
-      "sha256": "c4390485bf19e0633c1e70859e089959fed21066d812d01b68c7b63ca24e8514",
+      "id": "sg-023-rel-none",
+      "sha256": "ad2b90c637e6422babbd2e1d2f7dee27857bb3fd954f1d99617984b2b8ec7bcd",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-008.entity-type.missing-evidence",
-      "sha256": "dcb45e59d865beee0857a4ac349d518827a23c3f1966b9a7bc9d127186ec4512",
+      "id": "sg-024-entitytype-base",
+      "sha256": "9721b1610581aadc88de2997487e22e116a077de97b2f357d4cf238b78bba193",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-008.claim.conflicting",
-      "sha256": "1d2d1ae40ba42ff2c3cbaaf37dd462ed881ad344d40ec8c22745d6cec5cee6f1",
+      "id": "sg-024-candidate-typing",
+      "sha256": "484135b48c039e2806b60312c3cec1132e5bcff280988357739dc5be94fdac1d",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-008.claim.adversarial",
-      "sha256": "90267876ca17ecb923bb5cfc5ffc67feae92d18b9679aacd901a7efcd43301a5",
+      "id": "sg-024-rel-base",
+      "sha256": "56d2e6dc41dd9ce3575f0381f08a2d03e6182f24d42be51567c9348dde0fb4fa",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-008.claim.irrelevant",
-      "sha256": "38e8dd8c1245a00191acbe4a9393e2462350398144d3eea5d63cec5c627d3af1",
+      "id": "sg-024-rel-reverse",
+      "sha256": "147ac4272d4c81ebafaf3fce4e4a4cf0f58d9bb970c42dd3aadc85babb055840",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-008.claim.number-trap",
-      "sha256": "9b50be3d2de3e5be85445468c9282ff5993ed322c2620c14a7bc7e43c5f95460",
+      "id": "sg-024-claim-base",
+      "sha256": "8f303bea38a43506ab4595c2b4f996ee64ae331697eae260080364a3df173303",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-008.entity-type.rename",
-      "sha256": "a5ec37b5327e1a5408ed4d0dc77a5d3f8a606fc856a4891129e81a5325cc5eb4",
+      "id": "sg-024-claim-insufficient",
+      "sha256": "e02eaf44bad5e6f9a56ce3e19c1de3bf3a4b808f310eea18454276aad693458e",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-008.relationship.reversed",
-      "sha256": "fe262fb99f91db800818a0c38c536342985654aaf7ae586c5fab33664ae20582",
+      "id": "sg-024-entitytype-missing",
+      "sha256": "059126adf1ad0c46100e32c317a13b54a2dcf9415e0ed8d58e5c99f07dec5824",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-009.entity-type.base",
-      "sha256": "d99d9b25c2058a3b56d334de1b66149255084f3cb69306311a4bf35dafb68673",
+      "id": "sg-024-entitytype-rename",
+      "sha256": "63eef293dbf2c9cf63c337232728f2c8d77da6b97425c9b97b7ea4481aed1c99",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-009.relationship.base",
-      "sha256": "c1df56b8cc086ff9fbea5aa91490b57860d5461e0e140bc68bcad4b61d47d054",
+      "id": "sg-024-claim-adversarial",
+      "sha256": "21b79eff62f3d62d346da33916197ea2ff3dc6763a9aacd7be7f343902766776",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-009.claim.base",
-      "sha256": "0e04a154621c961d9396c4c9af13177a9830537e04ca2f8eef06b75eb4415373",
+      "id": "sg-024-claim-irrelevant",
+      "sha256": "5cef82df115b5eec45a8c29d1ed7f7c20c6100aa1da9985491108f1d87b09a1c",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-009.entity-type.missing-evidence",
-      "sha256": "11a76277689c37a402695f6067ab9474ab8a6ef992bc3d54b43ab915947e65c6",
+      "id": "sg-024-claim-numbers",
+      "sha256": "5753c5b1db3ba93abbb4f2890f70da42b2169a564f5e45257aebccccd244c892",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-009.claim.conflicting",
-      "sha256": "d17ba7e177df3a1fdb8ee9942e52dca093de7f089a9a410a1fafcab45678ac3e",
+      "id": "sg-024-claim-noprec",
+      "sha256": "70b415a63e962c5bc5b70d780429ff2b6d6824b94e7a66e8e81b5e4d0b304c0f",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-009.claim.adversarial",
-      "sha256": "3eab58a805f94ed666830520e257faaa692a48cafe5c7452df7cb2510dd0743d",
+      "id": "sg-024-rel-none",
+      "sha256": "94b0758b9d824e6a7567ac7ec7e75ab57a19a79ce5c72fad5c801b722013e2d7",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-009.claim.irrelevant",
-      "sha256": "c26419232f8bf88bf607096629c8d71a33b9dff00201c94c4de893999d2c7c7e",
+      "id": "sg-025-entitytype-base",
+      "sha256": "2897475cf7acc5e566c3942c433a8944243c6f2014155edde9f307a76e711fbc",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-009.claim.number-trap",
-      "sha256": "f39cb8add712117ba256f835219da8aa3c2199e31f4d2c82b5f0f7456d60b1d6",
+      "id": "sg-025-candidate-typing",
+      "sha256": "7f6154453d67af2eb01142029460ab0151cc797586cf353ff91365945925d053",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-009.entity-type.rename",
-      "sha256": "633b6d94dbdd8d401a1bf47ef7912ded07fc7a049bef02b23e92efb9ac87a34b",
+      "id": "sg-025-rel-base",
+      "sha256": "4f450200162c9765bfad43fb09112c6decd89672d9ceb3858c31e4e263de660c",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-009.relationship.reversed",
-      "sha256": "b038c17b515bfea124839112d7a5b2a59f70495ab8dee5878b3112936dbcc5b3",
+      "id": "sg-025-rel-reverse",
+      "sha256": "b1b4047570eae5a1a0a20d018318871806561f79b4bcf2731808dfcdcc8b3fd2",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-010.entity-type.base",
-      "sha256": "c1313a755a43a9a0dabc2939b9c4fed01c86f5352fc5bcba98d0bbc82ec7d771",
+      "id": "sg-025-claim-base",
+      "sha256": "fc3380ec6f7888986b50a242164c1bb4b426bc52c00da617e711e9dd201b38f3",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-010.relationship.base",
-      "sha256": "d326be2ec94f8c4e50235e0eedcc2d87bdcfef2a583749b77efbc59d8ef2c2c0",
+      "id": "sg-025-claim-insufficient",
+      "sha256": "c00614f27a259bcbd9628e147db800cab3c81c9a89010cdfc464603024fc447a",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-010.claim.base",
-      "sha256": "02a95913a229f02f50d09dab7632652a1e07fbd275e460ed3bd8e55542f88558",
+      "id": "sg-025-entitytype-missing",
+      "sha256": "50dfe11e07a72d4d02c19c40d434e21e1d3e1bf7dee0e9391249bcd1583c34ef",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-010.entity-type.missing-evidence",
-      "sha256": "e1132a31e8ed8809617d687bbc238cac4931e87a02a27746075b20a90728e979",
+      "id": "sg-025-entitytype-rename",
+      "sha256": "77b715c5c08d73bd91b6dc1c9ff41c2c8c07880bb59733db4cca34a2c2982d62",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-010.claim.conflicting",
-      "sha256": "a701ee415991b911684924a0e5241c2062018bca594cbbdee4fe93d412491b6c",
+      "id": "sg-025-claim-adversarial",
+      "sha256": "3a8926c3f64bd6b1b80ed8ec762b89430cc91162b098448c977c1d3e8b3bc413",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-010.claim.adversarial",
-      "sha256": "49aeaccd180ad8257e7d5b88b042ba92cb8d762aebb161b36e65b4639f40e957",
+      "id": "sg-025-claim-irrelevant",
+      "sha256": "c80d88570981741cd5407ea87a51ee16f543425f66c2fc62afca5a92d00f5b59",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-010.claim.irrelevant",
-      "sha256": "4f9c33c6331a68881193fbc410919558e19e8184d19fd902fbba367fdb505ee3",
+      "id": "sg-025-claim-numbers",
+      "sha256": "57b427152bd6164b99b818796cb34b4b9f8d74bdb82ce71288bf96339a492ec9",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-010.claim.number-trap",
-      "sha256": "a88a63c55e8617f7cfd26ba2c12d2ff1268204b95086a48263e0cb14f5df3a8d",
+      "id": "sg-025-claim-noprec",
+      "sha256": "2b02b4093d645406c3e53bc1f57cead42cd959f8339e541f649387f2a14034ce",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-010.entity-type.rename",
-      "sha256": "fbbb6bf52ebb7f7cd29da207be1abb188d8d64ece106c81b473d361b1b42d686",
+      "id": "sg-025-rel-none",
+      "sha256": "f7e7322c35dde1d4d66d51fcccf3f447a4451c1790c8ded5210655c04147a22b",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-010.relationship.reversed",
-      "sha256": "dad9c199b3d87eed0a6a711e3117adcfcce131b0dd8b5bbf65ff4407de467485",
+      "id": "sg-026-entitytype-base",
+      "sha256": "45267a71228b4ec39181e78e3f0e045ef0d332e572fa3312a2e88f5b51f7ec33",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-001.entity-type.base",
-      "sha256": "6bae7cf624b0839baab5fe259e4ec89fcc44781361d0666189f6eb4d789dc082",
-      "split": "tuning"
+      "id": "sg-026-candidate-typing",
+      "sha256": "59f75b6d47d3e6fafb1a62429a7837fa4d9fd49ddf37c59ac718db591105d81a",
+      "split": "held-out"
     },
     {
-      "id": "sg-concepts-001.relationship.base",
-      "sha256": "1dc0b669aaf1db320e8786578b95c9bcd654a8fe9e40f0d3579aff2d0c1cb15b",
-      "split": "tuning"
+      "id": "sg-026-rel-base",
+      "sha256": "ee676f098ca11cfcc381453993237e17d8bb3135e501d46fe62ba21d33f1abea",
+      "split": "held-out"
     },
     {
-      "id": "sg-concepts-001.claim.base",
-      "sha256": "3a012c5d93902d210b68f47a891269cdd1c01857da1bdf07e4ad5e79008d8e1a",
-      "split": "tuning"
+      "id": "sg-026-rel-reverse",
+      "sha256": "0f4bfab81fdf9210a55859cce1602bcb17d3361f90b1820f443cc4549c453a5b",
+      "split": "held-out"
     },
     {
-      "id": "sg-concepts-001.entity-type.missing-evidence",
-      "sha256": "0fcbc471cf20cb5f46ac9aa64bed032c1e3f0c56e7ae647d31efe503fcf290c4",
-      "split": "tuning"
+      "id": "sg-026-claim-base",
+      "sha256": "29a60b970398d041dc34b46499358bf63ec8ad4308cf90de332c91ab92a78006",
+      "split": "held-out"
     },
     {
-      "id": "sg-concepts-001.claim.conflicting",
-      "sha256": "faf13891639448a85b52e48ce3e0dbd77a47963cff3ebe8fddc8e43adb9aa164",
-      "split": "tuning"
+      "id": "sg-026-claim-insufficient",
+      "sha256": "3ae8b43ecd798cc486e51e609634ba040882c05bec7b7e5eec84d9110551dbf3",
+      "split": "held-out"
     },
     {
-      "id": "sg-concepts-001.claim.adversarial",
-      "sha256": "4863a972150da44a61a44cb0057425f991a3017842eb7d259e661db41d1b4ae9",
-      "split": "tuning"
+      "id": "sg-026-entitytype-missing",
+      "sha256": "5fe6ede6ca0147b4e0d22cf4a0b85a7adaf278305f994fc171e0a342f6de9b1d",
+      "split": "held-out"
     },
     {
-      "id": "sg-concepts-001.claim.irrelevant",
-      "sha256": "52d3a7798237b8051555186c8863f551798cf59668b41349fc4da262a2f11ca7",
-      "split": "tuning"
+      "id": "sg-026-entitytype-rename",
+      "sha256": "dca4028af1aea2bd72dc43a34caf3713c78951083c012e716067e9a76583595d",
+      "split": "held-out"
     },
     {
-      "id": "sg-concepts-001.claim.number-trap",
-      "sha256": "e9a03b4f6350add7d9c25fc2846e2af53490555810533e75db4b38f063987e6e",
-      "split": "tuning"
+      "id": "sg-026-claim-adversarial",
+      "sha256": "a6c0e2126cbd171c6ceb518e9c0debd170c7c3b2f64b77372c76454061d6b478",
+      "split": "held-out"
     },
     {
-      "id": "sg-concepts-001.entity-type.rename",
-      "sha256": "adc5a8399142ba2548889fbf831bb512924825a4583ed54a390536fe3ebe0b1f",
-      "split": "tuning"
+      "id": "sg-026-claim-irrelevant",
+      "sha256": "68441765eb8ed4fb4e6d6dc3c4c6beb6c6cc87556ba66339d1ba0ccb49b1a1f4",
+      "split": "held-out"
+    },
+    {
+      "id": "sg-026-claim-numbers",
+      "sha256": "c605bac57e0215317076c1d65ec9c5365151c26c482b8b731d6f9f614a2fecbd",
+      "split": "held-out"
+    },
+    {
+      "id": "sg-026-claim-noprec",
+      "sha256": "59452ebd9a9c6a9b4840e5439f91268dbfe87a40165a975c9f44e2df40c69b55",
+      "split": "held-out"
+    },
+    {
+      "id": "sg-026-rel-none",
+      "sha256": "21600e8fba4bb28a02941bee5b4ae2e3a163f6cf8f82a4b64aeaf5e8e817a69d",
+      "split": "held-out"
+    },
+    {
+      "id": "sg-027-entitytype-base",
+      "sha256": "25fb96125c19204ee94e2ac7f2f1dc573edb92e4486b74132ff69416c4759544",
+      "split": "held-out"
     },
     {
-      "id": "sg-concepts-002.entity-type.base",
-      "sha256": "36255a8d2f7a6049f9184917f6922e6c6fddf0af5dfa7aba94fc4438bb74d9ad",
+      "id": "sg-027-candidate-typing",
+      "sha256": "2985296c748728452a22cef561bf428a654d98677e823fd8081523740d92eaf9",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-002.relationship.base",
-      "sha256": "89c42d19648ecfeebdf2551865aefd54290750ea173cb54f82be61f053472b96",
+      "id": "sg-027-rel-base",
+      "sha256": "a8ef2614ef386f7da151239ad67b9eb91fbc0c158ad761339cf78b1a4a88ba27",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-002.claim.base",
-      "sha256": "3bdd5b126279463b2033327e0a524c59939c50962fd1cfc8e9a4fd28b600abc6",
+      "id": "sg-027-rel-reverse",
+      "sha256": "35e14f30b486a1eeeb872dc4da8393e8d9069204e7b71786df08248a847e2e72",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-002.entity-type.missing-evidence",
-      "sha256": "db25b0b1e1ed3be7d01df5f40ea6b4ec2b1d053ffeda9690a14a03766467f27e",
+      "id": "sg-027-claim-base",
+      "sha256": "0988f3fa9e9defa83e31b814dfd8435e73bce5283e4d29e489ad8d7c882108e7",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-002.claim.conflicting",
-      "sha256": "0d21658554806440d4ac54986334d4ed7bc5b05afe9bc4ad0c339a64e6d2cfc4",
+      "id": "sg-027-claim-insufficient",
+      "sha256": "80244b369eaf1e8ec9af53f20d5aa207e694e27b02924c92e416a2a7baca1095",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-002.claim.adversarial",
-      "sha256": "9ea202011f96275acf4afce7d39cfc50fcecbd253e4c772e9d9a756982864090",
+      "id": "sg-027-entitytype-missing",
+      "sha256": "4a756d9afcb2f3ad6af392c2f3e2117ddd297f3fd8ae840b29e1d88efb863773",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-002.claim.irrelevant",
-      "sha256": "dd332d2fcd060ad7fb99d8cbf3d002dc3f4390c6d0881e85b5078f89e74b8f71",
+      "id": "sg-027-entitytype-rename",
+      "sha256": "2060bdd2a514fd880adb0ec28e10df47a198a90d25d2b9fedc9f4c8e4ea7e35d",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-002.claim.number-trap",
-      "sha256": "bd93d4f692cdf256f5fcadf28076d809e3fd4547665c964cc69ad8da66b3d216",
+      "id": "sg-027-claim-adversarial",
+      "sha256": "aa75a8ce7909eb1d6f12aafb3fdb7ad852cd4f04f774ae3a555f20d3917f031c",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-002.entity-type.rename",
-      "sha256": "fc599b1d4e84516de45e5076a6c8e0db75705998576fb6ef1c4c3a31428ccc99",
+      "id": "sg-027-claim-irrelevant",
+      "sha256": "f61d3cdaf979c88ce3f0ad8164af8d2dac82230ec8bf0c6914ff3454ac0e9715",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-001.entity-type.base",
-      "sha256": "fe6f183517a8d1fba6f5f46a449dd9b1886056262840c8ba7b64a33abc2c6959",
+      "id": "sg-027-claim-numbers",
+      "sha256": "9c389ad4c1a0d2c4b99a4a8920e1b1db3302e9219b8be7ef0c59b68949d7472e",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-001.relationship.base",
-      "sha256": "77ce0b94986a36051f4df1a0874103806ac9b4b0e7c8860da194e3478c151705",
+      "id": "sg-027-claim-noprec",
+      "sha256": "380419d8ebcbfae31b9d3cfba2cf4d70bce2ed817de76a12167e650eba86f582",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-001.claim.base",
-      "sha256": "e7504c0c855a6025e3754c241bbfa269ecfc65b1e001df2a58e9ed6a661b8c19",
+      "id": "sg-027-rel-none",
+      "sha256": "15738258f6e504a5ab7eba6541ff1e37471d976f836dd33695dcf9786d56aa17",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-001.entity-type.missing-evidence",
-      "sha256": "60048969139803ea29b6389249aba153ed4f0ca5c2910386ea0b3f54cecc2464",
+      "id": "sg-028-entitytype-base",
+      "sha256": "d374630807c4572ead7d715596bbfe54098f0280f7dc8f2ae4480c7782c9c4c8",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-001.claim.conflicting",
-      "sha256": "42c27147909d9d2398129a81349b0c1eef86069dd9ecd4f26bf7346a685e1737",
+      "id": "sg-028-candidate-typing",
+      "sha256": "5a361dcd3ef6cf63c58b76820fbe31283a8b79e92482abec7bea6dcd3c8c871e",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-001.claim.adversarial",
-      "sha256": "ee9af9a6227330d367533ade59e65a95d0dbd68280852b126cdb004584269ea4",
+      "id": "sg-028-rel-base",
+      "sha256": "20205cb499ea966af2612e0464308620c21d4ae0bc956ea41c10c083684df1f1",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-001.claim.irrelevant",
-      "sha256": "eba978fcdb87a7d7956828f5b3449357b52559f80538bf3da984f0803071fd79",
+      "id": "sg-028-rel-reverse",
+      "sha256": "3144ad66916bea50cf780f6c3d92dded45098b2927025963ce6a11065ba088ca",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-001.claim.number-trap",
-      "sha256": "77e903e317daff962949c467cdc69fb3acb80a1d61d8b9e7b4451d632acb09a3",
+      "id": "sg-028-claim-base",
+      "sha256": "3d215a23c43919a5fc27e9c0392de59d4a286d2ef1c949f91b3627c4039cf46f",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-001.entity-type.rename",
-      "sha256": "739b6bf3feccc518febfe03d65c507ff970e8e6a2a5d448953ee6afadddb2004",
+      "id": "sg-028-claim-insufficient",
+      "sha256": "9730e2aed17307f5b7d7a6bcb03d854b52a775d2bfc2bf8d85e1e897e62559d1",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-001.relationship.reversed",
-      "sha256": "907c1d6bf58be6dfc7c241b9923915430203059aa32361225bba1dd0c10894ba",
+      "id": "sg-028-entitytype-missing",
+      "sha256": "0d23e1d885c1c5209c000440e98595d768ad1baeb313446e08828f4c49e63e35",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-002.entity-type.base",
-      "sha256": "5a1b2afd6ded9a65330a749e91c72af2fd987d4a3510bbd554d47f60f33d067a",
+      "id": "sg-028-entitytype-rename",
+      "sha256": "9b17ae20cc2c4cbf2c65c43728608ca00719cb42f8f87e0b86ddb438919df1fd",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-002.relationship.base",
-      "sha256": "0321a7eb035c9bc14fb705ba3f06eb76589df1cb6844547b6993dc2e02317f85",
+      "id": "sg-028-claim-adversarial",
+      "sha256": "998d51ff88327a8e9495384d29c6e07729c3ebc1e5950a7b94ba54f35794610b",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-002.claim.base",
-      "sha256": "2da544b44041d19f30830a83b5cf7bdaa93f0a61e5187bffa528d2c14811f140",
+      "id": "sg-028-claim-irrelevant",
+      "sha256": "b781b6f71be0176aa6e870e70111c9322cdf31949f3b5a09ea9ac1c0e12b1b35",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-002.entity-type.missing-evidence",
-      "sha256": "6b19d134ea5be6e155a653ff80f014b7cc62530022bb4577e2f9ee2e02e2d30f",
+      "id": "sg-028-claim-numbers",
+      "sha256": "f4a78e3e0aa5d7edf0d42cac7cea3fdf6f4aecda9ab4bb8d6ba9b9ddd24ae2dd",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-002.claim.conflicting",
-      "sha256": "5b8dc5cd8c4ab309da54fd64953f3eda237d7ad91a3a5c666eb74eec2ad3c5c9",
+      "id": "sg-028-claim-noprec",
+      "sha256": "27177b70e8bd7c368b98a4ea4de51377721717a6a2c224054eff61b9613154ff",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-002.claim.adversarial",
-      "sha256": "e736f162a01d4cc622b6963479197f1339885eddc70fd22a0bc9d4597481e465",
+      "id": "sg-028-rel-none",
+      "sha256": "e586a6d3dd5e95a4bdf21216425a1528bc21183a97d224762a81aee82ec1827a",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-002.claim.irrelevant",
-      "sha256": "fa2936e37abba7fb5bd124b8aff45b12882b1c5d3b5b96430a5ed614c7aa9c29",
+      "id": "sg-029-entitytype-base",
+      "sha256": "49c8580a19a9d5199d0e3b1be011565b8b45d82e75c90a68120c739dfece9e45",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-002.claim.number-trap",
-      "sha256": "d00afd4b76281b41cb163300c74b349bff8a9e4f5ba9230f696dd4a2e312bac2",
+      "id": "sg-029-candidate-typing",
+      "sha256": "4fd60861a6ed907c05fe92f384f460dd1d30347b8027703c024cd4ded44480b6",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-002.entity-type.rename",
-      "sha256": "ad94fe836239fbe6865925ceddc294b1f5589cbd85451a0d4bb9f4a0251cb5bb",
+      "id": "sg-029-rel-base",
+      "sha256": "ea3c4aa46891a0c514f99eb6e4f92d176c01ff0198bb9a5341c63220f5b17fca",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-002.relationship.reversed",
-      "sha256": "d2d3e638e67ff052f0ddcf30f28e00722bc32201d398e499a4885a8c35b31200",
+      "id": "sg-029-rel-reverse",
+      "sha256": "6fa2aac1431baf2a60e329ec5e49262bf844b46b454818cb60755aa263064c85",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-003.entity-type.base",
-      "sha256": "7f8ee955157034e18e65cf5f7878380c3b3cb0a23f6516d8faa88361ff88222e",
+      "id": "sg-029-claim-base",
+      "sha256": "b98a1abe5a36479b1124de4393e298b646518ecd0fa29fd9a8176e16b31a9537",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-003.relationship.base",
-      "sha256": "c891d5e63f1c48500dd9eca02ccd541856258ba67eeaff45a80ddbd04f994bf2",
+      "id": "sg-029-claim-insufficient",
+      "sha256": "c9bcc4da5ca3e892bc27f2ba987c491caa861acbe9c80508d69161c96e316054",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-003.claim.base",
-      "sha256": "a89ae31e8f89fd90066784e3b141f3b3fb088124addbbe6fde24e4e03bc39abe",
+      "id": "sg-029-entitytype-missing",
+      "sha256": "036c7c772ef654fb909f1e473ca0b94ac2d69b8afdaab0e1d42dbe5215b81f37",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-003.entity-type.missing-evidence",
-      "sha256": "1f7c12b822e9600dc972778306696944597c8a43b54fadaf095e1fe8d7942ec3",
+      "id": "sg-029-entitytype-rename",
+      "sha256": "f80287d0e37fc0afbaf9657c4018ad34969fc911d8f6f7d211188f7d671e90c6",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-003.claim.conflicting",
-      "sha256": "20f87fab2a083417141772b3b353378ddc1b7d78722a52b71f42b9e54c26e360",
+      "id": "sg-029-claim-adversarial",
+      "sha256": "8df526761760e955a8dcddbaf9cb0337827095aeeadb935d7428a50eb799843e",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-003.claim.adversarial",
-      "sha256": "8f6b3fe523886e37a003827845a3232c2983d0707e9ee2ba20a8bcde5ab1239f",
+      "id": "sg-029-claim-irrelevant",
+      "sha256": "7a564913bf012fabafb00f06ebc085f4338129ac3c5b0f245a6d221bd8270110",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-003.claim.irrelevant",
-      "sha256": "3dd28146d945675968f1feb2070889b1ddb65038152c9f550603742a3048acab",
+      "id": "sg-029-claim-numbers",
+      "sha256": "e7777c6f0af7256559d51664a9cf4801321b722fe3637edd813fe0300b21c8db",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-003.claim.number-trap",
-      "sha256": "c52692a169bd160173c2788b83f76d5ce6c7b087f27c2fbb325154369887b3e2",
+      "id": "sg-029-claim-noprec",
+      "sha256": "b2eccee0b5941d29348814e0f97dfafcc3be6265fbb0cd15e784b0bc83961f1f",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-003.entity-type.rename",
-      "sha256": "7d1251eca394a4024f287591320eebce20c7298361c715f8c2bf4c25a2e45790",
+      "id": "sg-029-rel-none",
+      "sha256": "48f1bd89415e86b619800f286fad6ac6301218a293bd7bd1cd4d9bbdd2d5cd7e",
       "split": "held-out"
     },
     {
-      "id": "sg-orgs-003.relationship.reversed",
-      "sha256": "4403ff4a02cb96fdfb80c902484a56b834363dbfea6f4e84592b1fabd51979a8",
+      "id": "sg-030-entitytype-base",
+      "sha256": "b25960e4b6c90517a9042f05376a26d415d29fbd7fca864ff81a253016b5b489",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-005.entity-type.base",
-      "sha256": "7714930617f634c0ee5bd6575d3efa5e2a61a5c5b5b37646951ddf429e3fc27c",
+      "id": "sg-030-candidate-typing",
+      "sha256": "f8ff4a4ceb128f4a5af237122a3156f022d4aa0ca4a75fa2c252da8b1392f967",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-005.relationship.base",
-      "sha256": "086396f716fc49a650c49d18841e5bb4047b068b037cf596e4775e1d01340425",
+      "id": "sg-030-rel-base",
+      "sha256": "7157db0bec179a006b62c98deabefa3ec85bf01b08df333170766ff451be95bc",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-005.claim.base",
-      "sha256": "73fff194f15cb80d8840e343e385621bc02eb4c298228273069b1c65e4cbe005",
+      "id": "sg-030-rel-reverse",
+      "sha256": "4b63700dac6bb51f5731c867881291ed4b1e30ce8710cafc74431fdecf65c79e",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-005.entity-type.missing-evidence",
-      "sha256": "64b8680e43f99724fc2ac895d6f462d0176ca34060bdf390418060965a4e0576",
+      "id": "sg-030-claim-base",
+      "sha256": "0453a009a59d4800b5fe5ce1daaf3491adeacd496854172c142d53f2212693ae",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-005.claim.conflicting",
-      "sha256": "50fbe66ce61fd7fc44566e1036012345c9931fe4090ab7f304d8f5185635dffe",
+      "id": "sg-030-claim-insufficient",
+      "sha256": "f0b9348f50db87f4334e6e905a3d52c5459ed9c9e71d41a1adeb6e7bc7ade599",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-005.claim.adversarial",
-      "sha256": "e23ed5c007659508e114891158b5957d7e5b0647adf316adf142fea155ef262e",
+      "id": "sg-030-entitytype-missing",
+      "sha256": "b60631c13f3755584a8f7c5542329dad1ddc709ee08fa37a882814dfab09e29a",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-005.claim.irrelevant",
-      "sha256": "7693edf7ccb54eadfce17af69f735b220e6c4ffb78d4e6246c3a6ec595393a77",
+      "id": "sg-030-entitytype-rename",
+      "sha256": "89811a27764552f85fb350793a478d717bf829a66a0e7a4257142b1c3f0042e5",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-005.claim.number-trap",
-      "sha256": "876340ac33fba2f15d73c1969f6753d09035c9ba22108d48151360e3611e6900",
+      "id": "sg-030-claim-adversarial",
+      "sha256": "c51a04e8074182f566ca3f98ed8a0b3db92d334317c3f712aef8310372ae27f4",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-005.entity-type.rename",
-      "sha256": "e386c1fd7dbb7e131f8b21d2fd3c118aedd53c5045263c0cf5af9e5fcd7ebab2",
+      "id": "sg-030-claim-irrelevant",
+      "sha256": "ef0b9d535beb56642705187b749c6affaa2badbd31e30ca3e1214c45cbdff892",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-006.entity-type.base",
-      "sha256": "febef2cded82d1449cc1a2ffc476f19f4d0ae4a4b915ba3ac986305297fbd638",
+      "id": "sg-030-claim-numbers",
+      "sha256": "01d978f16173f5650fbf9be64ab4687d8b0f215acbd37349ad52932ffbcdb29f",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-006.relationship.base",
-      "sha256": "8666b0be229b2f9b09ad5c8e72c474ac6d3880f19d3ed6a1529ebc58d5a40b95",
+      "id": "sg-030-claim-noprec",
+      "sha256": "442a3db235445fd88bb9ab22d297f816f4a7fd88ceaad7ac231af0dc8e33b21a",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-006.claim.base",
-      "sha256": "79baed0ff448acbd3e5a7b561b5557413f9013f030d4d860b0d9a9d1c7b934c8",
+      "id": "sg-030-rel-none",
+      "sha256": "eea6040ae7e7e1ae2d36f93aeca0e986158e8056aa8ebcc35b69904cc37d8ba6",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-006.entity-type.missing-evidence",
-      "sha256": "c6cce9802fbc57421dd779d52400079cfce3f2ae6d4d62e1c3fd95323bfc32b0",
+      "id": "sg-031-entitytype-base",
+      "sha256": "d66c6a0992ccc49a45106c9a21296465b29f0eeebed4cae547e908c12c30d54a",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-006.claim.conflicting",
-      "sha256": "c81858eae091a7b20f6b5de68d707e46e7167d330f6e7538aafa54f04ee1d577",
+      "id": "sg-031-candidate-typing",
+      "sha256": "790db360efc86903d8bf65ca7e23263160e0dd190d2e03ed8d5e7553e1a93427",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-006.claim.adversarial",
-      "sha256": "a2d49f422f72ddd2604cf28b6f15f0eb697695c76a1762cfe2bbae65dd733e1d",
+      "id": "sg-031-rel-base",
+      "sha256": "024dad25c780cbe4242c62ec322fe9e0656490e4c4d24fe3f956cd78c7085e76",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-006.claim.irrelevant",
-      "sha256": "6858e32b5b7958659eceb9b33b90e3679ee8a12022a5e471e50bed985ccad8ed",
+      "id": "sg-031-rel-reverse",
+      "sha256": "5a0f6988c6877ba1617a81b3f139f7e045dc39ae4ab8053e3233a815c43c5c43",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-006.claim.number-trap",
-      "sha256": "092280fb918d719a529f853d28df85210c4e3c6d8297becf66e17185b07bdb7a",
+      "id": "sg-031-claim-base",
+      "sha256": "a296f61d8e82f88918598c4003635bbfc15762af541c44fd8f58afa1fe681a1f",
       "split": "held-out"
     },
     {
-      "id": "sg-tools-006.entity-type.rename",
-      "sha256": "8ece38adfbf75fbd1a29038676b899f70d10321841bb4c20f2cbabd09df8a6e6",
+      "id": "sg-031-claim-insufficient",
+      "sha256": "42b2d5f1bd4eebddfb122a0d91e28c1b7b4d1b185b96a5474c294877ebe800d3",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-003.entity-type.base",
-      "sha256": "b588c18f3904de0267b7425acb77fe26490e50feb3a96846f85817a7ba6edd45",
+      "id": "sg-031-entitytype-missing",
+      "sha256": "f607458924d2b5c0274bdeca44d1a3bd541c86affc3a2703e81a7f913c17d80a",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-003.relationship.base",
-      "sha256": "b4adc6c69ad6fc5099582725947457a0f4df4fbae043b5ec2557c7a80b1499c5",
+      "id": "sg-031-entitytype-rename",
+      "sha256": "1dbe5bff78755de5aa4a48cf6a51f73b4c16b1ec4dd6f21ee9994849e2fd25ff",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-003.claim.base",
-      "sha256": "5281c8d21316285b2b33b34ebbc513e741c67c82f6d8568796f97b886aa0ab3b",
+      "id": "sg-031-claim-adversarial",
+      "sha256": "5ab75ee558d2b27b46e7eb20841e9c790c51ec83cfbff6cc724d6bd0f8baeb7d",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-003.entity-type.missing-evidence",
-      "sha256": "2af40a75187ab35a109f93e1e10c7c545039d72992236e9fe6562659b9520c1d",
+      "id": "sg-031-claim-irrelevant",
+      "sha256": "eae9aa408ab5d8cc34dcb3280e7d828fadb102eabb9fe8a441023d95b1cee4a2",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-003.claim.conflicting",
-      "sha256": "6e1b49ee7749aa56f35dc7b60b38eab918e76760b49f81ea82f0f41042af440c",
+      "id": "sg-031-claim-numbers",
+      "sha256": "a5a46a47b28e19656ab9f973a6ba0425429f5b2a8a8ec3915a54dfdfdfe3d785",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-003.claim.adversarial",
-      "sha256": "d88ffec34cc3a7a68be660995eb9f6795c85908a34a7e7d74fd36662313cfc4b",
+      "id": "sg-031-claim-noprec",
+      "sha256": "e315719588b257e0866fc514747bf4886a56f8cec35646fa2375e678ae5b5bd6",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-003.claim.irrelevant",
-      "sha256": "63df65d76c2cb85ae74ec0e94d5e2080b85c1687a07eacd601ac0e68f380c658",
+      "id": "sg-031-rel-none",
+      "sha256": "8826bf03083161d6b021cfafdddc3207c9dfd02e432fccca86edac5fbb6e4ad1",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-003.claim.number-trap",
-      "sha256": "9aedd394d51634d7ffa948681c2cb01fb53da73c212e22f4439fdf0d1eee8772",
+      "id": "sg-032-entitytype-base",
+      "sha256": "069850eb03953e1a8d89c1977e0040b3848c141eff846716c3c111ce2e164e54",
       "split": "held-out"
     },
     {
-      "id": "sg-concepts-003.entity-type.rename",
-      "sha256": "25088cabbc8a109d01ce32f66697d6c65b9e0f06aa6466d3336de1a3d9c928ca",
+      "id": "sg-032-candidate-typing",
+      "sha256": "d382baff90fba5290e6d1192a2e0c0da4bb0e73db5828380f08b428f0358de51",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-011.entity-type.base",
-      "sha256": "128cc11f7b9dfec73311040215cdbe50b98abbd078e71c994efa20544831133a",
+      "id": "sg-032-rel-base",
+      "sha256": "0c5ade40ecb65a3747f296570001c8d44a0ff149d59a9ccd0b8ceb1da1bb2d57",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-011.relationship.base",
-      "sha256": "e42b6355c5bd6a3c604869acc5972d0cd3696dd588ce72eba52409a8922df766",
+      "id": "sg-032-rel-reverse",
+      "sha256": "6190aa97626deb6f120cc1fcea81cf35a6607c43eb778f16a8fe96b5787b971c",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-011.claim.base",
-      "sha256": "f7366d734643496810ae8b233ede7106df87282c4c86241bc53c6eef2acc729b",
+      "id": "sg-032-claim-base",
+      "sha256": "c5e08d0ae448c3defb0ad277dbc69157ce3e3a230058d83223f1a1f267d57b60",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-011.entity-type.missing-evidence",
-      "sha256": "3a3df0ac8b4a03f901e6d59fd3f861409442adaeb57bdadc5a5968720c19be6b",
+      "id": "sg-032-claim-insufficient",
+      "sha256": "1626f65e643b670958984e18a6b33894a67cbd5ec94fa8330e1c1dba4a390933",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-011.claim.conflicting",
-      "sha256": "2569de0402fcb7ca6fb97e29136a96392d3ae4faa7f4fedc9c013de41a2bd7a3",
+      "id": "sg-032-entitytype-missing",
+      "sha256": "aaa8f7edfe65e43519407e9a5b44e6f7470af9732ab30533296acd1c3abfb32c",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-011.claim.adversarial",
-      "sha256": "7215182311ba8b50a39e389b889e5731257665b85e2ce5018e4be56675d8d63a",
+      "id": "sg-032-entitytype-rename",
+      "sha256": "ccf30d3c0225d5766b710b13e663d6124ae443b1769f28f110f1aa6731f12e79",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-011.claim.irrelevant",
-      "sha256": "1fc936f0e9a5b24def9e846f60344e6da35d241cf09fa98119e0fb7c9dad6bcb",
+      "id": "sg-032-claim-adversarial",
+      "sha256": "5305d9f328dac57e2152fc0c1f6b4820b50f57128c67218c1d2d713992b746ae",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-011.claim.number-trap",
-      "sha256": "8c6f3d676b9f91ced10bf2111a0b1ca014694db605883df0c6dfde5408a8c09e",
+      "id": "sg-032-claim-irrelevant",
+      "sha256": "bc7b5281ba4639f926179c1678723b43978c61ea712e5cf20080e7a818218b9a",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-011.entity-type.rename",
-      "sha256": "e7be4251723e5f79086e2e49cff1e6c0b303a1900a41f328c1f90310c41ebaba",
+      "id": "sg-032-claim-numbers",
+      "sha256": "d58eef952b07f5ac784caa3b3929e536e77d919a43a3a47d00595ae04d735d01",
       "split": "held-out"
     },
     {
-      "id": "sg-papers-011.relationship.reversed",
-      "sha256": "77ba631eece9d7caa8847a995ebc7032056a0ea413f9a164499e9902396ebb72",
+      "id": "sg-032-claim-noprec",
+      "sha256": "280d8ff0438c082ae0451a1a83b4fc5ca81a995c404cb1ee2f36475de58d11be",
       "split": "held-out"
     },
     {
-      "id": "sg-events-004.entity-type.base",
-      "sha256": "38e0e37aa789cf466283c1218defb1898d0da474fd4aaa77f8d0b4eb399423c7",
+      "id": "sg-032-rel-none",
+      "sha256": "3fb8883d991d2a038f029b12b6e6e94a4c3cfa5e0e41dccc60c0f5209ffe072d",
       "split": "held-out"
     },
     {
-      "id": "sg-events-004.relationship.base",
-      "sha256": "f453d8c9d4f27664a13ee458585080c7623a1e18bb97f88130f13d00a8a90376",
+      "id": "cov-entity-person-entitytype-base",
+      "sha256": "199505cf9df9b3fa4d2f063dad78f244417d8998314d9a09ab6ab2f73ad17579",
       "split": "held-out"
     },
     {
-      "id": "sg-events-004.claim.base",
-      "sha256": "b25b47221328e811712578a32105c7de676d87c9f04174b89f45ce600d0e9f56",
+      "id": "cov-entity-project-entitytype-base",
+      "sha256": "b9990e1e28feb2de7b9bc3e6d82987adf34bf825258b34cd9d4b667a9700c1c6",
       "split": "held-out"
     },
     {
-      "id": "sg-events-004.entity-type.missing-evidence",
-      "sha256": "20445256bcecc3547aa8cc9d69d105aa301a131902147018d755547c90a053c2",
+      "id": "cov-entity-software-entitytype-base",
+      "sha256": "ed323abc0a628e69d2f0140689ee05536241a475f083c137843023653a7a73d7",
       "split": "held-out"
     },
     {
-      "id": "sg-events-004.claim.conflicting",
-      "sha256": "6c1be590fbe00cc9dc7293a4ddfb9c66bfdb9c071b74e0b573886b3f5accea90",
+      "id": "cov-entity-event-entitytype-base",
+      "sha256": "7fad08f87079222deb3b65de37d9f0aa7359c4b8244f33343f3c1a15bc4c4e31",
       "split": "held-out"
     },
     {
-      "id": "sg-events-004.claim.adversarial",
-      "sha256": "a9593003328d884b088af311ca8e3cadad7e0f193cdfbfafd30e396047051c45",
+      "id": "cov-entity-paper-entitytype-base",
+      "sha256": "50912b29618a7b785b46c5891d9e4239da03245170ea6a0fd8790a88064dfae9",
       "split": "held-out"
     },
     {
-      "id": "sg-events-004.claim.irrelevant",
-      "sha256": "4fd2d468748b18e334b4da03f1c757b6170f61b66da2a971d39944db948714c5",
+      "id": "cov-rel-derived-rel-base",
+      "sha256": "9c8f5a11530fbec220a2105f15b66b77ad224050876b7f66cc8b1b9266f869c0",
       "split": "held-out"
     },
     {
-      "id": "sg-events-004.claim.number-trap",
-      "sha256": "0aa99e1d95557dacafcbdcc08d8096c63dd59e7c9a6126b16f5c492faa70a0e4",
+      "id": "cov-rel-implements-rel-base",
+      "sha256": "7fb2a419dd8a0ff191f118ed131d80b682dfdd8ddbb7060fac51ad50f1381903",
       "split": "held-out"
     },
     {
-      "id": "sg-events-004.entity-type.rename",
-      "sha256": "71d6e5e36e0e38036208f7793dc1bf53d55d4618e40afdec72b52a302fd9faee",
+      "id": "cov-rel-depends-rel-base",
+      "sha256": "91bd1d6b2cdd55214d439cdeb596b5c91e56c4ba6faf7bef925aa655cbf9bf44",
       "split": "held-out"
     },
     {
-      "id": "sg-events-004.relationship.reversed",
-      "sha256": "517e20fd41e20f94c04a5ef02bfab3bbe7cf62cb308070f491b692e089cbdbe1",
+      "id": "cov-rel-insufficient-rel-base",
+      "sha256": "530ef243bc22372b3d3f4c52d35545422b681c165d77ac86b8ba160925e7ddc9",
       "split": "held-out"
     }
   ],
   "splitIndependences": [
     {
       "split": "tuning",
-      "sourceGroupCount": 10,
+      "sourceGroupCount": 12,
       "independent": true
     },
     {
       "split": "held-out",
-      "sourceGroupCount": 25,
+      "sourceGroupCount": 29,
       "independent": true
     },
     {

@@ -66,13 +66,20 @@ type ChatResponse struct {
 // ChatObservation is the harness-visible artifact returned by the chat
 // adapter. Content is the validated JSON object the model emitted, ready for
 // scoring.
+//
+// Latency is the final attempt's duration; per-attempt durations and total
+// wall time (including backoff and body reads) live in AttemptLatencies /
+// TotalLatency. The harness NEVER relabels these as provider cold/warm —
+// cold/warm attribution is not derivable from a single adapter run.
 type ChatObservation struct {
-	ResolvedModel string
-	Content       map[string]any
-	Usage         ChatUsage
-	Latency       time.Duration
-	Attempts      int
-	Raw           json.RawMessage
+	ResolvedModel    string
+	Content          map[string]any
+	Usage            ChatUsage
+	Latency          time.Duration
+	AttemptLatencies []time.Duration
+	TotalLatency     time.Duration
+	Attempts         int
+	Raw              json.RawMessage
 }
 
 // ChatConfig configures the chat adapter. It mirrors Config but uses a
@@ -117,6 +124,10 @@ func NewChatClient(cfg ChatConfig) (*ChatClient, error) {
 // response. The first choice's message.content is parsed as JSON. The model's
 // response MUST match the pinned model in cfg.Model or the call fails with
 // model-pin.
+//
+// All successful observations carry per-attempt durations and total wall
+// time including backoff and body reads. The harness does NOT relabel any
+// of these as provider cold/warm.
 func (c *ChatClient) Complete(ctx context.Context, req ChatRequest) (*ChatObservation, error) {
 	if req.Model != c.cfg.Model {
 		return nil, &TransportError{
@@ -135,12 +146,14 @@ func (c *ChatClient) Complete(ctx context.Context, req ChatRequest) (*ChatObserv
 		return nil, &TransportError{Code: "payload", Message: "marshal chat request: " + err.Error(), Cause: err}
 	}
 	var (
-		attempt     int
-		lastLatency time.Duration
-		respBody    []byte
-		status      int
-		retryable   bool
-		transErr    *TransportError
+		attempt          int
+		lastLatency      time.Duration
+		respBody         []byte
+		status           int
+		retryable        bool
+		transErr         *TransportError
+		attemptLatencies []time.Duration
+		totalStart       = time.Now()
 	)
 	for {
 		attempt++
@@ -160,6 +173,7 @@ func (c *ChatClient) Complete(ctx context.Context, req ChatRequest) (*ChatObserv
 		lastLatency = time.Since(start)
 		if err != nil {
 			cancel()
+			attemptLatencies = append(attemptLatencies, lastLatency)
 			transErr = &TransportError{Code: classifyTransport(err), Message: err.Error(), Cause: err, Latency: lastLatency, Attempts: attempt}
 			retryable = transErr.Retryable() && attempt <= c.cfg.Retry.MaxRetries && ctx.Err() == nil
 			if !retryable {
@@ -174,14 +188,16 @@ func (c *ChatClient) Complete(ctx context.Context, req ChatRequest) (*ChatObserv
 		rawBody, err := io.ReadAll(limited)
 		cancel()
 		_ = resp.Body.Close()
+		attDur := time.Since(start)
+		attemptLatencies = append(attemptLatencies, attDur)
 		status = resp.StatusCode
 		respBody = rawBody
 		if len(rawBody) > MaxResponseBytes {
-			return nil, &TransportError{Status: status, Code: "payload", Message: fmt.Sprintf("chat response exceeded %d bytes", MaxResponseBytes), Latency: lastLatency, Attempts: attempt}
+			return nil, &TransportError{Status: status, Code: "payload", Message: fmt.Sprintf("chat response exceeded %d bytes", MaxResponseBytes), Latency: attDur, Attempts: attempt}
 		}
 		if isRetryableStatus(status, c.cfg.Retry.RetryOnStatus) && attempt <= c.cfg.Retry.MaxRetries {
 			wait := retryAfter(resp, c.cfg.Retry.RetryAfterMax, c.cfg.Retry.BaseBackoff, c.cfg.Retry.MaxBackoff)
-			transErr = &TransportError{Status: status, Code: codeForStatus(status), Message: resp.Status, Latency: lastLatency, Attempts: attempt}
+			transErr = &TransportError{Status: status, Code: codeForStatus(status), Message: resp.Status, Latency: attDur, Attempts: attempt}
 			retryable = true
 			if err := sleepCtx(ctx, wait, c.cfg.Retry.RetryAfterMax); err != nil {
 				return nil, &TransportError{Code: "cancelled", Message: err.Error(), Cause: err, Attempts: attempt}
@@ -189,6 +205,7 @@ func (c *ChatClient) Complete(ctx context.Context, req ChatRequest) (*ChatObserv
 			continue
 		}
 		retryable = false
+		lastLatency = attDur
 		break
 	}
 	if retryable {
@@ -197,7 +214,13 @@ func (c *ChatClient) Complete(ctx context.Context, req ChatRequest) (*ChatObserv
 	if status >= 400 {
 		return nil, transErrFromStatus(status, respBody, lastLatency, attempt)
 	}
-	return parseChatResponse(respBody, c.cfg.Model, lastLatency, attempt)
+	obs, err := parseChatResponse(respBody, c.cfg.Model, lastLatency, attempt)
+	if err != nil {
+		return nil, err
+	}
+	obs.AttemptLatencies = attemptLatencies
+	obs.TotalLatency = time.Since(totalStart)
+	return obs, nil
 }
 
 func parseChatResponse(body []byte, expectedModel string, latency time.Duration, attempts int) (*ChatObservation, error) {

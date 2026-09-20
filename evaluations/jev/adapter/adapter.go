@@ -116,11 +116,14 @@ type DecisionRequest struct {
 	State     State                       `json:"state"`
 }
 
-// ChoiceAnswer is the model's per-question response.
+// ChoiceAnswer is the model's per-question response. Confidence is a pointer
+// to distinguish "model emitted 0.0" from "model omitted the field". The
+// protocol forbids the adapter from inventing a value when the field is
+// absent.
 type ChoiceAnswer struct {
 	Type          string             `json:"type"`
 	Choice        string             `json:"choice"`
-	Confidence    float64            `json:"confidence"`
+	Confidence    *float64           `json:"confidence"`
 	Probabilities map[string]float64 `json:"probabilities"`
 }
 
@@ -140,16 +143,28 @@ type DecisionResponse struct {
 }
 
 // Decision is the validated, immutable observation produced by the adapter.
+//
+// All optional fields are pointers so the caller can distinguish "absent"
+// from "zero". Probabilities may be nil when the provider omits them; the
+// adapter records absence rather than synthesizing a degenerate
+// distribution.
+//
+// Latency is the final attempt's duration; per-attempt durations and total
+// wall time (including backoff and body reads) live in AttemptLatencies /
+// TotalLatency. The harness NEVER relabels these as provider cold/warm —
+// cold/warm attribution is not derivable from a single adapter run.
 type Decision struct {
-	QuestionID    string
-	Choice        string
-	Confidence    float64
-	Probabilities map[string]float64
-	ResolvedModel string
-	Latency       time.Duration
-	Attempts      int
-	Usage         DecisionUsage
-	Raw           json.RawMessage // preserved verbatim for audit; non-secret
+	QuestionID       string
+	Choice           string
+	Confidence       *float64
+	Probabilities    map[string]float64
+	ResolvedModel    string
+	Latency          time.Duration
+	AttemptLatencies []time.Duration
+	TotalLatency     time.Duration
+	Attempts         int
+	Usage            DecisionUsage
+	Raw              json.RawMessage // preserved verbatim for audit; non-secret
 }
 
 // TransportError is the typed error returned by the adapter for non-success
@@ -240,6 +255,11 @@ func NewClient(cfg Config) (*Client, error) {
 // and returns an immutable Decision. Concurrency 1: callers serialize.
 // Retries obey the supplied RetryPolicy. Auth, schema and model-pin errors
 // do NOT retry.
+//
+// All successful Decisions carry per-attempt durations and total wall time
+// including backoff and body reads. The harness does NOT relabel any of
+// these as provider cold/warm: that attribution requires a separate
+// measurement the adapter cannot make from a single call.
 func (c *Client) SubmitDecisions(ctx context.Context, req DecisionRequest) (*Decision, error) {
 	if err := validateDecisionRequest(req); err != nil {
 		return nil, &TransportError{Code: "schema", Message: err.Error()}
@@ -255,12 +275,14 @@ func (c *Client) SubmitDecisions(ctx context.Context, req DecisionRequest) (*Dec
 		return nil, &TransportError{Code: "payload", Message: "marshal request: " + err.Error(), Cause: err}
 	}
 	var (
-		attempt     int
-		lastLatency time.Duration
-		respBody    []byte
-		status      int
-		retryable   bool
-		transErr    *TransportError
+		attempt          int
+		lastLatency      time.Duration
+		respBody         []byte
+		status           int
+		retryable        bool
+		transErr         *TransportError
+		attemptLatencies []time.Duration
+		totalStart       = time.Now()
 	)
 	for {
 		attempt++
@@ -278,8 +300,11 @@ func (c *Client) SubmitDecisions(ctx context.Context, req DecisionRequest) (*Dec
 		}
 		resp, err := c.cfg.HTTPClient.Do(httpReq)
 		lastLatency = time.Since(start)
+		// Per-attempt duration includes the round-trip and body read; we
+		// capture it once the body has been read below.
 		if err != nil {
 			cancel()
+			attemptLatencies = append(attemptLatencies, lastLatency)
 			transErr = &TransportError{Code: classifyTransport(err), Message: err.Error(), Cause: err, Latency: lastLatency, Attempts: attempt}
 			retryable = transErr.Retryable() && attempt <= c.cfg.Retry.MaxRetries && ctx.Err() == nil
 			if !retryable {
@@ -295,21 +320,24 @@ func (c *Client) SubmitDecisions(ctx context.Context, req DecisionRequest) (*Dec
 		rawBody, err := io.ReadAll(limited)
 		cancel()
 		_ = resp.Body.Close()
+		attDur := time.Since(start)
+		attemptLatencies = append(attemptLatencies, attDur)
 		status = resp.StatusCode
 		respBody = rawBody
 		if len(rawBody) > MaxResponseBytes {
-			return nil, &TransportError{Status: status, Code: "payload", Message: fmt.Sprintf("response exceeded %d bytes", MaxResponseBytes), Latency: lastLatency, Attempts: attempt}
+			return nil, &TransportError{Status: status, Code: "payload", Message: fmt.Sprintf("response exceeded %d bytes", MaxResponseBytes), Latency: attDur, Attempts: attempt}
 		}
 		if isRetryableStatus(status, c.cfg.Retry.RetryOnStatus) && attempt <= c.cfg.Retry.MaxRetries {
 			wait := retryAfter(resp, c.cfg.Retry.RetryAfterMax, c.cfg.Retry.BaseBackoff, c.cfg.Retry.MaxBackoff)
 			retryable = true
-			transErr = &TransportError{Status: status, Code: codeForStatus(status), Message: resp.Status, Latency: lastLatency, Attempts: attempt}
+			transErr = &TransportError{Status: status, Code: codeForStatus(status), Message: resp.Status, Latency: attDur, Attempts: attempt}
 			if err := sleepCtx(ctx, wait, c.cfg.Retry.RetryAfterMax); err != nil {
 				return nil, &TransportError{Code: "cancelled", Message: err.Error(), Cause: err, Attempts: attempt}
 			}
 			continue
 		}
 		retryable = false
+		lastLatency = attDur
 		break
 	}
 	if retryable {
@@ -322,6 +350,8 @@ func (c *Client) SubmitDecisions(ctx context.Context, req DecisionRequest) (*Dec
 	if err != nil {
 		return nil, err
 	}
+	dec.AttemptLatencies = attemptLatencies
+	dec.TotalLatency = time.Since(totalStart)
 	return dec, nil
 }
 
@@ -377,19 +407,24 @@ func parseDecisionResponse(body []byte, expectedModel string, latency time.Durat
 	if answer.Choice == "" {
 		return nil, &TransportError{Code: "schema", Message: "answer.choice is empty", Latency: latency, Attempts: attempts}
 	}
-	if err := validateProbabilities(answer.Probabilities); err != nil {
-		return nil, &TransportError{Code: "schema", Message: err.Error(), Latency: latency, Attempts: attempts}
+	// Probabilities are optional. When present, validate shape.
+	if len(answer.Probabilities) > 0 {
+		if err := validateProbabilities(answer.Probabilities); err != nil {
+			return nil, &TransportError{Code: "schema", Message: err.Error(), Latency: latency, Attempts: attempts}
+		}
+		if err := validateProbabilityCoverage(answer.Probabilities); err != nil {
+			return nil, &TransportError{Code: "schema", Message: err.Error(), Latency: latency, Attempts: attempts}
+		}
 	}
-	if err := validateProbabilityCoverage(answer.Probabilities); err != nil {
-		return nil, &TransportError{Code: "schema", Message: err.Error(), Latency: latency, Attempts: attempts}
-	}
-	if !isFinite(answer.Confidence) || answer.Confidence < 0 || answer.Confidence > 1 {
-		return nil, &TransportError{Code: "schema", Message: fmt.Sprintf("confidence %v is not in [0,1]", answer.Confidence), Latency: latency, Attempts: attempts}
+	if answer.Confidence != nil {
+		if !isFinite(*answer.Confidence) || *answer.Confidence < 0 || *answer.Confidence > 1 {
+			return nil, &TransportError{Code: "schema", Message: fmt.Sprintf("confidence %v is not in [0,1]", *answer.Confidence), Latency: latency, Attempts: attempts}
+		}
 	}
 	return &Decision{
 		QuestionID:    DecisionVerdictID,
 		Choice:        answer.Choice,
-		Confidence:    answer.Confidence,
+		Confidence:    cloneConfidence(answer.Confidence),
 		Probabilities: cloneProbabilities(answer.Probabilities),
 		ResolvedModel: resp.Model,
 		Latency:       latency,
@@ -397,6 +432,14 @@ func parseDecisionResponse(body []byte, expectedModel string, latency time.Durat
 		Usage:         resp.Usage,
 		Raw:           append(json.RawMessage(nil), body...),
 	}, nil
+}
+
+func cloneConfidence(c *float64) *float64 {
+	if c == nil {
+		return nil
+	}
+	v := *c
+	return &v
 }
 
 // validateProbabilities enforces that every probability is a finite number in
@@ -429,6 +472,9 @@ func validateProbabilityCoverage(p map[string]float64) error {
 }
 
 func cloneProbabilities(p map[string]float64) map[string]float64 {
+	if p == nil {
+		return nil
+	}
 	out := make(map[string]float64, len(p))
 	for k, v := range p {
 		out[k] = v

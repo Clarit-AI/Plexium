@@ -187,27 +187,46 @@ func ValidateFixtures(fixtures []protocol.Fixture) error {
 }
 
 // VerifySplitIndependence runs the protocol's independence rule: no source
-// group may appear in more than one split.
+// group, and no template family, may appear in more than one split. The
+// independence report lists per-split counts and any violation note; a
+// violation returns an error so callers fail closed.
 func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroupIndependence, error) {
+	splits := []protocol.Split{protocol.SplitTuning, protocol.SplitHeldOut, protocol.SplitReserved}
 	groups := map[protocol.Split]map[string]struct{}{}
-	for _, s := range []protocol.Split{protocol.SplitTuning, protocol.SplitHeldOut, protocol.SplitReserved} {
+	templates := map[protocol.Split]map[string]struct{}{}
+	for _, s := range splits {
 		groups[s] = map[string]struct{}{}
+		templates[s] = map[string]struct{}{}
 	}
 	for _, f := range fixtures {
 		groups[f.Split][f.SourceGroup] = struct{}{}
+		if f.TemplateFamily != "" {
+			templates[f.Split][f.TemplateFamily] = struct{}{}
+		}
 	}
 	var out []protocol.SplitGroupIndependence
-	seen := map[string]string{}
-	for _, s := range []protocol.Split{protocol.SplitTuning, protocol.SplitHeldOut, protocol.SplitReserved} {
+	seenGroup := map[string]string{}
+	seenFamily := map[string]string{}
+	for _, s := range splits {
 		ind := true
 		var note string
 		for g := range groups[s] {
-			if prev, ok := seen[g]; ok {
+			if prev, ok := seenGroup[g]; ok {
 				ind = false
-				note = fmt.Sprintf("group %q appears in %s and %s", g, prev, s)
+				note = fmt.Sprintf("source group %q appears in %s and %s", g, prev, s)
 				break
 			}
-			seen[g] = string(s)
+			seenGroup[g] = string(s)
+		}
+		if ind {
+			for tf := range templates[s] {
+				if prev, ok := seenFamily[tf]; ok {
+					ind = false
+					note = fmt.Sprintf("template family %q appears in %s and %s", tf, prev, s)
+					break
+				}
+				seenFamily[tf] = string(s)
+			}
 		}
 		out = append(out, protocol.SplitGroupIndependence{
 			Split:         s,

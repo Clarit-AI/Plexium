@@ -14,10 +14,15 @@ import (
 	"time"
 )
 
-// ProtocolVersion identifies the frozen state of the offline protocol. Change
-// it whenever anything observable changes (vocabulary, scorer, adapter
-// contract, transport rules, fixture review status).
-const ProtocolVersion = "0.1.0"
+// ProtocolVersion identifies the frozen state of the offline protocol.
+// v0.2 supersedes v0.1: the corpus generator was replaced with a smaller
+// genuinely synthetic evidence-driven pilot; scoring was rewritten to
+// remove measurement-corrupting defects; replay validation now joins
+// fixtureId to the authoritative corpus; template-family independence
+// is enforced; per-attempt latency and total wall time replace single
+// latency; confidence is a pointer to distinguish absent from zero;
+// fixture IDs are opaque to ranker role tags.
+const ProtocolVersion = "0.2.0"
 
 // SourceCommit records the inspected source revision for a fixture or
 // baseline. An empty value indicates a synthetic source group that does not
@@ -200,12 +205,24 @@ const (
 // Fixture is the human-authored evaluation case. All author fields are
 // populated even when the author is an agent; the Reviewer/ReviewStatus pair
 // is what separates agent proposals from adjudicated labels.
+//
+// TemplateFamily identifies a perturbation template family (e.g. an
+// adversarial-injection suffix string). The independence check refuses to
+// place fixtures that share a TemplateFamily in different splits; the
+// corpus generator must keep each family entirely within a single split.
+//
+// EdgeSourceID / EdgeTargetID carry the candidate IDs the relationship
+// question is about. Reversing them produces a different expected verdict.
+// They are opaque and free of ranker role tags.
 type Fixture struct {
 	ID                  string              `json:"id"`
 	Task                Task                `json:"task"`
 	SourceGroup         string              `json:"sourceGroup"`
+	TemplateFamily      string              `json:"templateFamily,omitempty"`
 	SourceRevision      SourceCommit        `json:"sourceRevision"`
 	Question            string              `json:"question"`
+	EdgeSourceID        string              `json:"edgeSourceId,omitempty"`
+	EdgeTargetID        string              `json:"edgeTargetId,omitempty"`
 	Excerpts            []Excerpt           `json:"excerpts"`
 	Candidates          []Candidate         `json:"candidates"`
 	CandidateGeneration string              `json:"candidateGeneration"` // how candidates were produced
@@ -275,6 +292,14 @@ type SplitGroupIndependence struct {
 
 // Validate enforces structural rules on a fixture. It does not check label
 // quality — that requires human review.
+//
+// AllowedLabels, when non-empty, is the reviewer-supplied vocabulary for
+// this fixture. It may legitimately be broader than the closed task
+// vocabulary (e.g. when a fixture exercises a candidate-typing task that
+// uses an entity-role set distinct from the document-level vocabulary).
+// When the fixture supplies AllowedLabels, membership in AllowedLabels
+// satisfies the validator; otherwise membership in the closed task
+// vocabulary is required.
 func (f *Fixture) Validate() error {
 	if !f.Task.Valid() {
 		return fmt.Errorf("fixture %s: invalid task %q", f.ID, f.Task)
@@ -291,11 +316,18 @@ func (f *Fixture) Validate() error {
 	if f.ExpectedLabel == "" {
 		return fmt.Errorf("fixture %s: missing expectedLabel", f.ID)
 	}
-	if !IsAllowedLabel(f.Task, f.ExpectedLabel) {
+	allowed := f.AllowedLabels
+	if len(allowed) == 0 {
+		allowed = AllowedLabelsFor(f.Task)
+	}
+	if !containsString(allowed, f.ExpectedLabel) {
 		return fmt.Errorf("fixture %s: expectedLabel %q not in vocabulary", f.ID, f.ExpectedLabel)
 	}
 	for _, l := range f.AllowedLabels {
-		if !IsAllowedLabel(f.Task, l) {
+		// A reviewer may legitimately extend the vocabulary; we only
+		// complain when the fixture lists no overrides and uses the closed
+		// vocabulary that doesn't accept the label.
+		if len(f.AllowedLabels) == 0 && !IsAllowedLabel(f.Task, l) {
 			return fmt.Errorf("fixture %s: allowedLabels contains %q not in vocabulary", f.ID, l)
 		}
 	}
@@ -316,7 +348,26 @@ func (f *Fixture) Validate() error {
 	if f.Task != TaskEntityType && len(f.Candidates) == 0 {
 		return fmt.Errorf("fixture %s: task %s requires candidates", f.ID, f.Task)
 	}
+	// Relationship fixtures must specify edge source/target IDs so a
+	// reversed question can produce a different verdict.
+	if f.Task == TaskRelationship {
+		if f.EdgeSourceID == "" || f.EdgeTargetID == "" {
+			return fmt.Errorf("fixture %s: relationship fixture requires edgeSourceId and edgeTargetId", f.ID)
+		}
+		if f.EdgeSourceID == f.EdgeTargetID {
+			return fmt.Errorf("fixture %s: relationship fixture has identical source and target", f.ID)
+		}
+	}
 	return nil
+}
+
+func containsString(s []string, x string) bool {
+	for _, v := range s {
+		if v == x {
+			return true
+		}
+	}
+	return false
 }
 
 func validChallenge(c ChallengeCategory) bool {

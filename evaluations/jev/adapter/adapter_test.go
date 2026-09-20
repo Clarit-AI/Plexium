@@ -69,7 +69,7 @@ func TestSubmitDecisionsHappyPath(t *testing.T) {
 	if dec.Choice != "supported" {
 		t.Fatalf("choice: %s", dec.Choice)
 	}
-	if dec.Confidence != 0.9 {
+	if dec.Confidence == nil || *dec.Confidence != 0.9 {
 		t.Fatalf("confidence: %v", dec.Confidence)
 	}
 	if !approx(dec.Probabilities["supported"], 0.9) {
@@ -77,6 +77,53 @@ func TestSubmitDecisionsHappyPath(t *testing.T) {
 	}
 	if dec.ResolvedModel != "test-model" {
 		t.Fatalf("model: %s", dec.ResolvedModel)
+	}
+	if len(dec.AttemptLatencies) != 1 {
+		t.Fatalf("expected 1 attempt, got %d", len(dec.AttemptLatencies))
+	}
+	if dec.TotalLatency <= 0 {
+		t.Fatalf("expected positive total wall time, got %v", dec.TotalLatency)
+	}
+}
+
+func TestSubmitDecisionsConfidenceAbsenceIsRecordedAsNil(t *testing.T) {
+	// P1 finding #6: absent confidence must be recorded as nil, not 0.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"r","model":"x","answers":{"verdict":{"type":"choice","choice":"a","probabilities":{"a":1.0}}},"usage":{}}`))
+	}))
+	defer srv.Close()
+	c, _ := NewClient(Config{Endpoint: srv.URL, Model: "x", Timeout: 2 * time.Second})
+	dec, err := c.SubmitDecisions(context.Background(), DecisionRequest{
+		Model:     "x",
+		Questions: map[string]DecisionQuestion{"verdict": {Instructions: "x", Criteria: map[string]DecisionCriteria{"a": {Description: "y"}}}},
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if dec.Confidence != nil {
+		t.Fatalf("expected nil confidence when model omits field, got %v", *dec.Confidence)
+	}
+}
+
+func TestSubmitDecisionsProbabilitiesOptional(t *testing.T) {
+	// Probabilities are optional per the documented recipe; the adapter
+	// must accept a response without them and record nil.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"r","model":"x","answers":{"verdict":{"type":"choice","choice":"a","confidence":1.0}},"usage":{}}`))
+	}))
+	defer srv.Close()
+	c, _ := NewClient(Config{Endpoint: srv.URL, Model: "x", Timeout: 2 * time.Second})
+	dec, err := c.SubmitDecisions(context.Background(), DecisionRequest{
+		Model:     "x",
+		Questions: map[string]DecisionQuestion{"verdict": {Instructions: "x", Criteria: map[string]DecisionCriteria{"a": {Description: "y"}}}},
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if dec.Probabilities != nil {
+		t.Fatalf("expected nil probabilities, got %v", dec.Probabilities)
 	}
 }
 
