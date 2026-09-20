@@ -117,13 +117,13 @@ func main() {
 
 	// --- Verdict ---
 	type verdict struct {
-		Mode              string         `json:"mode"`
-		FirstSync         probeOutput    `json:"firstSync"`
-		SecondSync        probeOutput    `json:"secondSync"`
-		BugReproduced     bool           `json:"bugReproduced"`
-		BugNotes          string         `json:"bugNotes"`
-		FixVerified       bool           `json:"fixVerified"`
-		FixNotes          string         `json:"fixNotes"`
+		Mode          string      `json:"mode"`
+		FirstSync     probeOutput `json:"firstSync"`
+		SecondSync    probeOutput `json:"secondSync"`
+		BugReproduced bool        `json:"bugReproduced"`
+		BugNotes      string      `json:"bugNotes"`
+		FixVerified   bool        `json:"fixVerified"`
+		FixNotes      string      `json:"fixNotes"`
 	}
 	v := verdict{Mode: *mode, FirstSync: po1, SecondSync: po2}
 

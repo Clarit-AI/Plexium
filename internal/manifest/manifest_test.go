@@ -314,11 +314,11 @@ func TestManager_DetectStalePages(t *testing.T) {
 		WikiPath:  "modules/auth.md",
 		Ownership: "managed",
 		SourceFiles: []SourceFile{
-			{Path: file1, Hash: hash1},
+			{Path: file1, Hash: hash1, ValidatedHash: hash1, LastValidatedAt: "2026-01-01T00:00:00Z"},
 		},
 	}))
 
-	// No changes — no stale pages
+	// No changes — no stale pages (ValidatedHash matches current hash)
 	stale, err := mgr.DetectStalePages(ComputeHash)
 	require.NoError(t, err)
 	assert.Empty(t, stale)
@@ -330,6 +330,81 @@ func TestManager_DetectStalePages(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, stale, 1)
 	assert.Equal(t, "modules/auth.md", stale[0].WikiPath)
+}
+
+// TestManager_DetectStalePages_V1ManifestIsStale documents the v1→v2
+// migration: a manifest created by older plexium versions has no
+// ValidatedHash, so its pages are treated as never-validated and must be
+// flagged stale.
+func TestManager_DetectStalePages_V1ManifestIsStale(t *testing.T) {
+	dir := t.TempDir()
+	mgr, err := NewManager(filepath.Join(dir, "manifest.json"))
+	require.NoError(t, err)
+
+	file1 := filepath.Join(dir, "src", "auth.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(file1), 0755))
+	require.NoError(t, os.WriteFile(file1, []byte("package auth"), 0644))
+
+	hash1, err := ComputeHash(file1)
+	require.NoError(t, err)
+
+	// Legacy shape: no ValidatedHash.
+	require.NoError(t, mgr.UpsertPage(PageEntry{
+		WikiPath:  "modules/auth.md",
+		Ownership: "managed",
+		SourceFiles: []SourceFile{
+			{Path: file1, Hash: hash1},
+		},
+	}))
+
+	// Even though file hasn't changed, page is stale because it has never been validated.
+	stale, err := mgr.DetectStalePages(ComputeHash)
+	require.NoError(t, err)
+	assert.Len(t, stale, 1, "v1 manifest with no ValidatedHash must be stale until validated")
+	assert.Equal(t, "modules/auth.md", stale[0].WikiPath)
+}
+
+// TestManager_MarkPageValidated verifies the debt-mark helper advances
+// ValidatedHash for every source file in the target page.
+func TestManager_MarkPageValidated(t *testing.T) {
+	dir := t.TempDir()
+	mgr, err := NewManager(filepath.Join(dir, "manifest.json"))
+	require.NoError(t, err)
+
+	file1 := filepath.Join(dir, "src", "auth.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(file1), 0755))
+	require.NoError(t, os.WriteFile(file1, []byte("package auth"), 0644))
+
+	hash1, err := ComputeHash(file1)
+	require.NoError(t, err)
+
+	require.NoError(t, mgr.UpsertPage(PageEntry{
+		WikiPath:  "modules/auth.md",
+		Ownership: "managed",
+		SourceFiles: []SourceFile{
+			{Path: file1, Hash: hash1},
+		},
+	}))
+
+	found, err := mgr.MarkPageValidated("modules/auth.md", "2026-01-02T00:00:00Z")
+	require.NoError(t, err)
+	assert.True(t, found)
+
+	// Reload and verify ValidatedHash was set.
+	m, err := mgr.Load()
+	require.NoError(t, err)
+	assert.Equal(t, hash1, m.Pages[0].SourceFiles[0].ValidatedHash)
+	assert.Equal(t, "2026-01-02T00:00:00Z", m.Pages[0].SourceFiles[0].LastValidatedAt)
+
+	// Now DetectStalePages should return no stale pages.
+	stale, err := mgr.DetectStalePages(ComputeHash)
+	require.NoError(t, err)
+	assert.Empty(t, stale)
+
+	// MarkPageValidated on an unknown page returns false.
+	found, err = mgr.MarkPageValidated("does/not-exist.md", "2026-01-02T00:00:00Z")
+	require.NoError(t, err)
+	assert.False(t, found)
 }
 
 func TestManager_DetectStalePages_SkipsHumanAuthored(t *testing.T) {

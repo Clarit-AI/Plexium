@@ -68,11 +68,29 @@ type RelationshipRef struct {
 	Strength float64 `json:"strength,omitempty"`
 }
 
-// SourceFile represents a source file that feeds into a wiki page
+// SourceFile represents a source file that feeds into a wiki page.
+//
+// Hash tracks the latest *observed* source hash — the most recent value
+// computed from the file on disk. ValidatedHash tracks the hash that the
+// wiki page text was last *validated* against, i.e. the hash that was in
+// effect when a successful regeneration ran, when a user explicitly marked
+// the page reviewed, or — for v1 manifests that predate this field —
+// when the page was last touched.
+//
+// A page is stale when the current file hash differs from ValidatedHash.
+// Plain plexium sync (no --regenerate, no --mark-reviewed) never advances
+// ValidatedHash; the manifest therefore continues to flag the page as
+// stale until evidence of wiki-content refresh exists.
+//
+// LastValidatedAt is an RFC3339 timestamp recorded alongside the last
+// successful validation. Empty for v1 manifests and for pages that have
+// never been validated.
 type SourceFile struct {
 	Path                string `json:"path"`
 	Hash                string `json:"hash"`
 	LastProcessedCommit string `json:"lastProcessedCommit"`
+	ValidatedHash       string `json:"validatedHash,omitempty"`
+	LastValidatedAt     string `json:"lastValidatedAt,omitempty"`
 }
 
 // UnmanagedEntry represents a wiki page not managed by Plexium
