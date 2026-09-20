@@ -782,16 +782,20 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 	}
 	res := l.entries[resIdx]
 
-	// Check for duplicate settlement (any settlement referencing this refID).
+	// Check for duplicate settlement or terminal status on this refID.
+	// G2: include EntryAdjustment (overrun) so a second overrun Settle
+	// on the same reservation is rejected as duplicate rather than
+	// double-counting the overrun adjustment. B1: include EntryMismatch.
 	for _, e := range l.entries {
-		if e.Type == EntrySettlement && e.RefID == refID {
-			return 0, &LedgerError{Code: LedgerCodeDuplicateSettle, Message: fmt.Sprintf("reservation %q already settled", refID)}
+		if e.RefID != refID {
+			continue
 		}
-	}
-	// B1: A previously-mismatched reservation cannot be re-settled as
-	// "valid" — its terminal/disputed status is durable evidence.
-	for _, e := range l.entries {
-		if e.Type == EntryMismatch && e.RefID == refID {
+		switch e.Type {
+		case EntrySettlement:
+			return 0, &LedgerError{Code: LedgerCodeDuplicateSettle, Message: fmt.Sprintf("reservation %q already settled", refID)}
+		case EntryAdjustment:
+			return 0, &LedgerError{Code: LedgerCodeDuplicateSettle, Message: fmt.Sprintf("reservation %q already overrun (adjustment on record); cannot re-settle", refID)}
+		case EntryMismatch:
 			return 0, &LedgerError{Code: LedgerCodeDuplicateSettle, Message: fmt.Sprintf("reservation %q is terminal (mismatch on record); cannot re-settle", refID)}
 		}
 	}
@@ -964,6 +968,22 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 		return 0, &LedgerError{Code: errCode, Message: fmt.Sprintf("actual cost %d exceeds reservation %d by %d (ledger halted)", actualCost, reservedAmount, overrun)}
 	}
 
+	// G1: Once the aggregate is unrepresentable (any entry Overflow=true
+	// OR balance at the MaxMicroUnits sentinel), Settle MUST NOT
+	// decrement the reported balance — the aggregate is unknown. The
+	// settle entry is still appended as durable evidence (actual bill
+	// recorded) but balance stays at the sentinel and Available stays
+	// 0; a false exact aggregate must never be derived.
+	unrepresentable := l.balance == MaxMicroUnits
+	if !unrepresentable {
+		for _, e := range l.entries {
+			if e.Overflow {
+				unrepresentable = true
+				break
+			}
+		}
+	}
+
 	// F1: Normal settlement releases ONLY the unused reservation headroom
 	// (reserved - actual). The actual billed cost stays charged toward
 	// the authorized cap so the cap can be enforced across repeated
@@ -978,6 +998,12 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 	if release < 0 {
 		release = 0
 	}
+	var postBalance MicroUnit
+	if unrepresentable {
+		postBalance = MaxMicroUnits
+	} else {
+		postBalance = l.balance - release
+	}
 	settleEntry := Entry{
 		ID:          fmt.Sprintf("set-%s-%d", l.cfg.RunID, time.Now().UnixNano()),
 		Type:        EntrySettlement,
@@ -988,7 +1014,7 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 		Task:        res.Task,
 		SourceGroup: res.SourceGroup,
 		Amount:      -release,
-		Balance:     l.balance - release,
+		Balance:     postBalance,
 		TokensIn:    actualTokensIn,
 		TokensOut:   actualTokensOut,
 		RateIn:      actualRateIn,
@@ -1001,8 +1027,10 @@ func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit,
 		return 0, err
 	}
 
-	l.balance -= release
-	l.lastEntry++
+	if !unrepresentable {
+		l.balance -= release
+		l.lastEntry++
+	}
 
 	// Return the released (unspent) headroom; for full-cost this is 0,
 	// for zero-cost this is the full reservation. Overrun path returns

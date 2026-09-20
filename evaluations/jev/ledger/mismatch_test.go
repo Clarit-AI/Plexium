@@ -1042,3 +1042,207 @@ func TestMismatchOverflowFailsClosedWithoutDroppingEvidence(t *testing.T) {
 		t.Fatal("ledger must remain halted after in-flight reconciliation")
 	}
 }
+
+// G1: Once an Overflow marker exists, the aggregate is permanently
+// unrepresentable. Later outstanding partial/zero/full-cost
+// settlements must NOT decrement the sentinel balance into a false
+// exact aggregate. The settle entry IS appended (actual bill is
+// durable evidence) but balance stays at MaxMicroUnits and
+// Available stays 0. Halt remains latched. State survives reopen.
+func TestG1SentinelStableAcrossOutstandingSettlements(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test-ledger.jsonl"
+	cfg := testConfigFixedRunID(path, MaxMicroUnits, "fixed-run-id")
+	cfg.TokenBounds = TokenBounds{MaxInputTokens: 16, MaxOutputTokens: 16}
+	cfg.RateIn = 1_000_000
+	rateOut := MicroUnit(1_000_000)
+	cfg.RateOut = &rateOut
+
+	l1, err := Open(cfg)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+
+	// Reserve A at 0 tokens (amount 0). Mismatch on A will trigger overflow.
+	resA, _, err := l1.Reserve(context.Background(), 1, "entity-type", "sg-001", 0, 0)
+	if err != nil {
+		t.Fatalf("Reserve A failed: %v", err)
+	}
+	// Reserve B, C, D each at 1+1 tokens. cost = 2, retry = 2, total = 4.
+	resB, _, err := l1.Reserve(context.Background(), 2, "entity-type", "sg-001", 1, 1)
+	if err != nil {
+		t.Fatalf("Reserve B failed: %v", err)
+	}
+	resC, _, err := l1.Reserve(context.Background(), 3, "entity-type", "sg-001", 1, 1)
+	if err != nil {
+		t.Fatalf("Reserve C failed: %v", err)
+	}
+	resD, _, err := l1.Reserve(context.Background(), 4, "entity-type", "sg-001", 1, 1)
+	if err != nil {
+		t.Fatalf("Reserve D failed: %v", err)
+	}
+
+	// Mismatch A at actualCost=MaxMicroUnits → overflow, balance=MaxMicroUnits sentinel.
+	_, err = l1.Settle(context.Background(), resA, MaxMicroUnits, 0, 0, 100_000_000, 1_000_000)
+	if !IsLedgerCode(err, LedgerCodeOverflow) {
+		t.Fatalf("expected overflow code, got %v", err)
+	}
+	if l1.Balance() != MaxMicroUnits {
+		t.Fatalf("sentinel not set, got %d", l1.Balance())
+	}
+	if l1.Available() != 0 {
+		t.Fatalf("Available must be 0 on overflow, got %d", l1.Available())
+	}
+
+	// Settle B at actual=2 (partial). reserved=4, release=2.
+	_, err = l1.Settle(context.Background(), resB, 2, 1, 1, 1_000_000, 1_000_000)
+	if err != nil {
+		t.Fatalf("settle B failed: %v", err)
+	}
+	if l1.Balance() != MaxMicroUnits {
+		t.Fatalf("G1: sentinel must NOT decrement after partial settle B (got %d, want %d)", l1.Balance(), MaxMicroUnits)
+	}
+	if l1.Available() != 0 {
+		t.Fatalf("Available must stay 0 (got %d)", l1.Available())
+	}
+	if !l1.Halted() {
+		t.Fatal("halt must persist after outstanding settle")
+	}
+
+	// Settle C at actual=4 (full-cost). reserved=4, release=0.
+	_, err = l1.Settle(context.Background(), resC, 4, 1, 1, 1_000_000, 1_000_000)
+	if err != nil {
+		t.Fatalf("settle C failed: %v", err)
+	}
+	if l1.Balance() != MaxMicroUnits {
+		t.Fatalf("G1: sentinel must NOT decrement after full-cost settle C (got %d)", l1.Balance())
+	}
+	if l1.Available() != 0 {
+		t.Fatalf("Available must stay 0 (got %d)", l1.Available())
+	}
+
+	// Settle D at actual=1 (small actual). reserved=4, release=3.
+	_, err = l1.Settle(context.Background(), resD, 1, 1, 1, 1_000_000, 1_000_000)
+	if err != nil {
+		t.Fatalf("settle D failed: %v", err)
+	}
+	if l1.Balance() != MaxMicroUnits {
+		t.Fatalf("G1: sentinel must NOT decrement after near-full settle D (got %d)", l1.Balance())
+	}
+
+	// Verify all 3 settle entries persisted (B, C, D) — actual bills recorded.
+	settleCount := 0
+	for _, e := range l1.Entries() {
+		if e.Type == EntrySettlement {
+			settleCount++
+		}
+	}
+	if settleCount != 3 {
+		t.Fatalf("expected 3 settle entries (B, C, D), got %d", settleCount)
+	}
+
+	l1.Close()
+
+	// Reopen: sentinel survives, halt survives, evidence intact.
+	l2, err := Open(cfg)
+	if err != nil {
+		t.Fatalf("Reopen failed: %v", err)
+	}
+	defer l2.Close()
+	if l2.Balance() != MaxMicroUnits {
+		t.Fatalf("G1: sentinel must persist across reopen (got %d)", l2.Balance())
+	}
+	if l2.Available() != 0 {
+		t.Fatalf("Available must stay 0 across reopen (got %d)", l2.Available())
+	}
+	if !l2.Halted() {
+		t.Fatal("halt must persist across reopen")
+	}
+
+	// New Reserve rejected after reopen.
+	_, _, err = l2.Reserve(context.Background(), 5, "entity-type", "sg-001", 1, 1)
+	if !IsLedgerCode(err, LedgerCodeHalted) {
+		t.Fatalf("expected halted on new Reserve after reopen, got %v", err)
+	}
+}
+
+// G2: Duplicate Settle on ordinary overrun (EntryAdjustment) must
+// reject before arithmetic, not double-count. First overrun at
+// actual=9999 vs reserved=3000 → balance=9999. Second identical Settle
+// → reject as duplicate-settle (NOT cap-exceeded). Balance must NOT
+// double-count to 16998. Adjustment entry count = 1. Survives reopen.
+func TestG2DuplicateOverrunSettlementRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test-ledger.jsonl"
+	cfg := testConfigFixedRunID(path, 100_000_000, "fixed-run-id")
+
+	l, err := Open(cfg)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+
+	resA, _, err := l.Reserve(context.Background(), 1, "entity-type", "sg-001", 1000, 500)
+	if err != nil {
+		t.Fatalf("Reserve A failed: %v", err)
+	}
+	// reserved = 3000 (1000*1M/1e6 + 500*1M/1e6 + retry = 1500+1500 = 3000).
+
+	// First settle with overrun (actual 9999 vs reserved 3000).
+	_, err = l.Settle(context.Background(), resA, 9999, 1000, 500, 1_000_000, 1_000_000)
+	if !IsLedgerCode(err, LedgerCodeCapExceeded) {
+		t.Fatalf("expected cap-exceeded (overrun), got %v", err)
+	}
+	if l.Balance() != 9999 {
+		t.Fatalf("balance should be 9999 after first overrun, got %d", l.Balance())
+	}
+	if !l.Halted() {
+		t.Fatal("ledger should be halted after overrun")
+	}
+
+	// Second identical settle must be rejected as duplicate-settle,
+	// NOT cap-exceeded (which would double-count).
+	_, err = l.Settle(context.Background(), resA, 9999, 1000, 500, 1_000_000, 1_000_000)
+	if !IsLedgerCode(err, LedgerCodeDuplicateSettle) {
+		t.Fatalf("G2: expected duplicate-settle, got %v", err)
+	}
+
+	// Balance unchanged (must NOT double-count to 16998).
+	if l.Balance() != 9999 {
+		t.Fatalf("G2: balance must NOT double-count (got %d, want 9999)", l.Balance())
+	}
+
+	// Exactly one adjustment entry on disk.
+	adjCount := 0
+	for _, e := range l.Entries() {
+		if e.Type == EntryAdjustment && e.RefID == resA {
+			adjCount++
+		}
+	}
+	if adjCount != 1 {
+		t.Fatalf("G2: expected exactly 1 adjustment entry, got %d", adjCount)
+	}
+
+	l.Close()
+
+	// Reopen: balance, halt, evidence survive.
+	l2, err := Open(cfg)
+	if err != nil {
+		t.Fatalf("Reopen failed: %v", err)
+	}
+	defer l2.Close()
+	if l2.Balance() != 9999 {
+		t.Fatalf("balance must survive reopen at 9999, got %d", l2.Balance())
+	}
+	if !l2.Halted() {
+		t.Fatal("halt must survive reopen")
+	}
+
+	// Third identical settle after reopen: still rejected as duplicate.
+	_, err = l2.Settle(context.Background(), resA, 9999, 1000, 500, 1_000_000, 1_000_000)
+	if !IsLedgerCode(err, LedgerCodeDuplicateSettle) {
+		t.Fatalf("G2: expected duplicate-settle after reopen, got %v", err)
+	}
+	if l2.Balance() != 9999 {
+		t.Fatalf("balance must NOT double-count after reopen (got %d)", l2.Balance())
+	}
+}
