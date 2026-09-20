@@ -21,12 +21,24 @@ type ChatRequest struct {
 	Messages       []ChatMessage   `json:"messages"`
 	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 	Temperature    *float64        `json:"temperature,omitempty"`
+	MaxTokens      *int            `json:"max_tokens,omitempty"`
+	Provider       *ProviderRoute  `json:"provider,omitempty"`
+}
+
+// ProviderRoute is the OpenRouter routing envelope required by the frozen
+// Nano request. A preference is not proof of the serving provider;
+// CompleteOnce separately validates response-linked provider identity.
+type ProviderRoute struct {
+	Only              []string `json:"only"`
+	AllowFallbacks    *bool    `json:"allow_fallbacks"`
+	RequireParameters *bool    `json:"require_parameters"`
 }
 
 // ChatMessage is a single role-tagged chat turn.
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string  `json:"role"`
+	Content string  `json:"content"`
+	Refusal *string `json:"refusal,omitempty"`
 }
 
 // ResponseFormat declares the JSON Schema the response must conform to.
@@ -38,6 +50,7 @@ type ResponseFormat struct {
 // JSONSchema is the JSON Schema envelope used by /api/v1/chat/completions.
 type JSONSchema struct {
 	Name   string         `json:"name"`
+	Strict bool           `json:"strict,omitempty"`
 	Schema map[string]any `json:"schema"`
 }
 
@@ -50,17 +63,19 @@ type ChatChoice struct {
 
 // ChatUsage mirrors the documented usage block.
 type ChatUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens     int             `json:"prompt_tokens"`
+	CompletionTokens int             `json:"completion_tokens"`
+	TotalTokens      int             `json:"total_tokens"`
+	Cost             json.RawMessage `json:"cost,omitempty"`
 }
 
 // ChatResponse is the parsed body of /api/v1/chat/completions.
 type ChatResponse struct {
-	ID      string       `json:"id"`
-	Model   string       `json:"model"`
-	Choices []ChatChoice `json:"choices"`
-	Usage   ChatUsage    `json:"usage"`
+	ID       string       `json:"id"`
+	Model    string       `json:"model"`
+	Provider string       `json:"provider,omitempty"`
+	Choices  []ChatChoice `json:"choices"`
+	Usage    ChatUsage    `json:"usage"`
 }
 
 // ChatObservation is the harness-visible artifact returned by the chat
@@ -85,12 +100,14 @@ type ChatObservation struct {
 // ChatConfig configures the chat adapter. It mirrors Config but uses a
 // dedicated type so callers cannot accidentally reuse a Decisions config.
 type ChatConfig struct {
-	Endpoint   string
-	APIKey     string
-	Model      string
-	Timeout    time.Duration
-	Retry      RetryPolicy
-	HTTPClient *http.Client
+	Endpoint         string
+	APIKey           string
+	Model            string // request alias
+	ResponseModel    string // exact accepted response pin; defaults to Model for compatibility
+	ResponseProvider string // exact provider identity required by CompleteOnce when configured
+	Timeout          time.Duration
+	Retry            RetryPolicy
+	HTTPClient       *http.Client
 }
 
 // ChatClient is the structured-output chat adapter. It has no global state.
@@ -116,6 +133,9 @@ func NewChatClient(cfg ChatConfig) (*ChatClient, error) {
 	}
 	if cfg.Retry.MaxRetries == 0 && cfg.Retry.BaseBackoff == 0 {
 		cfg.Retry = DefaultRetryPolicy()
+	}
+	if cfg.ResponseModel == "" {
+		cfg.ResponseModel = cfg.Model
 	}
 	return &ChatClient{cfg: cfg}, nil
 }
@@ -214,7 +234,7 @@ func (c *ChatClient) Complete(ctx context.Context, req ChatRequest) (*ChatObserv
 	if status >= 400 {
 		return nil, transErrFromStatus(status, respBody, lastLatency, attempt)
 	}
-	obs, err := parseChatResponse(respBody, c.cfg.Model, lastLatency, attempt)
+	obs, err := parseChatResponse(respBody, c.cfg.ResponseModel, lastLatency, attempt)
 	if err != nil {
 		return nil, err
 	}

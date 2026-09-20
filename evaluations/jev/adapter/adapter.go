@@ -73,6 +73,7 @@ type DecisionCriteria struct {
 // Only the Choice variant is implemented; Noul and Score are out of scope.
 type DecisionQuestion struct {
 	ID           string                      `json:"-"`
+	Type         string                      `json:"type,omitempty"`
 	Instructions string                      `json:"instructions"`
 	Criteria     map[string]DecisionCriteria `json:"criteria"`
 }
@@ -199,15 +200,17 @@ func (e *TransportError) Retryable() bool {
 	return false
 }
 
-// Config configures a Client. Endpoints, keys, and the expected model pin
-// are all required when a live call is attempted.
+// Config configures a Client. Model is the request alias; ResponseModel is the
+// exact accepted response pin and defaults to Model for compatibility.
 type Config struct {
-	Endpoint   string
-	APIKey     string
-	Model      string
-	Timeout    time.Duration
-	Retry      RetryPolicy
-	HTTPClient *http.Client
+	Endpoint         string
+	APIKey           string
+	Model            string // request alias
+	ResponseModel    string // exact accepted response pin; defaults to Model for compatibility
+	ResponseProvider string // exact provider identity when the response contract exposes one
+	Timeout          time.Duration
+	Retry            RetryPolicy
+	HTTPClient       *http.Client
 }
 
 // Validate enforces that a live call has the prerequisites.
@@ -247,6 +250,9 @@ func NewClient(cfg Config) (*Client, error) {
 	}
 	if cfg.Retry.MaxRetries == 0 && cfg.Retry.BaseBackoff == 0 {
 		cfg.Retry = DefaultRetryPolicy()
+	}
+	if cfg.ResponseModel == "" {
+		cfg.ResponseModel = cfg.Model
 	}
 	return &Client{cfg: cfg}, nil
 }
@@ -346,7 +352,7 @@ func (c *Client) SubmitDecisions(ctx context.Context, req DecisionRequest) (*Dec
 	if status >= 400 {
 		return nil, transErrFromStatus(status, respBody, lastLatency, attempt)
 	}
-	dec, err := parseDecisionResponse(respBody, c.cfg.Model, lastLatency, attempt)
+	dec, err := parseDecisionResponse(respBody, c.cfg.ResponseModel, lastLatency, attempt)
 	if err != nil {
 		return nil, err
 	}
