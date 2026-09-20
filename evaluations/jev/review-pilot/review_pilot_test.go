@@ -1,6 +1,7 @@
 // Schema and manifest validation tests for the review-pilot packet.
 // Human-reviewer spotcheck: verify proposed labels are in the closed
-// vocabulary for the task and reviewStatus is "unreviewed".
+// vocabulary, rp-et-001 carries its human approval, and the remaining
+// fixtures stay unreviewed.
 package main
 
 import (
@@ -65,11 +66,23 @@ func TestReviewPilotSchemaValidation(t *testing.T) {
 		t.Fatalf("expected 24 fixtures, got %d", len(fxs))
 	}
 
-	// Spotcheck: every proposed label in vocab for its task; every
-	// reviewStatus is "unreviewed"; every author is set.
+	// Spotcheck: every proposed label is in vocab for its task; rp-et-001
+	// is the sole human-approved fixture; every author is set.
 	for _, f := range fxs {
-		if f.ReviewStatus != protocol.ReviewUnreviewed {
-			t.Errorf("fixture %s: reviewStatus=%v (want unreviewed)", f.ID, f.ReviewStatus)
+		if f.ID == "rp-et-001" {
+			if f.ReviewStatus != protocol.ReviewApproved {
+				t.Errorf("fixture %s: reviewStatus=%v (want approved)", f.ID, f.ReviewStatus)
+			}
+			if f.Reviewer != "KHAEntertainment" {
+				t.Errorf("fixture %s: reviewer=%q (want KHAEntertainment)", f.ID, f.Reviewer)
+			}
+		} else {
+			if f.ReviewStatus != protocol.ReviewUnreviewed {
+				t.Errorf("fixture %s: reviewStatus=%v (want unreviewed)", f.ID, f.ReviewStatus)
+			}
+			if f.Reviewer != "" {
+				t.Errorf("fixture %s: reviewer=%q (want empty for unreviewed fixture)", f.ID, f.Reviewer)
+			}
 		}
 		if f.Author == "" {
 			t.Errorf("fixture %s: missing author", f.ID)
@@ -168,8 +181,11 @@ func TestReviewPilotManifest(t *testing.T) {
 	if m.SplitCounts.Tuning != 24 || m.SplitCounts.HoldOut != 0 {
 		t.Errorf("manifest SplitCounts wrong: %+v", m.SplitCounts)
 	}
-	if m.ReviewStatusCount[protocol.ReviewUnreviewed] != 24 {
-		t.Errorf("manifest reviewStatusCount[unreviewed] = %d, want 24", m.ReviewStatusCount[protocol.ReviewUnreviewed])
+	if m.ReviewStatusCount[protocol.ReviewUnreviewed] != 23 {
+		t.Errorf("manifest reviewStatusCount[unreviewed] = %d, want 23", m.ReviewStatusCount[protocol.ReviewUnreviewed])
+	}
+	if m.ReviewStatusCount[protocol.ReviewApproved] != 1 {
+		t.Errorf("manifest reviewStatusCount[approved] = %d, want 1", m.ReviewStatusCount[protocol.ReviewApproved])
 	}
 	// Per-task count regression: each of the 4 tasks has 6 fixtures.
 	if got := m.TaskCounts.EntityType; got != 6 {
@@ -234,6 +250,39 @@ func TestReviewPilotV0D4LabelsByConvention(t *testing.T) {
 	}
 	if m.ProtocolVersion != "0.4.0" {
 		t.Errorf("manifest ProtocolVersion = %q, want 0.4.0", m.ProtocolVersion)
+	}
+}
+
+func TestReviewPilotHumanAdjudicationMetadata(t *testing.T) {
+	fxPath, mfPath := paths(t)
+	loaded, err := loader.Load(fxPath, mfPath)
+	if err != nil {
+		t.Fatalf("loader.Load: %v", err)
+	}
+
+	var approved *protocol.Fixture
+	for i := range loaded.Fixtures {
+		if loaded.Fixtures[i].ReviewStatus == protocol.ReviewApproved {
+			if approved != nil {
+				t.Fatalf("multiple approved fixtures: %s and %s", approved.ID, loaded.Fixtures[i].ID)
+			}
+			approved = &loaded.Fixtures[i]
+		}
+	}
+	if approved == nil {
+		t.Fatal("missing approved fixture")
+	}
+	if approved.ID != "rp-et-001" || approved.ExpectedLabel != "place" {
+		t.Fatalf("approved fixture = %s/%s, want rp-et-001/place", approved.ID, approved.ExpectedLabel)
+	}
+	if approved.Reviewer != "KHAEntertainment" {
+		t.Fatalf("approved reviewer = %q, want KHAEntertainment", approved.Reviewer)
+	}
+	if !bytes.Contains([]byte(approved.Rationale), []byte("intentionally ambiguous benchmark case")) {
+		t.Fatalf("approved rationale does not preserve ambiguity annotation: %q", approved.Rationale)
+	}
+	if len(approved.ChallengeCategories) != 1 || approved.ChallengeCategories[0] != protocol.ChallengeCompeting {
+		t.Fatalf("approved challenge categories = %v, want [competing-candidates]", approved.ChallengeCategories)
 	}
 }
 

@@ -11,5 +11,7 @@ See **`review.md`** for the full case descriptions, evidence quotes,
 challenge categories, and adjudication template.
 
 The packet does NOT modify the accepted harness / ledger / scorer.
-The 24 fixtures are all `unreviewed` agent-authored proposals;
-author provenance is recorded in every fixture's `author` field.
+All 24 fixtures are agent-authored and retain their author provenance.
+`rp-et-001` is human-approved as `place` by `KHAEntertainment`, with
+its subject ambiguity preserved in the rationale; the other 23 remain
+`unreviewed` proposals.

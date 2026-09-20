@@ -1,6 +1,6 @@
 {
   "protocolVersion": "0.4.0",
-  "generatedAt": "2026-09-20T19:57:19.877557Z",
+  "generatedAt": "2026-09-20T20:37:11.690017Z",
   "fixtureFile": "review-pilot/fixtures.jsonl",
   "fixtureCount": 24,
   "splitCounts": {
@@ -17,24 +17,25 @@
   },
   "sourceGroupCount": 24,
   "reviewStatusCount": {
-    "unreviewed": 24
+    "approved": 1,
+    "unreviewed": 23
   },
   "challengeCount": {
     "adversarial-instruction": 2,
-    "competing-candidates": 2,
+    "competing-candidates": 3,
     "conflicting-sources": 3,
     "irrelevant-context": 2,
     "missing-evidence": 4,
     "rename": 4,
     "reversed-direction": 1,
-    "straightforward-positive": 6
+    "straightforward-positive": 5
   },
-  "sha256FixtureFile": "de13fbe5a9fea08aa1debebb98c902d7cbc87ab9e02cc659338b7bc8401fac1e",
+  "sha256FixtureFile": "d6d08975479333dbf1d8b135a3020ffa8214a70b6223776a9992d2ac9ab6fda0",
   "sha256Manifest": "",
   "fixtureHashes": [
     {
       "id": "rp-et-001",
-      "sha256": "3589421da1b656458a803eb054c436dac0135aa3af0fc5ed13af846b1fd5e185",
+      "sha256": "3653dd5466e9c95e4402cbc57894c17148b7a9ec9a7e1b70023371ecf7c5c768",
       "split": "tuning"
     },
     {
