@@ -21,6 +21,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -297,6 +298,22 @@ func Open(cfg LedgerConfig) (*Ledger, error) {
 		if len(l.entries) > 0 && l.entries[0].Type == EntryInit {
 			l.halted = l.entries[0].Halted
 		}
+		// D1: Derive halted=true from EVERY durable mismatch or overrun
+		// adjustment, regardless of init.Halted. This closes the crash
+		// window where evidence is fsynced but the init-entry rewrite
+		// never lands — without this derivation, a reopen would observe
+		// init.Halted=false and resume new spending despite a billing
+		// anomaly on durable record.
+		for _, e := range l.entries {
+			if e.Type == EntryMismatch {
+				l.halted = true
+				break
+			}
+			if e.Type == EntryAdjustment && strings.HasPrefix(e.Notes, "overrun") {
+				l.halted = true
+				break
+			}
+		}
 	}
 
 	return l, nil
@@ -410,9 +427,12 @@ func filepathDir(path string) string {
 // syncDir fsyncs the parent directory so atomic renames inside it are
 // durable across crashes. Without this, the rename can be lost if the
 // system crashes between the rename and the directory entry flush.
+// The empty string is normalized to "." (current directory); we never
+// silently no-op — the ledger must receive a real dirent flush even
+// when it resides at the working directory.
 func syncDir(dir string) error {
-	if dir == "" || dir == "." {
-		return nil
+	if dir == "" {
+		dir = "."
 	}
 	d, err := os.Open(dir)
 	if err != nil {
