@@ -224,6 +224,19 @@ func (s *Server) handleToolsList(req JSONRPCRequest) JSONRPCResponse {
 	}
 }
 
+// ToolsList returns the merged tool list (built-in pageindex_* tools plus
+// any tools contributed by registered retrieval plugins). Exported for
+// integration-boundary tests (KHA-574) that need to assert both backends'
+// tools are registered as distinct names without driving a JSON-RPC
+// request through Start().
+func (s *Server) ToolsList() []ToolDefinition {
+	// Reuse the JSONRPCRequest codepath so the contract test sees exactly
+	// what a real MCP client would see.
+	resp := s.handleToolsList(JSONRPCRequest{JSONRPC: "2.0", ID: 0, Method: "tools/list"})
+	tools, _ := resp.Result.(map[string]interface{})["tools"].([]ToolDefinition)
+	return tools
+}
+
 // handleToolsCall dispatches a tool invocation.
 func (s *Server) handleToolsCall(req JSONRPCRequest) JSONRPCResponse {
 	var params ToolCallParams
