@@ -1,6 +1,6 @@
 // Schema and manifest validation tests for the review-pilot packet.
 // Human-reviewer spotcheck: verify proposed labels are in the closed
-// vocabulary, the seven adjudicated fixtures carry human approval, and the
+// vocabulary, the ten adjudicated fixtures carry human approval, and the
 // remaining fixtures stay unreviewed.
 package main
 
@@ -74,9 +74,12 @@ func TestReviewPilotSchemaValidation(t *testing.T) {
 		"rp-rel-013": true,
 		"rp-rel-014": true,
 		"rp-rel-015": true,
+		"rp-ct-012":  true,
+		"rp-rel-016": true,
+		"rp-cs-020":  true,
 	}
 	// Spotcheck: every proposed label is in vocab for its task; exactly the
-	// seven adjudicated fixtures are approved; every author is set.
+	// ten adjudicated fixtures are approved; every author is set.
 	for _, f := range fxs {
 		if approvedIDs[f.ID] {
 			if f.ReviewStatus != protocol.ReviewApproved {
@@ -132,7 +135,7 @@ func TestReviewPilotSchemaValidation(t *testing.T) {
 		t.Errorf("sum of per-task counts %d != 24", total)
 	}
 
-	// All 3 claim verdicts represented twice.
+	// All 3 claim verdicts remain represented after human correction.
 	var sup, contra, insuf int
 	for _, f := range fxs {
 		if f.Task != protocol.TaskClaimSupport {
@@ -147,8 +150,8 @@ func TestReviewPilotSchemaValidation(t *testing.T) {
 			insuf++
 		}
 	}
-	if sup != 2 || contra != 2 || insuf != 2 {
-		t.Errorf("claim verdicts: supported=%d contradicted=%d insufficient-evidence=%d (want 2/2/2)", sup, contra, insuf)
+	if sup != 2 || contra != 1 || insuf != 3 {
+		t.Errorf("claim verdicts: supported=%d contradicted=%d insufficient-evidence=%d (want 2/1/3)", sup, contra, insuf)
 	}
 
 	// 24 distinct source groups.
@@ -190,11 +193,11 @@ func TestReviewPilotManifest(t *testing.T) {
 	if m.SplitCounts.Tuning != 24 || m.SplitCounts.HoldOut != 0 {
 		t.Errorf("manifest SplitCounts wrong: %+v", m.SplitCounts)
 	}
-	if m.ReviewStatusCount[protocol.ReviewUnreviewed] != 17 {
-		t.Errorf("manifest reviewStatusCount[unreviewed] = %d, want 17", m.ReviewStatusCount[protocol.ReviewUnreviewed])
+	if m.ReviewStatusCount[protocol.ReviewUnreviewed] != 14 {
+		t.Errorf("manifest reviewStatusCount[unreviewed] = %d, want 14", m.ReviewStatusCount[protocol.ReviewUnreviewed])
 	}
-	if m.ReviewStatusCount[protocol.ReviewApproved] != 7 {
-		t.Errorf("manifest reviewStatusCount[approved] = %d, want 7", m.ReviewStatusCount[protocol.ReviewApproved])
+	if m.ReviewStatusCount[protocol.ReviewApproved] != 10 {
+		t.Errorf("manifest reviewStatusCount[approved] = %d, want 10", m.ReviewStatusCount[protocol.ReviewApproved])
 	}
 	// Per-task count regression: each of the 4 tasks has 6 fixtures.
 	if got := m.TaskCounts.EntityType; got != 6 {
@@ -234,10 +237,12 @@ func TestReviewPilotLabelsByCurrentAdjudication(t *testing.T) {
 		"rp-et-004":  "insufficient-evidence", // empty body (missing evidence)
 		"rp-et-006":  "place",                 // approved named-region environment
 		"rp-ct-010":  "insufficient-evidence", // placeholder candidate, no context
+		"rp-ct-012":  "insufficient-evidence", // approved ambiguous survey referent
 		"rp-rel-013": "related-to",            // monitoring association, not functional use
 		"rp-rel-014": "related-to",            // ownership association survives reversed order
 		"rp-rel-015": "related-to",            // geographically consistent sources
-		"rp-rel-016": "used-by",               // unresolved; do not silently relabel
+		"rp-rel-016": "related-to",            // approved supply association, not entity use
+		"rp-cs-020":  "insufficient-evidence", // no incompatible or exhaustive endpoint evidence
 	}
 	got := map[string]string{}
 	for _, f := range loaded.Fixtures {
@@ -282,6 +287,9 @@ func TestReviewPilotHumanAdjudicationMetadata(t *testing.T) {
 		"rp-rel-013": {label: "related-to", rationaleFragment: "not explicit functional use"},
 		"rp-rel-014": {label: "related-to", rationaleFragment: "does not justify broadening part-of semantics"},
 		"rp-rel-015": {label: "related-to", rationaleFragment: "geographically consistent"},
+		"rp-ct-012":  {label: "insufficient-evidence", rationaleFragment: "ambiguous between a survey activity and a resulting document"},
+		"rp-rel-016": {label: "related-to", rationaleFragment: "not explicit use of the source supplier entity itself"},
+		"rp-cs-020":  {label: "insufficient-evidence", rationaleFragment: "does not declare the listed endpoints exhaustive"},
 	}
 	approved := make(map[string]protocol.Fixture)
 	for i := range loaded.Fixtures {
@@ -314,16 +322,12 @@ func TestReviewPilotHumanAdjudicationMetadata(t *testing.T) {
 	if fixture := approved["rp-rel-015"]; len(fixture.ChallengeCategories) != 1 || fixture.ChallengeCategories[0] != protocol.ChallengeStraightPositive {
 		t.Fatalf("rp-rel-015 challenge categories = %v, want [straightforward-positive]", fixture.ChallengeCategories)
 	}
-	for _, fixture := range loaded.Fixtures {
-		if fixture.ID != "rp-rel-016" {
-			continue
-		}
-		if fixture.ExpectedLabel != "used-by" || fixture.ReviewStatus != protocol.ReviewUnreviewed || fixture.Reviewer != "" {
-			t.Fatalf("rp-rel-016 must remain unresolved used-by proposal, got label=%q status=%q reviewer=%q", fixture.ExpectedLabel, fixture.ReviewStatus, fixture.Reviewer)
-		}
-		return
+	if fixture := approved["rp-ct-012"]; len(fixture.ChallengeCategories) != 1 || fixture.ChallengeCategories[0] != protocol.ChallengeAdversarial {
+		t.Fatalf("rp-ct-012 challenge categories = %v, want [adversarial-instruction]", fixture.ChallengeCategories)
 	}
-	t.Fatal("rp-rel-016 not found")
+	if fixture := approved["rp-cs-020"]; len(fixture.ChallengeCategories) != 1 || fixture.ChallengeCategories[0] != protocol.ChallengeMissingEvidence {
+		t.Fatalf("rp-cs-020 challenge categories = %v, want [missing-evidence]", fixture.ChallengeCategories)
+	}
 }
 
 func wd(t *testing.T) string {

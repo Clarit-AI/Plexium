@@ -12,8 +12,9 @@ challenge categories, and adjudication template.
 
 The packet does NOT modify the accepted harness / ledger / scorer.
 All 24 fixtures are agent-authored and retain their author provenance.
-Seven fixtures are human-approved by `KHAEntertainment`:
+Ten fixtures are human-approved by `KHAEntertainment`:
 `rp-et-001 = place`, `rp-et-002 = project`, `rp-et-003 = document`,
-`rp-et-006 = place`, and `rp-rel-013` through `rp-rel-015 =
-related-to`. The other 17 remain `unreviewed` proposals. See
+`rp-et-006 = place`, `rp-ct-012 = insufficient-evidence`,
+`rp-rel-013` through `rp-rel-016 = related-to`, and `rp-cs-020 =
+insufficient-evidence`. The other 14 remain `unreviewed`. See
 `review.md` for the correction log and adjudication rubrics.
