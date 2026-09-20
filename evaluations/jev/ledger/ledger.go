@@ -12,9 +12,12 @@
 package ledger
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"sync"
@@ -47,6 +50,10 @@ const (
 	LedgerCodeLockFailed      LedgerErrorCode = "lock-failed"
 	LedgerCodeIO              LedgerErrorCode = "io"
 	LedgerCodeCorrupt         LedgerErrorCode = "corrupt"
+	LedgerCodeHalted          LedgerErrorCode = "halted"
+	LedgerCodeTokenBounds     LedgerErrorCode = "token-bounds-exceeded"
+	LedgerCodeRateMismatch    LedgerErrorCode = "rate-mismatch"
+	LedgerCodeTokenMismatch   LedgerErrorCode = "token-mismatch"
 )
 
 // LedgerError is a typed error for ledger operations.
@@ -81,12 +88,13 @@ const (
 	EntryReservation EntryType = "reservation"
 	EntrySettlement  EntryType = "settlement"
 	EntryAdjustment  EntryType = "adjustment" // for manual corrections with audit trail
+	EntryInit        EntryType = "init"       // initialization header (first line)
 )
 
 // Entry is a single ledger record. All fields are immutable once written.
 type Entry struct {
 	ID              string    `json:"id"`          // UUID or deterministic key
-	Type            EntryType `json:"type"`        // reservation | settlement | adjustment
+	Type            EntryType `json:"type"`        // reservation | settlement | adjustment | init
 	Timestamp       time.Time `json:"timestamp"`   // UTC
 	RunID           string    `json:"runId"`       // evaluation run identifier
 	Attempt         int       `json:"attempt"`     // attempt number within run
@@ -102,6 +110,10 @@ type Entry struct {
 	Notes           string    `json:"notes,omitempty"`
 	RefID           string    `json:"refId,omitempty"`           // for settlements: the reservation ID being settled
 	ProtocolVersion string    `json:"protocolVersion,omitempty"` // protocol version at reservation time
+	// Init-only fields (present only on EntryInit):
+	AuthorizedCap MicroUnit    `json:"authorizedCap,omitempty"` // authorized cap at init time
+	ManifestKey   *ManifestKey `json:"manifestKey,omitempty"`   // full manifest key at init time
+	Halted        bool         `json:"halted,omitempty"`        // whether ledger is halted (persisted on init)
 }
 
 // ManifestKey is a digest used to detect manifest/model drift between
@@ -111,7 +123,7 @@ type ManifestKey struct {
 	ProtocolVersion string `json:"protocolVersion"`
 	ModelPin        string `json:"modelPin"`
 	RatesVersion    string `json:"ratesVersion"`    // e.g., "openrouter-2026-09-15"
-	TokenBoundsHash string `json:"tokenBoundsHash"` // hash of token limits config
+	TokenBoundsHash string `json:"tokenBoundsHash"` // SHA256 of token limits config
 }
 
 // LedgerConfig controls ledger behavior.
@@ -136,12 +148,15 @@ type LedgerConfig struct {
 	// RateIn is the input token rate in micro-units per 1M tokens.
 	RateIn MicroUnit
 	// RateOut is the output token rate in micro-units per 1M tokens.
+	// A value of 0 means "omitted/unknown" — this is VALID and distinct from
+	// an explicitly supplied zero rate (which would mean free output).
+	// Use a pointer or sentinel if you need to distinguish "omitted" from "zero".
+	// For this implementation, 0 means "not configured" and is rejected by Reserve.
 	RateOut MicroUnit
 }
 
 // TokenBounds defines conservative token limits used for reservation sizing.
-// When actual usage exceeds these, the ledger records an overrun but does not
-// silently increase the reservation.
+// When actual usage exceeds these, the ledger rejects the reservation.
 type TokenBounds struct {
 	MaxInputTokens  int64 `json:"maxInputTokens"`
 	MaxOutputTokens int64 `json:"maxOutputTokens"`
@@ -173,11 +188,13 @@ type Ledger struct {
 	entries   []Entry
 	balance   MicroUnit
 	closed    bool
-	lastEntry int // index of last fully written entry
+	halted    bool // P0: latched on overrun; blocks new reservations/settlements
+	lastEntry int  // index of last fully written entry
 }
 
 // Open opens or creates the ledger file, acquires an exclusive lock,
-// replays entries to reconstruct balance, and validates drift.
+// replays entries to reconstruct balance, validates drift, and writes
+// an init header if the file is new.
 func Open(cfg LedgerConfig) (*Ledger, error) {
 	if cfg.Path == "" {
 		return nil, &LedgerError{Code: LedgerCodeIO, Message: "path required"}
@@ -226,6 +243,7 @@ func Open(cfg LedgerConfig) (*Ledger, error) {
 		entries:   []Entry{},
 		balance:   0,
 		closed:    false,
+		halted:    false,
 		lastEntry: -1,
 	}
 
@@ -235,26 +253,87 @@ func Open(cfg LedgerConfig) (*Ledger, error) {
 		return nil, err
 	}
 
-	// Validate manifest/model drift against the first entry's manifest key (if any).
-	if len(l.entries) > 0 {
-		first := l.entries[0]
-		// The first entry should carry the manifest key in notes or a dedicated field.
-		// For now we check the runID matches.
-		if first.RunID != cfg.RunID {
-			return nil, &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("runId mismatch: ledger has %q, config has %q", first.RunID, cfg.RunID)}
+	// Validate manifest/model drift against the init entry (if any).
+	// If file is new (no entries), write init header now.
+	if len(l.entries) == 0 {
+		if err := l.writeInitEntry(); err != nil {
+			_ = l.Close()
+			return nil, err
 		}
-		if first.Model != cfg.Model {
-			return nil, &LedgerError{Code: LedgerCodeModelDrift, Message: fmt.Sprintf("model drift: ledger has %q, config has %q", first.Model, cfg.Model)}
+	} else {
+		if err := l.validateDrift(); err != nil {
+			_ = l.Close()
+			return nil, err
 		}
-		if first.ProtocolVersion != "" && first.ProtocolVersion != cfg.ManifestKey.ProtocolVersion {
-			return nil, &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("protocol version drift: ledger has %q, config has %q", first.ProtocolVersion, cfg.ManifestKey.ProtocolVersion)}
+		// Restore halted state from init entry.
+		if len(l.entries) > 0 && l.entries[0].Type == EntryInit {
+			l.halted = l.entries[0].Halted
 		}
 	}
 
 	return l, nil
 }
 
+// writeInitEntry writes the initialization header as the first line of the ledger.
+// This persists the full ManifestKey and AuthorizedCap for drift detection on reopen.
+func (l *Ledger) writeInitEntry() error {
+	init := Entry{
+		ID:              fmt.Sprintf("init-%s-%d", l.cfg.RunID, time.Now().UnixNano()),
+		Type:            EntryInit,
+		Timestamp:       time.Now().UTC(),
+		RunID:           l.cfg.RunID,
+		Attempt:         0,
+		Model:           l.cfg.Model,
+		Task:            "",
+		SourceGroup:     "",
+		Amount:          0,
+		Balance:         0,
+		TokensIn:        0,
+		TokensOut:       0,
+		RateIn:          0,
+		RateOut:         0,
+		Notes:           "initialization header",
+		ProtocolVersion: l.cfg.ManifestKey.ProtocolVersion,
+		AuthorizedCap:   l.cfg.AuthorizedCap,
+		ManifestKey:     &l.cfg.ManifestKey,
+		Halted:          l.halted,
+	}
+	return l.appendEntry(init)
+}
+
+// rewriteInitEntry rewrites the first line (init entry) with the current halted state.
+// This is called when the ledger is halted to persist the halted state.
+func (l *Ledger) rewriteInitEntry() error {
+	if len(l.entries) == 0 || l.entries[0].Type != EntryInit {
+		return errors.New("no init entry to rewrite")
+	}
+	// Update the first entry's halted state.
+	l.entries[0].Halted = l.halted
+	// Rewrite the entire file.
+	if _, err := l.file.Seek(0, 0); err != nil {
+		return &LedgerError{Code: LedgerCodeIO, Message: "seek to start for rewrite", Cause: err}
+	}
+	if err := l.file.Truncate(0); err != nil {
+		return &LedgerError{Code: LedgerCodeIO, Message: "truncate for rewrite", Cause: err}
+	}
+	for _, e := range l.entries {
+		data, err := json.Marshal(e)
+		if err != nil {
+			return &LedgerError{Code: LedgerCodeIO, Message: "marshal entry for rewrite", Cause: err}
+		}
+		data = append(data, '\n')
+		if _, err := l.file.Write(data); err != nil {
+			return &LedgerError{Code: LedgerCodeIO, Message: "write entry for rewrite", Cause: err}
+		}
+	}
+	if err := l.file.Sync(); err != nil {
+		return &LedgerError{Code: LedgerCodeIO, Message: "sync for rewrite", Cause: err}
+	}
+	return nil
+}
+
 // replay reads all lines from the file, parses entries, and reconstructs balance.
+// L1: Fails closed on torn/truncated final entry (distinguishes EOF from parse errors).
 func (l *Ledger) replay() error {
 	// Seek to start.
 	if _, err := l.file.Seek(0, 0); err != nil {
@@ -265,8 +344,32 @@ func (l *Ledger) replay() error {
 	lineNum := 0
 	for {
 		var e Entry
-		if err := dec.Decode(&e); err != nil {
-			break // EOF or error
+		err := dec.Decode(&e)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return &LedgerError{Code: LedgerCodeIO, Message: "context canceled during replay", Cause: err}
+			}
+			// L1: Distinguish clean EOF from torn/truncated entry.
+			// Clean EOF is io.EOF - this is normal end of file, not an error.
+			if errors.Is(err, io.EOF) {
+				break // clean end of file
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				return &LedgerError{Code: LedgerCodeIO, Message: "context deadline exceeded during replay", Cause: err}
+			}
+			// Check for syntax errors / unexpected EOF (torn write).
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				return &LedgerError{Code: LedgerCodeIO, Message: "context error during replay", Cause: err}
+			}
+			// For json package, syntax errors and unexpected EOF are not wrapped in standard errors.
+			// We check the error string for the distinction.
+			errStr := err.Error()
+			if errStr == "unexpected EOF" {
+				// Torn/truncated write - the file ended mid-JSON object.
+				return &LedgerError{Code: LedgerCodeCorrupt, Message: fmt.Sprintf("torn/truncated entry at line %d (fail-closed): %v", lineNum+1, err)}
+			}
+			// Other errors (syntax, type mismatch) are also corruption.
+			return &LedgerError{Code: LedgerCodeCorrupt, Message: fmt.Sprintf("corrupt entry at line %d: %v", lineNum+1, err)}
 		}
 		lineNum++
 		// Validate entry integrity.
@@ -289,18 +392,62 @@ func (l *Ledger) replay() error {
 	return nil
 }
 
+// validateDrift checks that the init entry's persisted config matches current config.
+func (l *Ledger) validateDrift() error {
+	if len(l.entries) == 0 {
+		return nil
+	}
+	first := l.entries[0]
+	if first.Type != EntryInit {
+		return &LedgerError{Code: LedgerCodeDrift, Message: "first entry is not init header"}
+	}
+	// RunID must match.
+	if first.RunID != l.cfg.RunID {
+		return &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("runId mismatch: ledger has %q, config has %q", first.RunID, l.cfg.RunID)}
+	}
+	// Model must match.
+	if first.Model != l.cfg.Model {
+		return &LedgerError{Code: LedgerCodeModelDrift, Message: fmt.Sprintf("model drift: ledger has %q, config has %q", first.Model, l.cfg.Model)}
+	}
+	// AuthorizedCap must match.
+	if first.AuthorizedCap != l.cfg.AuthorizedCap {
+		return &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("authorized cap drift: ledger has %d, config has %d", first.AuthorizedCap, l.cfg.AuthorizedCap)}
+	}
+	// Full ManifestKey must match.
+	if first.ManifestKey == nil {
+		return &LedgerError{Code: LedgerCodeDrift, Message: "init entry missing manifest key"}
+	}
+	mk := first.ManifestKey
+	if mk.FixtureFileSHA != l.cfg.ManifestKey.FixtureFileSHA {
+		return &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("fixture SHA drift: ledger has %q, config has %q", mk.FixtureFileSHA, l.cfg.ManifestKey.FixtureFileSHA)}
+	}
+	if mk.ProtocolVersion != l.cfg.ManifestKey.ProtocolVersion {
+		return &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("protocol version drift: ledger has %q, config has %q", mk.ProtocolVersion, l.cfg.ManifestKey.ProtocolVersion)}
+	}
+	if mk.ModelPin != l.cfg.ManifestKey.ModelPin {
+		return &LedgerError{Code: LedgerCodeModelDrift, Message: fmt.Sprintf("model pin drift: ledger has %q, config has %q", mk.ModelPin, l.cfg.ManifestKey.ModelPin)}
+	}
+	if mk.RatesVersion != l.cfg.ManifestKey.RatesVersion {
+		return &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("rates version drift: ledger has %q, config has %q", mk.RatesVersion, l.cfg.ManifestKey.RatesVersion)}
+	}
+	if mk.TokenBoundsHash != l.cfg.ManifestKey.TokenBoundsHash {
+		return &LedgerError{Code: LedgerCodeDrift, Message: fmt.Sprintf("token bounds hash drift: ledger has %q, config has %q", mk.TokenBoundsHash, l.cfg.ManifestKey.TokenBoundsHash)}
+	}
+	return nil
+}
+
 // validateEntry performs basic integrity checks on an entry.
 func (l *Ledger) validateEntry(e Entry) error {
 	if e.ID == "" {
 		return errors.New("empty entry id")
 	}
-	if e.Type != EntryReservation && e.Type != EntrySettlement && e.Type != EntryAdjustment {
+	if e.Type != EntryReservation && e.Type != EntrySettlement && e.Type != EntryAdjustment && e.Type != EntryInit {
 		return fmt.Errorf("invalid entry type %q", e.Type)
 	}
-	if e.Amount == 0 {
+	if e.Type != EntryInit && e.Amount == 0 {
 		return errors.New("entry amount is zero")
 	}
-	if e.Balance < 0 {
+	if e.Type != EntryInit && e.Balance < 0 {
 		return errors.New("entry balance is negative")
 	}
 	if e.TokensIn < 0 || e.TokensOut < 0 {
@@ -311,6 +458,14 @@ func (l *Ledger) validateEntry(e Entry) error {
 	}
 	if e.Type == EntrySettlement && e.RefID == "" {
 		return errors.New("settlement entry missing refId")
+	}
+	if e.Type == EntryInit {
+		if e.AuthorizedCap < 0 {
+			return errors.New("init entry authorized cap cannot be negative")
+		}
+		if e.ManifestKey == nil {
+			return errors.New("init entry missing manifest key")
+		}
 	}
 	return nil
 }
@@ -326,17 +481,33 @@ func (l *Ledger) validateEntry(e Entry) error {
 //
 // All calculations are done in integer micro-units with ceiling division.
 // Fails closed if rates are zero (missing) or cap would be exceeded.
-func (l *Ledger) Reserve(ctx Context, attempt int, task, sourceGroup string, tokensInEst, tokensOutEst int64) (string, MicroUnit, error) {
+// L7: Enforces TokenBounds — tokensEst must not exceed bounds.
+func (l *Ledger) Reserve(ctx context.Context, attempt int, task, sourceGroup string, tokensInEst, tokensOutEst int64) (string, MicroUnit, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	if l.closed {
 		return "", 0, &LedgerError{Code: LedgerCodeIO, Message: "ledger is closed"}
 	}
+	// L3: Block new reservations if halted due to overrun.
+	if l.halted {
+		return "", 0, &LedgerError{Code: LedgerCodeHalted, Message: "ledger halted due to prior overrun; no further reservations permitted"}
+	}
 
 	// Validate rates are known (fail closed if missing).
+	// Note: RateOut == 0 means "omitted/unknown" and is rejected by Reserve.
+	// An explicitly supplied zero rate (free output) would need a different
+	// representation (e.g., pointer) — for now we treat 0 as "not configured".
 	if l.cfg.RateIn == 0 || l.cfg.RateOut == 0 {
 		return "", 0, &LedgerError{Code: LedgerCodeMissingRates, Message: "input/output rates must be configured before reservation"}
+	}
+
+	// L7: Enforce TokenBounds.
+	if tokensInEst > l.cfg.TokenBounds.MaxInputTokens {
+		return "", 0, &LedgerError{Code: LedgerCodeTokenBounds, Message: fmt.Sprintf("input tokens %d exceeds bound %d", tokensInEst, l.cfg.TokenBounds.MaxInputTokens)}
+	}
+	if tokensOutEst > l.cfg.TokenBounds.MaxOutputTokens {
+		return "", 0, &LedgerError{Code: LedgerCodeTokenBounds, Message: fmt.Sprintf("output tokens %d exceeds bound %d", tokensOutEst, l.cfg.TokenBounds.MaxOutputTokens)}
 	}
 
 	// Compute base cost estimate (ceiling division for conservatism).
@@ -363,7 +534,7 @@ func (l *Ledger) Reserve(ctx Context, attempt int, task, sourceGroup string, tok
 
 	// Include protocol version in the first reservation for drift detection.
 	protocolVersion := ""
-	if len(l.entries) == 0 {
+	if len(l.entries) == 1 && l.entries[0].Type == EntryInit { // only init entry so far
 		protocolVersion = l.cfg.ManifestKey.ProtocolVersion
 	}
 
@@ -402,7 +573,11 @@ func (l *Ledger) Reserve(ctx Context, attempt int, task, sourceGroup string, tok
 //   - Actual cost exceeds reservation (overrun) — ledger records the overrun and returns error
 //   - Actual cost is negative/nonfinite/overflow
 //   - Amount is zero
-func (l *Ledger) Settle(ctx Context, refID string, actualCost MicroUnit, actualTokensIn, actualTokensOut int64, actualRateIn, actualRateOut MicroUnit) (MicroUnit, error) {
+//
+// L3: Latches halted flag on overrun; subsequent Reserve/Settle blocked.
+// L4: Verifies actual rates/tokens against reservation.
+// Actual billed cost stays recorded even when drift/overrun occurs (never rolled back).
+func (l *Ledger) Settle(ctx context.Context, refID string, actualCost MicroUnit, actualTokensIn, actualTokensOut int64, actualRateIn, actualRateOut MicroUnit) (MicroUnit, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -438,6 +613,25 @@ func (l *Ledger) Settle(ctx Context, refID string, actualCost MicroUnit, actualT
 		}
 	}
 
+	// L4: Verify actual rates match reservation rates.
+	// Note: If actualRateOut is 0 (omitted), we skip the output rate check
+	// since the reservation may have had an estimated rateOut > 0.
+	// But if both are non-zero, they must match exactly.
+	if actualRateIn != 0 && res.RateIn != 0 && actualRateIn != res.RateIn {
+		return 0, &LedgerError{Code: LedgerCodeRateMismatch, Message: fmt.Sprintf("actual rateIn %d does not match reserved rateIn %d", actualRateIn, res.RateIn)}
+	}
+	if actualRateOut != 0 && res.RateOut != 0 && actualRateOut != res.RateOut {
+		return 0, &LedgerError{Code: LedgerCodeRateMismatch, Message: fmt.Sprintf("actual rateOut %d does not match reserved rateOut %d", actualRateOut, res.RateOut)}
+	}
+
+	// L4: Verify actual tokens do not exceed reserved tokens.
+	if actualTokensIn > res.TokensIn {
+		return 0, &LedgerError{Code: LedgerCodeTokenMismatch, Message: fmt.Sprintf("actual tokensIn %d exceeds reserved tokensIn %d", actualTokensIn, res.TokensIn)}
+	}
+	if actualTokensOut > res.TokensOut {
+		return 0, &LedgerError{Code: LedgerCodeTokenMismatch, Message: fmt.Sprintf("actual tokensOut %d exceeds reserved tokensOut %d", actualTokensOut, res.TokensOut)}
+	}
+
 	// Reconcile: actual cost must not exceed reservation.
 	reservedAmount := res.Amount
 	if actualCost > reservedAmount {
@@ -466,7 +660,19 @@ func (l *Ledger) Settle(ctx Context, refID string, actualCost MicroUnit, actualT
 		}
 		l.balance += overrun
 		l.lastEntry++
-		return 0, &LedgerError{Code: LedgerCodeCapExceeded, Message: fmt.Sprintf("actual cost %d exceeds reservation %d by %d", actualCost, reservedAmount, overrun)}
+
+		// L3: Latch halted flag — no further reservations or settlements permitted.
+		l.halted = true
+		// Persist halted state by rewriting init entry.
+		if len(l.entries) > 0 && l.entries[0].Type == EntryInit {
+			l.entries[0].Halted = true
+			// Rewrite the first line (init entry) with updated halted state.
+			if err := l.rewriteInitEntry(); err != nil {
+				return 0, err
+			}
+		}
+
+		return 0, &LedgerError{Code: LedgerCodeCapExceeded, Message: fmt.Sprintf("actual cost %d exceeds reservation %d by %d (ledger halted)", actualCost, reservedAmount, overrun)}
 	}
 
 	// Settlement entry (negative amount = debit).
@@ -565,6 +771,13 @@ func (l *Ledger) Entries() []Entry {
 	return out
 }
 
+// Halted returns true if the ledger is halted due to an overrun.
+func (l *Ledger) Halted() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.halted
+}
+
 // Close releases the lock and closes the file.
 func (l *Ledger) Close() error {
 	l.mu.Lock()
@@ -583,17 +796,64 @@ func (l *Ledger) Close() error {
 	return nil
 }
 
-// Context is a minimal context interface for future cancellation support.
-type Context interface {
-	Done() <-chan struct{}
-	Err() error
+// ComputeTokenBoundsHash computes the SHA256 hash of the token bounds config
+// for drift detection. Returns hex-encoded string.
+func ComputeTokenBoundsHash(bounds TokenBounds, maxRetries int, retryMultiplier, discoveryMultiplier float64, discoveryCostEstimate MicroUnit) string {
+	// Include all parameters that affect reservation sizing.
+	input := fmt.Sprintf("%d:%d:%d:%f:%f:%d", bounds.MaxInputTokens, bounds.MaxOutputTokens, maxRetries, retryMultiplier, discoveryMultiplier, discoveryCostEstimate)
+	h := sha256.Sum256([]byte(input))
+	return fmt.Sprintf("%x", h)
 }
 
-// noopContext is a trivial context for operations that don't need cancellation.
-type noopContext struct{}
+// MicroUnitFromBaseString parses a decimal string (e.g., "0.042") into MicroUnit,
+// rounding UP (conservative for cost estimation). Rejects negative, non-finite,
+// or overflow values. Never saturates or rounds a positive cost down.
+func MicroUnitFromBaseString(s string) (MicroUnit, error) {
+	if s == "" {
+		return 0, errors.New("empty string")
+	}
+	var base float64
+	n, err := fmt.Sscanf(s, "%f", &base)
+	if n != 1 || err != nil {
+		return 0, fmt.Errorf("invalid decimal: %s", s)
+	}
+	if base < 0 {
+		return 0, errors.New("negative value not allowed")
+	}
+	if math.IsNaN(base) || math.IsInf(base, 0) {
+		return 0, errors.New("non-finite value")
+	}
+	// Round UP (ceiling) for conservative cost estimation.
+	// Multiply by 1e6 and apply ceiling.
+	micro := base * float64(MicroUnitsPerUnit)
+	if micro > float64(MaxMicroUnits) {
+		return 0, errors.New("value overflows MicroUnit")
+	}
+	// Use math.Ceil to round UP (conservative: we want to reserve enough).
+	result := MicroUnit(math.Ceil(micro))
+	if result <= 0 && base > 0 {
+		// Tiny positive value rounded to zero — treat as 1 micro-unit.
+		return 1, nil
+	}
+	return result, nil
+}
 
-func (noopContext) Done() <-chan struct{} { return nil }
-func (noopContext) Err() error            { return nil }
-
-// NoopContext returns a context that never cancels.
-func NoopContext() Context { return noopContext{} }
+// MicroUnitFromBase is deprecated; use MicroUnitFromBaseString for conservative parsing.
+// Kept for backward compatibility with tests that use float64 inputs.
+func MicroUnitFromBase(base float64) (MicroUnit, error) {
+	if base < 0 {
+		return 0, errors.New("negative value not allowed")
+	}
+	if math.IsNaN(base) || math.IsInf(base, 0) {
+		return 0, errors.New("non-finite value")
+	}
+	if base > float64(MaxMicroUnits)/float64(MicroUnitsPerUnit) {
+		return 0, errors.New("value overflows MicroUnit")
+	}
+	// Round UP (ceiling) for conservative cost estimation.
+	result := MicroUnit(math.Ceil(base * float64(MicroUnitsPerUnit)))
+	if result <= 0 && base > 0 {
+		return 1, nil
+	}
+	return result, nil
+}

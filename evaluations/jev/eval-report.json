@@ -1,7 +1,7 @@
 {
   "manifestSummary": {
     "protocolVersion": "0.3.0",
-    "generatedAt": "2026-09-20T07:12:22.312144Z",
+    "generatedAt": "2026-09-20T09:31:56.165381Z",
     "fixtureFile": "fixtures.jsonl",
     "fixtureCount": 332,
     "splitCounts": {
@@ -1179,7 +1179,7 @@
       "sg-cov-rel-implements/brenton-folio-search-protocol",
       "sg-cov-rel-implements/brenton-indexer"
     ],
-    "generationNs": 125875,
+    "generationNs": 123334,
     "byPattern": {}
   }
 }

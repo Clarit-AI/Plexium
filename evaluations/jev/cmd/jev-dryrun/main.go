@@ -45,6 +45,7 @@ func main() {
 		outPath        = flag.String("out", "-", "output JSON path; - for stdout")
 		jsonOutput     = flag.Bool("json", true, "output JSON (vs human-readable)")
 		verbose        = flag.Bool("v", false, "verbose output")
+		repetitions    = flag.Int("repetitions", 3, "number of repetitions per fixture (protocol default: 3 for held-out scoring)")
 	)
 	flag.Parse()
 
@@ -59,6 +60,9 @@ func main() {
 	}
 	if *maxRetries < 0 {
 		die("max-retries must be >= 0")
+	}
+	if *repetitions < 1 {
+		die("repetitions must be >= 1")
 	}
 	if *retryMult < 0 || *discoveryMult < 0 || *discoveryCost < 0 || *cap < 0 {
 		die("multipliers, costs, and cap must be >= 0")
@@ -94,7 +98,7 @@ func main() {
 	discoveryCostMicro := MicroUnitFromBase(*discoveryCost)
 
 	// Build task plan: count attempts per task per source group.
-	// Each fixture = one attempt. We assume 1 attempt per fixture (no repetitions).
+	// Each fixture = one attempt per repetition.
 	taskGroups := analyzeFixtures(fixtures)
 
 	// Compute per-task estimates.
@@ -117,6 +121,7 @@ func main() {
 		DiscoveryMultiplier: *discoveryMult,
 		DiscoveryCost:       *discoveryCost,
 		AuthorizedCap:       *cap,
+		Repetitions:         *repetitions,
 		TokenBounds:         TokenBounds{MaxInputTokens: *maxIn, MaxOutputTokens: *maxOut},
 		RetryPolicy:         RetryPolicy{MaxRetries: *maxRetries, RetryMultiplier: *retryMult, DiscoveryMultiplier: *discoveryMult},
 	}
@@ -130,9 +135,8 @@ func main() {
 			SourceGroups: make([]SourceGroupEstimate, 0, len(groups)),
 		}
 		for _, sg := range groups {
-			// Each fixture in this group for this task = 1 attempt.
-			// Use max tokens for conservative estimate.
-			attempts := len(sg.FixtureIDs)
+			// Each fixture in this group for this task = 1 attempt per repetition.
+			attempts := len(sg.FixtureIDs) * *repetitions
 			basePerAttempt := estimateCostMicro(rateInMicro, rateOutMicro, int64(*maxIn), int64(*maxOut))
 			retryBudget := jevledger.MicroUnit(float64(basePerAttempt) * *retryMult * float64(*maxRetries))
 			discoveryBudget := jevledger.MicroUnit(float64(discoveryCostMicro) * *discoveryMult)
@@ -141,7 +145,8 @@ func main() {
 			taskTotal += totalPerGroup
 			taskEst.SourceGroups = append(taskEst.SourceGroups, SourceGroupEstimate{
 				SourceGroup:     sg.SourceGroup,
-				FixtureCount:    attempts,
+				FixtureCount:    len(sg.FixtureIDs),
+				Attempts:        attempts,
 				BasePerAttempt:  basePerAttempt,
 				RetryBudget:     retryBudget,
 				DiscoveryBudget: discoveryBudget,
@@ -213,6 +218,7 @@ type DryRunPlan struct {
 	DiscoveryMultiplier float64             `json:"discoveryMultiplier"`
 	DiscoveryCost       float64             `json:"discoveryCost"`
 	AuthorizedCap       float64             `json:"authorizedCap"`
+	Repetitions         int                 `json:"repetitions"`
 	TokenBounds         TokenBounds         `json:"tokenBounds"`
 	RetryPolicy         RetryPolicy         `json:"retryPolicy"`
 	TaskEstimates       []TaskEstimate      `json:"taskEstimates"`
@@ -235,6 +241,7 @@ type TaskEstimate struct {
 type SourceGroupEstimate struct {
 	SourceGroup     string              `json:"sourceGroup"`
 	FixtureCount    int                 `json:"fixtureCount"`
+	Attempts        int                 `json:"attempts"`
 	BasePerAttempt  jevledger.MicroUnit `json:"basePerAttemptMicro"`
 	RetryBudget     jevledger.MicroUnit `json:"retryBudgetMicro"`
 	DiscoveryBudget jevledger.MicroUnit `json:"discoveryBudgetMicro"`
@@ -360,7 +367,8 @@ func MicroUnitFromBase(base float64) jevledger.MicroUnit {
 	if base > float64(jevledger.MaxMicroUnits)/float64(jevledger.MicroUnitsPerUnit) {
 		return jevledger.MaxMicroUnits
 	}
-	return jevledger.MicroUnit(math.Round(base * float64(jevledger.MicroUnitsPerUnit)))
+	// Round UP (ceiling) for conservative cost estimation.
+	return jevledger.MicroUnit(math.Ceil(base * float64(jevledger.MicroUnitsPerUnit)))
 }
 
 func formatMicro(m jevledger.MicroUnit) string {
@@ -404,6 +412,7 @@ func writeOutput(path string, plan DryRunPlan, asJSON, verbose bool) error {
 	fmt.Fprintf(out, "Fixture SHA:   %s\n", plan.FixtureSHA)
 	fmt.Fprintf(out, "Rates Ver:     %s\n", plan.RatesVersion)
 	fmt.Fprintf(out, "Token Bounds:  %s\n", plan.TokenBoundsSHA)
+	fmt.Fprintf(out, "Repetitions:   %d\n", plan.Repetitions)
 	fmt.Fprintf(out, "\n")
 	fmt.Fprintf(out, "Rates:         $%.6f / 1M in, $%.6f / 1M out\n", plan.RateIn, plan.RateOut)
 	fmt.Fprintf(out, "Token Limits:  %d in / %d out per attempt\n", plan.MaxInputTokens, plan.MaxOutputTokens)
@@ -413,10 +422,10 @@ func writeOutput(path string, plan DryRunPlan, asJSON, verbose bool) error {
 	fmt.Fprintf(out, "\n")
 
 	for _, te := range plan.TaskEstimates {
-		fmt.Fprintf(out, "--- %s (%d fixtures) ---\n", te.Task, te.FixtureCount)
+		fmt.Fprintf(out, "--- %s (%d fixtures, %d attempts) ---\n", te.Task, te.FixtureCount, te.FixtureCount*plan.Repetitions)
 		for _, sge := range te.SourceGroups {
-			fmt.Fprintf(out, "  %-20s %3d fixtures | base=%s retry=%s disc=%s | TOTAL=%s\n",
-				sge.SourceGroup, sge.FixtureCount,
+			fmt.Fprintf(out, "  %-20s %3d fixtures | %d attempts | base=%s retry=%s disc=%s | TOTAL=%s\n",
+				sge.SourceGroup, sge.FixtureCount, sge.Attempts,
 				formatMicro(sge.BasePerAttempt),
 				formatMicro(sge.RetryBudget),
 				formatMicro(sge.DiscoveryBudget),
