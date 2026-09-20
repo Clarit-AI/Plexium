@@ -1,6 +1,6 @@
 // Schema and manifest validation tests for the review-pilot packet.
 // Human-reviewer spotcheck: verify proposed labels are in the closed
-// vocabulary, the four adjudicated fixtures carry human approval, and the
+// vocabulary, the seven adjudicated fixtures carry human approval, and the
 // remaining fixtures stay unreviewed.
 package main
 
@@ -67,13 +67,16 @@ func TestReviewPilotSchemaValidation(t *testing.T) {
 	}
 
 	approvedIDs := map[string]bool{
-		"rp-et-001": true,
-		"rp-et-002": true,
-		"rp-et-003": true,
-		"rp-et-006": true,
+		"rp-et-001":  true,
+		"rp-et-002":  true,
+		"rp-et-003":  true,
+		"rp-et-006":  true,
+		"rp-rel-013": true,
+		"rp-rel-014": true,
+		"rp-rel-015": true,
 	}
 	// Spotcheck: every proposed label is in vocab for its task; exactly the
-	// four adjudicated fixtures are approved; every author is set.
+	// seven adjudicated fixtures are approved; every author is set.
 	for _, f := range fxs {
 		if approvedIDs[f.ID] {
 			if f.ReviewStatus != protocol.ReviewApproved {
@@ -187,11 +190,11 @@ func TestReviewPilotManifest(t *testing.T) {
 	if m.SplitCounts.Tuning != 24 || m.SplitCounts.HoldOut != 0 {
 		t.Errorf("manifest SplitCounts wrong: %+v", m.SplitCounts)
 	}
-	if m.ReviewStatusCount[protocol.ReviewUnreviewed] != 20 {
-		t.Errorf("manifest reviewStatusCount[unreviewed] = %d, want 20", m.ReviewStatusCount[protocol.ReviewUnreviewed])
+	if m.ReviewStatusCount[protocol.ReviewUnreviewed] != 17 {
+		t.Errorf("manifest reviewStatusCount[unreviewed] = %d, want 17", m.ReviewStatusCount[protocol.ReviewUnreviewed])
 	}
-	if m.ReviewStatusCount[protocol.ReviewApproved] != 4 {
-		t.Errorf("manifest reviewStatusCount[approved] = %d, want 4", m.ReviewStatusCount[protocol.ReviewApproved])
+	if m.ReviewStatusCount[protocol.ReviewApproved] != 7 {
+		t.Errorf("manifest reviewStatusCount[approved] = %d, want 7", m.ReviewStatusCount[protocol.ReviewApproved])
 	}
 	// Per-task count regression: each of the 4 tasks has 6 fixtures.
 	if got := m.TaskCounts.EntityType; got != 6 {
@@ -225,12 +228,16 @@ func TestReviewPilotLabelsByCurrentAdjudication(t *testing.T) {
 		t.Fatalf("loader.Load: %v", err)
 	}
 	want := map[string]string{
-		"rp-et-001": "place",                 // approved regional subject
-		"rp-et-002": "project",               // approved civic foundation project
-		"rp-et-003": "document",              // approved accord-as-formal-document
-		"rp-et-004": "insufficient-evidence", // empty body (missing evidence)
-		"rp-et-006": "place",                 // approved named-region environment
-		"rp-ct-010": "insufficient-evidence", // placeholder candidate, no context
+		"rp-et-001":  "place",                 // approved regional subject
+		"rp-et-002":  "project",               // approved civic foundation project
+		"rp-et-003":  "document",              // approved accord-as-formal-document
+		"rp-et-004":  "insufficient-evidence", // empty body (missing evidence)
+		"rp-et-006":  "place",                 // approved named-region environment
+		"rp-ct-010":  "insufficient-evidence", // placeholder candidate, no context
+		"rp-rel-013": "related-to",            // monitoring association, not functional use
+		"rp-rel-014": "related-to",            // ownership association survives reversed order
+		"rp-rel-015": "related-to",            // geographically consistent sources
+		"rp-rel-016": "used-by",               // unresolved; do not silently relabel
 	}
 	got := map[string]string{}
 	for _, f := range loaded.Fixtures {
@@ -268,10 +275,13 @@ func TestReviewPilotHumanAdjudicationMetadata(t *testing.T) {
 		label             string
 		rationaleFragment string
 	}{
-		"rp-et-001": {label: "place", rationaleFragment: "intentionally ambiguous benchmark case"},
-		"rp-et-002": {label: "project", rationaleFragment: "public works project"},
-		"rp-et-003": {label: "document", rationaleFragment: "identifiable formal agreements"},
-		"rp-et-006": {label: "place", rationaleFragment: "environmental characteristics"},
+		"rp-et-001":  {label: "place", rationaleFragment: "intentionally ambiguous benchmark case"},
+		"rp-et-002":  {label: "project", rationaleFragment: "public works project"},
+		"rp-et-003":  {label: "document", rationaleFragment: "identifiable formal agreements"},
+		"rp-et-006":  {label: "place", rationaleFragment: "environmental characteristics"},
+		"rp-rel-013": {label: "related-to", rationaleFragment: "not explicit functional use"},
+		"rp-rel-014": {label: "related-to", rationaleFragment: "does not justify broadening part-of semantics"},
+		"rp-rel-015": {label: "related-to", rationaleFragment: "geographically consistent"},
 	}
 	approved := make(map[string]protocol.Fixture)
 	for i := range loaded.Fixtures {
@@ -301,6 +311,19 @@ func TestReviewPilotHumanAdjudicationMetadata(t *testing.T) {
 	if fixture := approved["rp-et-001"]; len(fixture.ChallengeCategories) != 1 || fixture.ChallengeCategories[0] != protocol.ChallengeCompeting {
 		t.Fatalf("rp-et-001 challenge categories = %v, want [competing-candidates]", fixture.ChallengeCategories)
 	}
+	if fixture := approved["rp-rel-015"]; len(fixture.ChallengeCategories) != 1 || fixture.ChallengeCategories[0] != protocol.ChallengeStraightPositive {
+		t.Fatalf("rp-rel-015 challenge categories = %v, want [straightforward-positive]", fixture.ChallengeCategories)
+	}
+	for _, fixture := range loaded.Fixtures {
+		if fixture.ID != "rp-rel-016" {
+			continue
+		}
+		if fixture.ExpectedLabel != "used-by" || fixture.ReviewStatus != protocol.ReviewUnreviewed || fixture.Reviewer != "" {
+			t.Fatalf("rp-rel-016 must remain unresolved used-by proposal, got label=%q status=%q reviewer=%q", fixture.ExpectedLabel, fixture.ReviewStatus, fixture.Reviewer)
+		}
+		return
+	}
+	t.Fatal("rp-rel-016 not found")
 }
 
 func wd(t *testing.T) string {

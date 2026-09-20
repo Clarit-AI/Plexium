@@ -1,6 +1,6 @@
 {
   "protocolVersion": "0.4.0",
-  "generatedAt": "2026-09-20T20:45:10.981211Z",
+  "generatedAt": "2026-09-20T21:03:07.614358Z",
   "fixtureFile": "review-pilot/fixtures.jsonl",
   "fixtureCount": 24,
   "splitCounts": {
@@ -17,20 +17,20 @@
   },
   "sourceGroupCount": 24,
   "reviewStatusCount": {
-    "approved": 4,
-    "unreviewed": 20
+    "approved": 7,
+    "unreviewed": 17
   },
   "challengeCount": {
     "adversarial-instruction": 2,
     "competing-candidates": 3,
-    "conflicting-sources": 3,
+    "conflicting-sources": 2,
     "irrelevant-context": 2,
     "missing-evidence": 4,
     "rename": 4,
     "reversed-direction": 1,
-    "straightforward-positive": 5
+    "straightforward-positive": 6
   },
-  "sha256FixtureFile": "b09b20794657620e2ff41b63a874017262af0c4e4f5ba6227fd2e84ad3f01c7c",
+  "sha256FixtureFile": "8f40998937e6c96e12e5579e2388b931ca61d190a57af2368a6e393b3c2584b3",
   "sha256Manifest": "",
   "fixtureHashes": [
     {
@@ -95,17 +95,17 @@
     },
     {
       "id": "rp-rel-013",
-      "sha256": "f10afc1214d571bbc7889dd758c8bcc323c9bb421c7fd6476314772100fd5d0b",
+      "sha256": "9723006accbdac04f3c346e541806b9c1c1ccc76c0bd692bc7fedc8e6b135704",
       "split": "tuning"
     },
     {
       "id": "rp-rel-014",
-      "sha256": "de0294becaaf4576607dc6d7b98e854cdc3ec7bcd13ccdc86cd9cce74d20bbdd",
+      "sha256": "939d0992488e469bb2c6b758fb3b74de0b2eecd1d5196b6d67af1f084bd19c9e",
       "split": "tuning"
     },
     {
       "id": "rp-rel-015",
-      "sha256": "1501b2fa87630e2402e23003f426780a4b7152b2394e33c7c72d753837b69742",
+      "sha256": "2559a9ae40fec8984f7a0e6bb13f9f01074418edc0995c15d95cfdbe8ea6de44",
       "split": "tuning"
     },
     {
