@@ -163,6 +163,23 @@ func TestVerifySplitIndependenceDetectsCrossSplitEntityLeak(t *testing.T) {
 	}
 }
 
+func TestVerifySplitIndependenceDetectsV03BodyEntityLeakBehindSaltedCandidates(t *testing.T) {
+	fs := []protocol.Fixture{
+		{ID: "f1", Task: protocol.TaskClaimSupport, SourceGroup: "tune-group", TemplateFamily: "tune-prose", Split: protocol.SplitTuning, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "tune-e1", Title: "tune/vornholt-pass", Alias: "tune/vornholt"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "The Vornholt Pass region closes during winter."}}},
+		{ID: "f2", Task: protocol.TaskClaimSupport, SourceGroup: "held-group", TemplateFamily: "held-docket", Split: protocol.SplitHeldOut, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "held-e1", Title: "held/vornholt-pass", Alias: "held/pass"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "Inspectors reopened the Vornholt Pass region in spring."}}},
+	}
+	_, err := VerifySplitIndependence(fs)
+	if err == nil || !strings.Contains(err.Error(), "body entity") {
+		t.Fatalf("v0.3-style body leak was not rejected: %v", err)
+	}
+}
+
 func TestVerifySplitIndependenceAcceptsNormalizedDistinctEntities(t *testing.T) {
 	// Same surface form but case differs; the loader must not flag a
 	// case-difference as an entity collision. The fixture-supplied

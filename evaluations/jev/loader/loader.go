@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -188,7 +189,7 @@ func ValidateFixtures(fixtures []protocol.Fixture) error {
 }
 
 // VerifySplitIndependence runs the protocol's independence rule. The
-// harness does NOT claim statistical independence; it verifies three
+// harness does NOT claim statistical independence; it verifies four
 // structural properties:
 //
 //  1. No source group appears in more than one split (group-ID
@@ -197,32 +198,34 @@ func ValidateFixtures(fixtures []protocol.Fixture) error {
 //     disjointness).
 //  3. No normalized entity name or alias appears in more than one split
 //     (entity-disjointness). The loader collects every entity title and
-//     alias across all of a fixture's candidates and excerpts, then
-//     demands each normalized token appears in exactly one split.
+//     alias across all of a fixture's candidates, then demands each
+//     normalized token appears in exactly one split.
+//  4. No extracted body-text entity appears in more than one split.
+//     New study fixtures mark body entities with [[Title]] or
+//     [[Title|alias]]. A conservative legacy extractor also recognizes
+//     multiword title-cased names so old salted-candidate leaks such as
+//     "Vornholt Pass" are rejected.
 //
-// Repeated perturbations from the same family are not independent
-// samples. The protocol's required 150-independent-negative bound is not
-// met by the pilot corpus and is reported separately as a sample-size
-// gap.
+// Repeated perturbations from the same family are not independent samples.
+// Sample-size sufficiency is reported separately from these structural
+// checks.
 func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroupIndependence, error) {
 	splits := []protocol.Split{protocol.SplitTuning, protocol.SplitHeldOut, protocol.SplitReserved}
 	groups := map[protocol.Split]map[string]struct{}{}
 	templates := map[protocol.Split]map[string]struct{}{}
 	entities := map[protocol.Split]map[string]struct{}{}
+	bodyEntities := map[protocol.Split]map[string]struct{}{}
 	for _, s := range splits {
 		groups[s] = map[string]struct{}{}
 		templates[s] = map[string]struct{}{}
 		entities[s] = map[string]struct{}{}
+		bodyEntities[s] = map[string]struct{}{}
 	}
 	for _, f := range fixtures {
 		groups[f.Split][f.SourceGroup] = struct{}{}
 		if f.TemplateFamily != "" {
 			templates[f.Split][f.TemplateFamily] = struct{}{}
 		}
-		// Entity title / alias extraction. The loader is the only place
-		// that touches raw body text for normalization; the corpus
-		// generator pre-normalizes by salt-suffixing every entity, so the
-		// fixtures' Candidates fields are the source of truth.
 		for _, c := range f.Candidates {
 			if t := normalizeEntityToken(c.Title); t != "" {
 				entities[f.Split][t] = struct{}{}
@@ -231,57 +234,78 @@ func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroup
 				entities[f.Split][t] = struct{}{}
 			}
 		}
+		for _, excerpt := range f.Excerpts {
+			for _, entity := range extractBodyEntities(excerpt.Text) {
+				bodyEntities[f.Split][entity] = struct{}{}
+			}
+		}
 	}
 	var out []protocol.SplitGroupIndependence
 	seenGroup := map[string]string{}
 	seenFamily := map[string]string{}
 	seenEntity := map[string]string{}
+	seenBodyEntity := map[string]string{}
 	for _, s := range splits {
 		ind := true
 		var note string
 		entityDisjoint := true
 		var entityNote string
+		bodyEntityDisjoint := true
+		var bodyEntityNote string
 		templateDisjoint := true
 		var templateNote string
-		for g := range groups[s] {
+		for _, g := range sortedKeys(groups[s]) {
 			if prev, ok := seenGroup[g]; ok {
 				ind = false
 				note = fmt.Sprintf("source group %q appears in %s and %s", g, prev, s)
-				break
+				continue
 			}
 			seenGroup[g] = string(s)
 		}
-		if ind {
-			for tf := range templates[s] {
-				if prev, ok := seenFamily[tf]; ok {
-					ind = false
-					templateDisjoint = false
+		for _, tf := range sortedKeys(templates[s]) {
+			if prev, ok := seenFamily[tf]; ok {
+				ind = false
+				templateDisjoint = false
+				if templateNote == "" {
 					templateNote = fmt.Sprintf("template family %q appears in %s and %s", tf, prev, s)
-					break
 				}
-				seenFamily[tf] = string(s)
+				continue
 			}
+			seenFamily[tf] = string(s)
 		}
-		if ind {
-			for e := range entities[s] {
-				if prev, ok := seenEntity[e]; ok {
-					ind = false
-					entityDisjoint = false
+		for _, e := range sortedKeys(entities[s]) {
+			if prev, ok := seenEntity[e]; ok {
+				ind = false
+				entityDisjoint = false
+				if entityNote == "" {
 					entityNote = fmt.Sprintf("entity %q appears in %s and %s", e, prev, s)
-					break
 				}
-				seenEntity[e] = string(s)
+				continue
 			}
+			seenEntity[e] = string(s)
+		}
+		for _, e := range sortedKeys(bodyEntities[s]) {
+			if prev, ok := seenBodyEntity[e]; ok {
+				ind = false
+				bodyEntityDisjoint = false
+				if bodyEntityNote == "" {
+					bodyEntityNote = fmt.Sprintf("body entity %q appears in %s and %s", e, prev, s)
+				}
+				continue
+			}
+			seenBodyEntity[e] = string(s)
 		}
 		out = append(out, protocol.SplitGroupIndependence{
-			Split:                  s,
-			GroupCount:             len(groups[s]),
-			Independent:            ind,
-			ViolationNote:          note,
-			EntityDisjoint:         entityDisjoint,
-			EntityViolationNote:    entityNote,
-			TemplateFamilyDisjoint: templateDisjoint,
-			TemplateViolationNote:  templateNote,
+			Split:                   s,
+			GroupCount:              len(groups[s]),
+			Independent:             ind,
+			ViolationNote:           note,
+			EntityDisjoint:          entityDisjoint,
+			EntityViolationNote:     entityNote,
+			BodyEntityDisjoint:      bodyEntityDisjoint,
+			BodyEntityViolationNote: bodyEntityNote,
+			TemplateFamilyDisjoint:  templateDisjoint,
+			TemplateViolationNote:   templateNote,
 		})
 	}
 	for _, item := range out {
@@ -299,10 +323,48 @@ func firstViolationNote(item protocol.SplitGroupIndependence) string {
 	if item.EntityViolationNote != "" {
 		return item.EntityViolationNote
 	}
+	if item.BodyEntityViolationNote != "" {
+		return item.BodyEntityViolationNote
+	}
 	if item.TemplateViolationNote != "" {
 		return item.TemplateViolationNote
 	}
 	return item.ViolationNote
+}
+
+var (
+	bodyLinkPattern   = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
+	legacyNamePattern = regexp.MustCompile(`\b[A-Z][A-Za-z0-9'-]*(?:[ \t]+[A-Z][A-Za-z0-9'-]*)+\b`)
+)
+
+func extractBodyEntities(text string) []string {
+	set := map[string]struct{}{}
+	for _, match := range bodyLinkPattern.FindAllStringSubmatch(text, -1) {
+		for _, surface := range strings.SplitN(match[1], "|", 2) {
+			if token := normalizeEntityToken(surface); token != "" {
+				set[token] = struct{}{}
+			}
+		}
+	}
+	legacyText := bodyLinkPattern.ReplaceAllString(text, " ")
+	for _, match := range legacyNamePattern.FindAllString(legacyText, -1) {
+		words := strings.Fields(match)
+		for start := 0; start+1 < len(words); start++ {
+			if token := normalizeEntityToken(strings.Join(words[start:], " ")); token != "" {
+				set[token] = struct{}{}
+			}
+		}
+	}
+	return sortedKeys(set)
+}
+
+func sortedKeys(set map[string]struct{}) []string {
+	out := make([]string, 0, len(set))
+	for item := range set {
+		out = append(out, item)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // normalizeEntityToken lower-cases and trims whitespace so trivial

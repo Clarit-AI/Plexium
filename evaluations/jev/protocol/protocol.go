@@ -348,22 +348,23 @@ type FixtureHash struct {
 // SplitGroupIndependence records what the split-independence check
 // actually establishes. The harness does NOT claim statistical
 // independence:
-//   - Independent=true means group-IDs, template-family IDs, and the
-//     normalized entity-name/alias set are each disjoint across splits.
+//   - Independent=true means group-IDs, template-family IDs, normalized
+//     candidate names/aliases, and extracted body-text entity names are
+//     each disjoint across splits.
 //   - Repeated perturbations from the same family are not independent
-//     samples.
-//   - The protocol's required 150-independent-negative bound is not met
-//     by the pilot corpus and is reported separately as a sample-size
-//     gap.
+//     samples. Sample-size sufficiency is reported separately from these
+//     structural checks.
 type SplitGroupIndependence struct {
-	Split                  Split  `json:"split"`
-	GroupCount             int    `json:"sourceGroupCount"`
-	Independent            bool   `json:"independent"`
-	ViolationNote          string `json:"violationNote,omitempty"`
-	EntityDisjoint         bool   `json:"entityDisjoint"`
-	EntityViolationNote    string `json:"entityViolationNote,omitempty"`
-	TemplateFamilyDisjoint bool   `json:"templateFamilyDisjoint"`
-	TemplateViolationNote  string `json:"templateViolationNote,omitempty"`
+	Split                   Split  `json:"split"`
+	GroupCount              int    `json:"sourceGroupCount"`
+	Independent             bool   `json:"independent"`
+	ViolationNote           string `json:"violationNote,omitempty"`
+	EntityDisjoint          bool   `json:"entityDisjoint"`
+	EntityViolationNote     string `json:"entityViolationNote,omitempty"`
+	BodyEntityDisjoint      bool   `json:"bodyEntityDisjoint"`
+	BodyEntityViolationNote string `json:"bodyEntityViolationNote,omitempty"`
+	TemplateFamilyDisjoint  bool   `json:"templateFamilyDisjoint"`
+	TemplateViolationNote   string `json:"templateViolationNote,omitempty"`
 }
 
 // Validate enforces structural rules on a fixture. It does not check label
