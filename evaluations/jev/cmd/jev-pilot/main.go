@@ -229,7 +229,7 @@ func report(args []string) error {
 	}
 	reconciled, failures, sent := 0, 0, 0
 	billingCounts := map[string]int{}
-	knownCost := ledger.MicroUnit(0)
+	knownCost, exposure := billingTotals(outcomes, s)
 	for _, out := range outcomes {
 		if st := s.Slots[out.Slot.Ordinal]; st.Reconciled {
 			reconciled++
@@ -241,19 +241,6 @@ func report(args []string) error {
 			sent++
 		}
 		billingCounts[out.Billing]++
-		knownCost += out.CostMicrodollars
-	}
-	exposure := ledger.MicroUnit(0)
-	for _, st := range s.Slots {
-		if !st.Reserved {
-			continue
-		}
-		if st.Event.Outcome == "settled-positive" {
-			cost, _ := pilot.CostMicrodollars(st.Event.BillingCostRaw)
-			exposure += cost
-		} else {
-			exposure += ledger.MicroUnit(st.ReservedAmount)
-		}
 	}
 	result := map[string]any{"events": s.Sequence, "scheduledSlots": len(inv.Schedule), "reconciledSlots": reconciled, "requestAttempts": sent, "operationalFailures": failures, "billingCounts": billingCounts, "actualKnownSpendMicrodollars": knownCost, "conservativeLedgerExposureMicrodollars": exposure, "halted": s.Halted, "haltReason": s.HaltReason, "outcomes": outcomes}
 	if *fixturesPath != "" || *manifestPath != "" {
@@ -278,6 +265,30 @@ func report(args []string) error {
 		result["tuningOnlyScores"] = reports
 	}
 	return json.NewEncoder(os.Stdout).Encode(result)
+}
+
+func billingTotals(outcomes []pilot.Outcome, state pilot.ReplayState) (ledger.MicroUnit, ledger.MicroUnit) {
+	knownCost := ledger.MicroUnit(0)
+	knownBySlot := make(map[int]ledger.MicroUnit, len(outcomes))
+	for _, out := range outcomes {
+		if !out.KnownCost {
+			continue
+		}
+		knownCost += out.CostMicrodollars
+		knownBySlot[out.Slot.Ordinal] = out.CostMicrodollars
+	}
+	exposure := ledger.MicroUnit(0)
+	for ordinal, st := range state.Slots {
+		if !st.Reserved {
+			continue
+		}
+		exposed := ledger.MicroUnit(st.ReservedAmount)
+		if knownBySlot[ordinal] > exposed {
+			exposed = knownBySlot[ordinal]
+		}
+		exposure += exposed
+	}
+	return knownCost, exposure
 }
 
 func openBudget(runID, name, inventoryHash string, a armManifest) (*ledger.Ledger, pilot.ArmBudget, error) {

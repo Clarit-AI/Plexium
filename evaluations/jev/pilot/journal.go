@@ -194,7 +194,7 @@ func applyEvent(s *ReplayState, e JournalEvent) error {
 		copy := e
 		st.Observation = &copy
 	case EventReconciled:
-		if !st.Observed || st.Reconciled {
+		if !st.Observed || st.Reconciled || e.ReservationID != st.ReservationID {
 			return fmt.Errorf("pilot: invalid reconcile transition for slot %d", e.SlotOrdinal)
 		}
 		st.Reconciled = true

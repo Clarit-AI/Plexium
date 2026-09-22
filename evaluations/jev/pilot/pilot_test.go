@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -127,7 +126,7 @@ func TestJournalReplayReconstructsStateAndRejectsTornTail(t *testing.T) {
 	}
 	base := JournalEvent{SlotOrdinal: 1, FixtureID: "x", Arm: ArmJev, PayloadSHA: "abc"}
 	for _, e := range []JournalEvent{withType(base, EventIntent), withType(base, EventReserved), withType(base, EventSend), withType(base, EventObserved), withType(base, EventReconciled)} {
-		if e.Type == EventReserved {
+		if e.Type == EventReserved || e.Type == EventReconciled {
 			e.ReservationID = "res-1"
 		}
 		if err := j.Append(e); err != nil {
@@ -182,7 +181,7 @@ func TestRestartAfterSendRefusesResendAndPreservesReservation(t *testing.T) {
 	if err := r.Journal.BindRun(RunBinding{InventoryHash: r.Config.InventoryHash, AuthorizationRef: r.Config.AuthorizationRef, CombinedCap: int64(r.Config.CombinedCap), ContractSHA: r.Config.ContractSHA}); err != nil {
 		t.Fatal(err)
 	}
-	base := JournalEvent{SlotOrdinal: 1, FixtureID: "x", Arm: ArmJev, PayloadSHA: "p"}
+	base := JournalEvent{SlotOrdinal: 1, FixtureID: "x", Arm: ArmJev, PayloadSHA: r.Inventory.Schedule[0].PayloadSHA}
 	if err := r.Journal.Append(withType(base, EventIntent)); err != nil {
 		t.Fatal(err)
 	}
@@ -500,14 +499,20 @@ func TestSubcapStopsOnlyOneArm(t *testing.T) {
 }
 
 func TestSharedCapStopsBothBeforeSend(t *testing.T) {
-	r, closeAll := newTestRunner(t, []Slot{{Ordinal: 1, FixtureID: "x", Arm: ArmJev, PayloadSHA: "p"}}, 4, 2, 2)
+	slots := []Slot{
+		{Ordinal: 1, FixtureID: "seed-a", Arm: ArmNano},
+		{Ordinal: 2, FixtureID: "seed-b", Arm: ArmNano},
+		{Ordinal: 3, FixtureID: "target", Arm: ArmJev},
+	}
+	r, closeAll := newTestRunner(t, slots, 4, 2, 2)
 	defer closeAll()
 	if err := r.Journal.BindRun(RunBinding{InventoryHash: r.Config.InventoryHash, AuthorizationRef: r.Config.AuthorizationRef, CombinedCap: int64(r.Config.CombinedCap), ContractSHA: r.Config.ContractSHA}); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		ordinal := 99 + i
-		base := JournalEvent{SlotOrdinal: ordinal, FixtureID: fmt.Sprintf("seed-%d", i), Arm: ArmNano, PayloadSHA: "seed"}
+		slot := r.Inventory.Schedule[i]
+		ordinal := slot.Ordinal
+		base := JournalEvent{SlotOrdinal: ordinal, FixtureID: slot.FixtureID, Arm: slot.Arm, PayloadSHA: slot.PayloadSHA}
 		if err := r.Journal.Append(withType(base, EventIntent)); err != nil {
 			t.Fatal(err)
 		}
@@ -525,7 +530,7 @@ func TestSharedCapStopsBothBeforeSend(t *testing.T) {
 			t.Fatal(err)
 		}
 		obs := zeroObservation("nano")
-		rp, rh, op, oh, err := persistAttemptEvidence(r.Config.EvidenceDir, Slot{Ordinal: ordinal, FixtureID: base.FixtureID, Arm: ArmNano}, obs)
+		rp, rh, op, oh, err := persistAttemptEvidence(r.Config.EvidenceDir, slot, obs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -559,6 +564,144 @@ func TestSharedCapStopsBothBeforeSend(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatal("request sent after shared cap exhausted")
+	}
+}
+
+func TestMutatedJournalOrdinalRefusesBeforeResend(t *testing.T) {
+	r, done := newTestRunner(t, []Slot{{Ordinal: 1, FixtureID: "x", Arm: ArmJev}}, 20, 10, 10)
+	defer done()
+	var calls atomic.Int32
+	r.Attempts[ArmJev] = func(context.Context, []byte) (adapter.AttemptObservation, error) {
+		calls.Add(1)
+		return zeroObservation("jev"), nil
+	}
+	if _, err := r.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	path := r.Journal.path
+	if err := r.Journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rewritten bytes.Buffer
+	for _, line := range bytes.Split(bytes.TrimSpace(b), []byte("\n")) {
+		var event JournalEvent
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatal(err)
+		}
+		if event.SlotOrdinal == 1 {
+			event.SlotOrdinal = 99
+		}
+		encoded, err := json.Marshal(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rewritten.Write(encoded)
+		rewritten.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, rewritten.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	j, err := OpenJournal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Journal = j
+	if _, err := r.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "absent from frozen inventory") {
+		t.Fatalf("mutated ordinal admitted: %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("mutated ordinal caused resend: calls=%d", calls.Load())
+	}
+}
+
+func TestJournalReservationMustMatchLedgerAttemptIdentity(t *testing.T) {
+	r, done := newTestRunner(t, []Slot{{Ordinal: 1, FixtureID: "x", Arm: ArmJev}}, 20, 10, 10)
+	defer done()
+	if err := r.Journal.BindRun(RunBinding{InventoryHash: r.Config.InventoryHash, AuthorizationRef: r.Config.AuthorizationRef, CombinedCap: int64(r.Config.CombinedCap), ContractSHA: r.Config.ContractSHA}); err != nil {
+		t.Fatal(err)
+	}
+	slot := r.Inventory.Schedule[0]
+	base := JournalEvent{SlotOrdinal: slot.Ordinal, FixtureID: slot.FixtureID, Arm: slot.Arm, PayloadSHA: slot.PayloadSHA}
+	if err := r.Journal.Append(withType(base, EventIntent)); err != nil {
+		t.Fatal(err)
+	}
+	ref, reserved, err := r.Config.Jev.Ledger.Reserve(context.Background(), 99, "entity-type", "sg", 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := withType(base, EventReserved)
+	event.ReservationID = ref
+	event.Reserved = int64(reserved)
+	if err := r.Journal.Append(event); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	r.Attempts[ArmJev] = func(context.Context, []byte) (adapter.AttemptObservation, error) {
+		calls.Add(1)
+		return zeroObservation("jev"), nil
+	}
+	if _, err := r.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "ledger reservation identity mismatch") {
+		t.Fatalf("mismatched ledger attempt admitted: %v", err)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("mismatched ledger identity caused send: %d", calls.Load())
+	}
+}
+
+func TestReplayInvalidCostIsEvidenceNotKnownSpend(t *testing.T) {
+	r, done := newTestRunner(t, []Slot{{Ordinal: 1, FixtureID: "x", Arm: ArmJev}}, 20, 10, 10)
+	defer done()
+	r.Attempts[ArmJev] = func(context.Context, []byte) (adapter.AttemptObservation, error) {
+		o := zeroObservation("jev")
+		o.Billing.Cost = decimal("0.005")
+		o.Billing.Cost.Valid = false
+		o.Billing.Error = "response schema not admitted"
+		o.Decision = nil
+		return o, &adapter.TransportError{Code: "schema", Message: "rejected"}
+	}
+	if _, err := r.Run(context.Background()); err == nil {
+		t.Fatal("invalid billing did not halt")
+	}
+	out, err := ReplayOutcomes(r.Inventory, r.Journal.State(), r.Config.EvidenceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].KnownCost || out[0].CostMicrodollars != 0 || out[0].Observation == nil || out[0].Observation.Billing.Cost.Raw != "0.005" || out[0].Observation.Billing.Cost.Valid {
+		t.Fatalf("invalid billing misclassified or discarded: %+v", out)
+	}
+}
+
+func TestPositiveOverrunReconcilesLedgerBeforeHalt(t *testing.T) {
+	for _, tokens := range []string{"1", "999"} {
+		t.Run(tokens, func(t *testing.T) {
+			r, done := newTestRunner(t, []Slot{{Ordinal: 1, FixtureID: "x", Arm: ArmJev}}, 20, 10, 10)
+			defer done()
+			r.Attempts[ArmJev] = func(context.Context, []byte) (adapter.AttemptObservation, error) {
+				o := zeroObservation("jev")
+				o.Billing.Cost = decimal("0.000009")
+				o.Billing.InputTokens = decimal(tokens)
+				return o, nil
+			}
+			out, err := r.Run(context.Background())
+			if err == nil {
+				t.Fatal("positive overrun admitted")
+			}
+			if r.Config.Jev.Ledger.Balance() != 9 {
+				t.Fatalf("ledger balance=%d want 9", r.Config.Jev.Ledger.Balance())
+			}
+			entries := r.Config.Jev.Ledger.Entries()
+			last := entries[len(entries)-1]
+			if (tokens == "999" && last.Type != ledger.EntryMismatch) || (tokens == "1" && last.Type != ledger.EntryAdjustment) {
+				t.Fatalf("overrun anomaly missing: %+v", last)
+			}
+			if len(out) != 1 || !out[0].KnownCost || out[0].CostMicrodollars != 9 {
+				t.Fatalf("known billed overrun lost: %+v", out)
+			}
+		})
 	}
 }
 
@@ -703,11 +846,19 @@ func newTestRunner(t *testing.T, slots []Slot, combined, jevSub, nanoSub ledger.
 	for i := range slots {
 		slots[i].PayloadSHA = payloadHash
 	}
-	input := GoldFreeInput{FixtureID: "x", Task: protocol.TaskEntityType, SourceGroup: "sg"}
-	inputBytes, _ := json.Marshal(input)
-	inputHash := hashBytes(inputBytes)
-	entry := InventoryEntry{Input: input, Payloads: []Payload{{Arm: ArmJev, Body: []byte(`{}`), SHA256: payloadHash, InputHash: inputHash}, {Arm: ArmNano, Body: []byte(`{}`), SHA256: payloadHash, InputHash: inputHash}}}
-	inv := &Inventory{Entries: []InventoryEntry{entry}, Schedule: slots}
+	seenFixtures := map[string]bool{}
+	entries := make([]InventoryEntry, 0, len(slots))
+	for _, slot := range slots {
+		if seenFixtures[slot.FixtureID] {
+			continue
+		}
+		seenFixtures[slot.FixtureID] = true
+		input := GoldFreeInput{FixtureID: slot.FixtureID, Task: protocol.TaskEntityType, SourceGroup: "sg"}
+		inputBytes, _ := json.Marshal(input)
+		inputHash := hashBytes(inputBytes)
+		entries = append(entries, InventoryEntry{Input: input, Payloads: []Payload{{Arm: ArmJev, Body: []byte(`{}`), SHA256: payloadHash, InputHash: inputHash}, {Arm: ArmNano, Body: []byte(`{}`), SHA256: payloadHash, InputHash: inputHash}}})
+	}
+	inv := &Inventory{Entries: entries, Schedule: slots}
 	canonical, _ := inventoryHashBytes(inv)
 	inv.InventoryHash = hashBytes(canonical)
 	r := &Runner{Inventory: inv, Config: ExecutionConfig{InventoryHash: inv.InventoryHash, AuthorizationRef: "test-authorization", CombinedCap: combined, LiveContractsVerified: true, RunLockPath: filepath.Join(dir, "run.lock"), EvidenceDir: filepath.Join(dir, "evidence"), ContractSHA: "test-contract", Jev: jb, Nano: nb}, Journal: j, Attempts: map[Arm]AttemptFunc{}}

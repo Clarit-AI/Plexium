@@ -43,6 +43,7 @@ type Outcome struct {
 	Billing          string
 	BillingRaw       string
 	CostMicrodollars ledger.MicroUnit
+	KnownCost        bool
 	RequestSent      bool
 	Status           int
 	Observation      *ObservationEvidence
@@ -121,7 +122,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		if armStopped[slot.Arm] {
 			out := Outcome{Slot: slot, Error: "arm-subcap-exhausted"}
 			outcomes = append(outcomes, out)
-			if err := r.Journal.Append(JournalEvent{Type: EventSkipped, SlotOrdinal: slot.Ordinal, FixtureID: slot.FixtureID, Arm: slot.Arm, PayloadSHA: slot.PayloadSHA, Outcome: "not-run", Error: out.Error}); err != nil {
+			if err := r.appendSlotEvent(slot, JournalEvent{Type: EventSkipped, SlotOrdinal: slot.Ordinal, FixtureID: slot.FixtureID, Arm: slot.Arm, PayloadSHA: slot.PayloadSHA, Outcome: "not-run", Error: out.Error}); err != nil {
 				return outcomes, err
 			}
 			continue
@@ -137,7 +138,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 			armStopped[slot.Arm] = true
 			out := Outcome{Slot: slot, Error: "arm-subcap-exhausted"}
 			outcomes = append(outcomes, out)
-			if err := r.Journal.Append(JournalEvent{Type: EventSkipped, SlotOrdinal: slot.Ordinal, FixtureID: slot.FixtureID, Arm: slot.Arm, PayloadSHA: slot.PayloadSHA, Outcome: "not-run", Error: out.Error}); err != nil {
+			if err := r.appendSlotEvent(slot, JournalEvent{Type: EventSkipped, SlotOrdinal: slot.Ordinal, FixtureID: slot.FixtureID, Arm: slot.Arm, PayloadSHA: slot.PayloadSHA, Outcome: "not-run", Error: out.Error}); err != nil {
 				return outcomes, err
 			}
 			continue
@@ -150,7 +151,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 			return outcomes, r.halt(err.Error())
 		}
 		base := JournalEvent{SlotOrdinal: slot.Ordinal, FixtureID: slot.FixtureID, Arm: slot.Arm, PayloadSHA: payload.SHA256}
-		if err := r.Journal.Append(withType(base, EventIntent)); err != nil {
+		if err := r.appendSlotEvent(slot, withType(base, EventIntent)); err != nil {
 			return outcomes, err
 		}
 		ref, reserved, err := budget.Ledger.Reserve(ctx, slot.Ordinal, string(entry.Input.Task), entry.Input.SourceGroup, budget.InputBound, budget.OutputBound)
@@ -163,13 +164,13 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		re := withType(base, EventReserved)
 		re.ReservationID = ref
 		re.Reserved = int64(reserved)
-		if err := r.Journal.Append(re); err != nil {
+		if err := r.appendSlotEvent(slot, re); err != nil {
 			return outcomes, err
 		}
 		if err := r.validateReplayState(r.Journal.State(), slot.Ordinal); err != nil {
 			return outcomes, r.halt(err.Error())
 		}
-		if err := r.Journal.Append(withType(base, EventSend)); err != nil {
+		if err := r.appendSlotEvent(slot, withType(base, EventSend)); err != nil {
 			return outcomes, err
 		}
 		fn := r.Attempts[slot.Arm]
@@ -193,7 +194,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		if attemptErr != nil {
 			oe.Error = attemptErr.Error()
 		}
-		if err := r.Journal.Append(oe); err != nil {
+		if err := r.appendSlotEvent(slot, oe); err != nil {
 			return outcomes, err
 		}
 		evidence := evidenceFromObservation(obs)
@@ -212,17 +213,23 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		out.Billing = billing
 		out.BillingRaw = obs.Billing.Cost.Raw
 		out.CostMicrodollars = cost
-		if in > budget.InputBound || outTokens > budget.OutputBound {
+		out.KnownCost = true
+		usageExceeded := in > budget.InputBound || outTokens > budget.OutputBound
+		if cost > 0 {
+			if _, err := budget.Ledger.Settle(ctx, ref, cost, in, outTokens, budget.RateIn, budget.RateOut); err != nil {
+				if usageExceeded {
+					out.Error = fmt.Sprintf("observed usage exceeds bounds: input %d/%d output %d/%d: %v", in, budget.InputBound, outTokens, budget.OutputBound, err)
+				} else {
+					out.Error = err.Error()
+				}
+				outcomes = append(outcomes, out)
+				return outcomes, r.halt(out.Error)
+			}
+		}
+		if usageExceeded {
 			out.Error = fmt.Sprintf("observed usage exceeds bounds: input %d/%d output %d/%d", in, budget.InputBound, outTokens, budget.OutputBound)
 			outcomes = append(outcomes, out)
 			return outcomes, r.halt(out.Error)
-		}
-		if cost > 0 {
-			if _, err := budget.Ledger.Settle(ctx, ref, cost, in, outTokens, budget.RateIn, budget.RateOut); err != nil {
-				out.Error = err.Error()
-				outcomes = append(outcomes, out)
-				return outcomes, r.halt(err.Error())
-			}
 		}
 		if attemptErr != nil {
 			out.Error = attemptErr.Error()
@@ -250,7 +257,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		} else {
 			final.Outcome = "settled-positive"
 		}
-		if err := r.Journal.Append(final); err != nil {
+		if err := r.appendSlotEvent(slot, final); err != nil {
 			return outcomes, err
 		}
 		outcomes = append(outcomes, out)
@@ -290,10 +297,27 @@ func (r *Runner) lookup(s Slot) (InventoryEntry, Payload, error) {
 	return InventoryEntry{}, Payload{}, errors.New("fixture missing")
 }
 
+func (r *Runner) appendSlotEvent(slot Slot, event JournalEvent) error {
+	if event.SlotOrdinal != slot.Ordinal || event.FixtureID != slot.FixtureID || event.Arm != slot.Arm || event.PayloadSHA != slot.PayloadSHA {
+		return fmt.Errorf("pilot: journal event does not match inventory slot %d", slot.Ordinal)
+	}
+	if err := r.Journal.Append(event); err != nil {
+		return err
+	}
+	return r.validateReplayState(r.Journal.State(), slot.Ordinal)
+}
+
 func (r *Runner) validateReplayState(state ReplayState, allowPendingOrdinal int) error {
-	refs := map[Arm]map[string]ledger.MicroUnit{ArmJev: {}, ArmNano: {}}
+	type reservation struct {
+		entry ledger.Entry
+	}
+	refs := map[Arm]map[string]reservation{ArmJev: {}, ArmNano: {}}
 	terminalRefs := map[Arm]map[string]bool{ArmJev: {}, ArmNano: {}}
 	journalRefs := map[Arm]map[string]int{ArmJev: {}, ArmNano: {}}
+	schedule := make(map[int]Slot, len(r.Inventory.Schedule))
+	for _, slot := range r.Inventory.Schedule {
+		schedule[slot.Ordinal] = slot
+	}
 	for _, arm := range []Arm{ArmJev, ArmNano} {
 		budget := r.budget(arm)
 		if budget == nil || budget.Ledger == nil {
@@ -301,7 +325,7 @@ func (r *Runner) validateReplayState(state ReplayState, allowPendingOrdinal int)
 		}
 		for _, entry := range budget.Ledger.Entries() {
 			if entry.Type == ledger.EntryReservation {
-				refs[arm][entry.ID] = entry.Amount
+				refs[arm][entry.ID] = reservation{entry: entry}
 			}
 			if entry.RefID != "" && (entry.Type == ledger.EntrySettlement || entry.Type == ledger.EntryAdjustment || entry.Type == ledger.EntryMismatch) {
 				terminalRefs[arm][entry.RefID] = true
@@ -309,14 +333,28 @@ func (r *Runner) validateReplayState(state ReplayState, allowPendingOrdinal int)
 		}
 	}
 	for ordinal, st := range state.Slots {
+		slot, ok := schedule[ordinal]
+		if !ok {
+			return fmt.Errorf("pilot: journal slot %d is absent from frozen inventory", ordinal)
+		}
+		if st.Event.SlotOrdinal != slot.Ordinal || st.Event.FixtureID != slot.FixtureID || st.Event.Arm != slot.Arm || st.Event.PayloadSHA != slot.PayloadSHA {
+			return fmt.Errorf("pilot: journal identity mismatch for inventory slot %d", ordinal)
+		}
 		if !st.Reserved {
 			continue
 		}
-		amount, ok := refs[st.Event.Arm][st.ReservationID]
-		if !ok || int64(amount) != st.ReservedAmount {
+		reserved, ok := refs[slot.Arm][st.ReservationID]
+		if !ok || int64(reserved.entry.Amount) != st.ReservedAmount {
 			return fmt.Errorf("pilot: journal/ledger reservation mismatch for slot %d", ordinal)
 		}
-		journalRefs[st.Event.Arm][st.ReservationID] = ordinal
+		inventoryEntry, _, err := r.lookup(slot)
+		if err != nil {
+			return fmt.Errorf("pilot: inventory lookup for slot %d: %w", ordinal, err)
+		}
+		if reserved.entry.Attempt != slot.Ordinal || reserved.entry.Task != string(inventoryEntry.Input.Task) || reserved.entry.SourceGroup != inventoryEntry.Input.SourceGroup {
+			return fmt.Errorf("pilot: ledger reservation identity mismatch for slot %d", ordinal)
+		}
+		journalRefs[slot.Arm][st.ReservationID] = ordinal
 		if !st.Reconciled && ordinal != allowPendingOrdinal {
 			return fmt.Errorf("pilot: slot %d has an uncertain outcome; never resend", ordinal)
 		}
@@ -330,8 +368,12 @@ func (r *Runner) validateReplayState(state ReplayState, allowPendingOrdinal int)
 			if st.Observation == nil {
 				return fmt.Errorf("pilot: slot %d lost observation binding", ordinal)
 			}
-			if _, err := loadAttemptEvidence(r.Config.EvidenceDir, *st.Observation); err != nil {
+			evidence, err := loadAttemptEvidence(r.Config.EvidenceDir, *st.Observation)
+			if err != nil {
 				return fmt.Errorf("pilot: slot %d evidence invalid: %w", ordinal, err)
+			}
+			if evidence.RequestSHA256 != "" && evidence.RequestSHA256 != slot.PayloadSHA {
+				return fmt.Errorf("pilot: slot %d request digest does not match frozen payload", ordinal)
 			}
 		}
 	}
@@ -443,7 +485,8 @@ func ReplayOutcomes(inv *Inventory, state ReplayState, evidenceDir string) ([]Ou
 		if e.Outcome == "settled-positive" {
 			billing = "known-positive"
 		}
-		cost, _ := decimalMicrodollars(e.BillingCostRaw)
+		var cost ledger.MicroUnit
+		knownCost := false
 		var evidence *ObservationEvidence
 		if st.Observed {
 			if st.Observation == nil {
@@ -454,8 +497,12 @@ func ReplayOutcomes(inv *Inventory, state ReplayState, evidenceDir string) ([]Ou
 				return nil, err
 			}
 			evidence = loaded
+			if parsedCost, _, _, _, billingErr := validatedBilling(loaded.Billing); billingErr == nil {
+				cost = parsedCost
+				knownCost = true
+			}
 		}
-		outcomes = append(outcomes, Outcome{Slot: slot, Label: e.Label, Error: errText, Billing: billing, BillingRaw: e.BillingCostRaw, CostMicrodollars: cost, RequestSent: e.RequestSent, Status: e.Status, Observation: evidence})
+		outcomes = append(outcomes, Outcome{Slot: slot, Label: e.Label, Error: errText, Billing: billing, BillingRaw: e.BillingCostRaw, CostMicrodollars: cost, KnownCost: knownCost, RequestSent: e.RequestSent, Status: e.Status, Observation: evidence})
 	}
 	return outcomes, nil
 }

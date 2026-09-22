@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/Clarit-AI/Plexium/evaluations/jev/ledger"
+	"github.com/Clarit-AI/Plexium/evaluations/jev/pilot"
 )
 
 func TestPrepareWritesFrozenInventoryAndCorpusReference(t *testing.T) {
@@ -203,5 +204,23 @@ func TestRunFailsClosedWithoutReviewedContracts(t *testing.T) {
 	}
 	if err := runCLI([]string{"run", "-execution-manifest", p}); err == nil {
 		t.Fatal("run accepted unresolved live contracts")
+	}
+}
+
+func TestBillingTotalsExcludeInvalidCostAndExposeKnownOverrun(t *testing.T) {
+	state := pilot.ReplayState{Slots: map[int]pilot.SlotState{
+		1: {Reserved: true, ReservedAmount: 2, Event: pilot.JournalEvent{SlotOrdinal: 1}},
+		2: {Reserved: true, ReservedAmount: 2, Event: pilot.JournalEvent{SlotOrdinal: 2}},
+	}}
+	outcomes := []pilot.Outcome{
+		{Slot: pilot.Slot{Ordinal: 1}, CostMicrodollars: 5000, KnownCost: false},
+		{Slot: pilot.Slot{Ordinal: 2}, CostMicrodollars: 9, KnownCost: true},
+	}
+	known, exposure := billingTotals(outcomes, state)
+	if known != 9 {
+		t.Fatalf("known spend=%d want 9", known)
+	}
+	if exposure != 11 {
+		t.Fatalf("exposure=%d want 11 (reservation 2 + overrun 9)", exposure)
 	}
 }

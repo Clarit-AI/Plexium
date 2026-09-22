@@ -42,7 +42,7 @@ func Project(fixtures []protocol.Fixture, outcomes []Outcome, arm Arm) ([]scorin
 				p.AttemptLatencies = []float64{ms}
 			}
 			cost := o.Observation.Billing.Cost
-			if cost.Present && !cost.Null && cost.Valid {
+			if o.KnownCost && cost.Present && !cost.Null && cost.Valid {
 				if rat, ok := new(big.Rat).SetString(cost.Raw); ok {
 					value, _ := rat.Float64()
 					p.CostUSD = &value
