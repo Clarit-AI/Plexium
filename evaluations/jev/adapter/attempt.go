@@ -9,10 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -36,6 +37,7 @@ type BillingObservation struct {
 	InputTokens  DecimalField
 	OutputTokens DecimalField
 	TotalTokens  DecimalField
+	Error        string
 }
 
 // AttemptObservation is the durable evidence returned by each one-shot call,
@@ -48,6 +50,9 @@ type AttemptObservation struct {
 	ResponseProvider string
 	ResponseHeaders  map[string]string
 	RequestSHA256    string
+	RequestSent      bool
+	ResponseReceived bool
+	RetryAfter       string
 	RawResponse      []byte
 	RawSHA256        string
 	RawTruncated     bool
@@ -90,26 +95,25 @@ func ValidateDecisionFrozenBody(body []byte, requestModel string) (DecisionReque
 // never retries, redirects, sleeps, repairs, or changes the supplied payload.
 func (c *Client) SubmitDecisionsOnce(ctx context.Context, frozenBody []byte) (AttemptObservation, error) {
 	if err := validateEndpoint(c.cfg.Endpoint, "/api/alpha/decisions"); err != nil {
-		return failedLocalAttempt(err)
+		return failedLocalAttempt(frozenBody, err)
 	}
 	req, err := ValidateDecisionFrozenBody(frozenBody, c.cfg.Model)
 	if err != nil {
-		return failedLocalAttempt(err)
+		return failedLocalAttempt(frozenBody, err)
 	}
 	return performOnce(ctx, onceConfig{
 		endpoint: c.cfg.Endpoint, apiKey: c.cfg.APIKey, timeout: c.cfg.Timeout,
 		httpClient: c.cfg.HTTPClient,
 	}, frozenBody, func(obs *AttemptObservation) error {
-		if obs.Status >= 400 {
+		if obs.Status != http.StatusOK {
 			return &TransportError{Status: obs.Status, Code: codeForStatus(obs.Status), Message: fmt.Sprintf("HTTP %d", obs.Status), Latency: obs.Duration, Attempts: 1}
+		}
+		if err := validateDecisionResponseShape(obs.RawResponse); err != nil {
+			return &TransportError{Code: "schema", Message: err.Error(), Cause: err, Latency: obs.Duration, Attempts: 1}
 		}
 		dec, err := parseDecisionResponse(obs.RawResponse, c.cfg.ResponseModel, obs.Duration, 1)
 		if err != nil {
 			return err
-		}
-		var response DecisionResponse
-		if err := json.Unmarshal(obs.RawResponse, &response); err != nil || len(response.Answers) != 1 {
-			return &TransportError{Code: "schema", Message: "response must contain exactly the verdict answer", Latency: obs.Duration, Attempts: 1}
 		}
 		answer := req.Questions[DecisionVerdictID]
 		if _, ok := answer.Criteria[dec.Choice]; !ok {
@@ -169,17 +173,17 @@ func ValidateChatFrozenBody(body []byte, requestModel, requiredProvider string) 
 // CompleteOnce performs exactly one strict structured-output chat POST.
 func (c *ChatClient) CompleteOnce(ctx context.Context, frozenBody []byte) (AttemptObservation, error) {
 	if err := validateEndpoint(c.cfg.Endpoint, "/api/v1/chat/completions"); err != nil {
-		return failedLocalAttempt(err)
+		return failedLocalAttempt(frozenBody, err)
 	}
 	_, labels, err := ValidateChatFrozenBody(frozenBody, c.cfg.Model, c.cfg.ResponseProvider)
 	if err != nil {
-		return failedLocalAttempt(err)
+		return failedLocalAttempt(frozenBody, err)
 	}
 	return performOnce(ctx, onceConfig{
 		endpoint: c.cfg.Endpoint, apiKey: c.cfg.APIKey, timeout: c.cfg.Timeout,
 		httpClient: c.cfg.HTTPClient,
 	}, frozenBody, func(obs *AttemptObservation) error {
-		if obs.Status >= 400 {
+		if obs.Status != http.StatusOK {
 			return &TransportError{Status: obs.Status, Code: codeForStatus(obs.Status), Message: fmt.Sprintf("HTTP %d", obs.Status), Latency: obs.Duration, Attempts: 1}
 		}
 		chat, err := parseStrictChatResponse(obs.RawResponse, c.cfg.ResponseModel, c.cfg.ResponseProvider, labels, obs.Duration)
@@ -220,14 +224,17 @@ func performOnce(ctx context.Context, cfg onceConfig, frozenBody []byte, validat
 	}
 	client := *cfg.httpClient
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	obs.RequestSent = true
 	resp, err := client.Do(req)
 	if err != nil {
 		finish()
 		return obs, &TransportError{Code: classifyTransport(err), Message: err.Error(), Cause: err, Latency: obs.Duration, Attempts: 1}
 	}
+	obs.ResponseReceived = true
 	obs.Status = resp.StatusCode
 	obs.ResponseHeaders = safeHeaders(resp.Header)
 	obs.RequestID = requestIDFromHeaders(resp.Header)
+	obs.RetryAfter = resp.Header.Get("Retry-After")
 	raw, truncated, readErr := readBounded(resp.Body)
 	closeErr := resp.Body.Close()
 	obs.RawResponse = raw
@@ -240,17 +247,27 @@ func performOnce(ctx context.Context, cfg onceConfig, frozenBody []byte, validat
 	finish()
 	sum := sha256.Sum256(raw)
 	obs.RawSHA256 = hex.EncodeToString(sum[:])
-	extractResponseEvidence(raw, &obs)
 	if obs.ReadError != "" {
+		obs.Billing.Error = "response body incomplete: " + obs.ReadError
 		return obs, &TransportError{Status: obs.Status, Code: "transport", Message: "response body read failed", Cause: readErr, Latency: obs.Duration, Attempts: 1}
 	}
 	if truncated {
 		return obs, &TransportError{Status: obs.Status, Code: "payload", Message: fmt.Sprintf("response exceeded %d bytes", MaxResponseBytes), Latency: obs.Duration, Attempts: 1}
 	}
+	if err := rejectDuplicateKeys(raw); err != nil {
+		obs.Billing.Error = "ambiguous response JSON: " + err.Error()
+		return obs, &TransportError{Status: obs.Status, Code: "schema", Message: obs.Billing.Error, Cause: err, Latency: obs.Duration, Attempts: 1}
+	}
+	extractResponseEvidence(raw, &obs)
 	if err := invalidBilling(obs.Billing); err != nil {
+		obs.Billing.Error = err.Error()
 		return obs, &TransportError{Status: obs.Status, Code: "billing", Message: err.Error(), Cause: err, Latency: obs.Duration, Attempts: 1}
 	}
 	if err := validate(&obs); err != nil {
+		var transportErr *TransportError
+		if errors.As(err, &transportErr) && transportErr.Code == "schema" {
+			invalidateBillingForSchema(&obs.Billing, transportErr.Message)
+		}
 		return obs, err
 	}
 	return obs, nil
@@ -282,9 +299,25 @@ func invalidBilling(b BillingObservation) error {
 	return nil
 }
 
-func failedLocalAttempt(err error) (AttemptObservation, error) {
+func invalidateBillingForSchema(b *BillingObservation, reason string) {
+	b.Error = "response schema not admitted: " + reason
+	for _, field := range []*DecimalField{&b.Cost, &b.InputTokens, &b.OutputTokens, &b.TotalTokens} {
+		if field.Present {
+			field.Valid = false
+			if field.Error == "" {
+				field.Error = b.Error
+			}
+		}
+	}
+}
+
+func failedLocalAttempt(frozenBody []byte, err error) (AttemptObservation, error) {
 	now := time.Now().UTC()
-	return AttemptObservation{StartedAt: now, EndedAt: now}, &TransportError{Code: "schema", Message: err.Error(), Cause: err}
+	sum := sha256.Sum256(frozenBody)
+	return AttemptObservation{
+		StartedAt: now, EndedAt: now,
+		RequestSHA256: hex.EncodeToString(sum[:]),
+	}, &TransportError{Code: "schema", Message: err.Error(), Cause: err}
 }
 
 func readBounded(r io.Reader) ([]byte, bool, error) {
@@ -297,7 +330,7 @@ func readBounded(r io.Reader) ([]byte, bool, error) {
 
 func safeHeaders(h http.Header) map[string]string {
 	out := map[string]string{}
-	for _, key := range []string{"X-Request-Id", "Openrouter-Request-Id", "Cf-Ray"} {
+	for _, key := range []string{"X-Request-Id", "Openrouter-Request-Id", "Cf-Ray", "Location", "Retry-After"} {
 		if value := h.Get(key); value != "" {
 			out[http.CanonicalHeaderKey(key)] = value
 		}
@@ -363,28 +396,84 @@ func decimalFrom(raw json.RawMessage, integral bool) DecimalField {
 		field.Null = true
 		return field
 	}
-	var number json.Number
+	trimmed := bytes.TrimSpace(raw)
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	if err := dec.Decode(&number); err != nil {
+	token, err := dec.Token()
+	if err != nil {
 		field.Error = err.Error()
 		return field
 	}
+	number, ok := token.(json.Number)
+	if !ok {
+		field.Error = "value must be a JSON number token"
+		return field
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		field.Error = "value must contain exactly one JSON number"
+		return field
+	}
+	if len(trimmed) > 0 && trimmed[0] == '-' {
+		field.Number = number
+		field.Error = "value must not be negative"
+		return field
+	}
 	field.Number = number
+	exact, err := exactDecimal(number.String())
+	if err != nil {
+		field.Error = err.Error()
+		return field
+	}
 	if integral {
-		if value, err := number.Int64(); err != nil || value < 0 {
+		if !exact.IsInt() || exact.Num().BitLen() > 63 {
 			field.Error = "token count must be a nonnegative integer"
 			return field
 		}
 	} else {
-		value, err := strconv.ParseFloat(number.String(), 64)
-		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
-			field.Error = "cost must be a finite nonnegative JSON number"
+		maxMicroUnits := new(big.Int).SetInt64(int64(^uint64(0) >> 1))
+		maxCost := new(big.Rat).SetFrac(maxMicroUnits, big.NewInt(1_000_000))
+		if exact.Cmp(maxCost) > 0 {
+			field.Error = "cost exceeds int64 micro-unit accounting range"
 			return field
 		}
 	}
 	field.Valid = true
 	return field
+}
+
+func exactDecimal(value string) (*big.Rat, error) {
+	mantissa := value
+	exponent := 0
+	if index := strings.IndexAny(value, "eE"); index >= 0 {
+		mantissa = value[:index]
+		parsed, err := strconv.Atoi(value[index+1:])
+		if err != nil || parsed < -10_000 || parsed > 10_000 {
+			return nil, errors.New("decimal exponent is outside supported range")
+		}
+		exponent = parsed
+	}
+	digits := mantissa
+	scale := 0
+	if dot := strings.IndexByte(mantissa, '.'); dot >= 0 {
+		digits = mantissa[:dot] + mantissa[dot+1:]
+		scale = len(mantissa) - dot - 1
+	}
+	numerator := new(big.Int)
+	if _, ok := numerator.SetString(digits, 10); !ok {
+		return nil, errors.New("invalid decimal digits")
+	}
+	denominator := big.NewInt(1)
+	power := exponent - scale
+	if power >= 0 {
+		numerator.Mul(numerator, pow10(power))
+	} else {
+		denominator = pow10(-power)
+	}
+	return new(big.Rat).SetFrac(numerator, denominator), nil
+}
+
+func pow10(exponent int) *big.Int {
+	return new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(exponent)), nil)
 }
 
 func decodeStrictSingle(body []byte, dst any) error {
@@ -509,9 +598,78 @@ func strictLabelVocabulary(schema map[string]any) ([]string, error) {
 	return labels, nil
 }
 
+func validateDecisionResponseShape(body []byte) error {
+	if err := rejectDuplicateKeys(body); err != nil {
+		return fmt.Errorf("ambiguous Decisions response: %w", err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(body, &top); err != nil {
+		return fmt.Errorf("decode Decisions response: %w", err)
+	}
+	if err := exactObjectKeys(top,
+		[]string{"id", "model", "provider", "answers", "usage"},
+		[]string{"id", "model", "answers", "usage"}); err != nil {
+		return fmt.Errorf("Decisions response: %w", err)
+	}
+	answers, err := rawObject(top["answers"], "answers")
+	if err != nil {
+		return err
+	}
+	if err := exactObjectKeys(answers, []string{DecisionVerdictID}, []string{DecisionVerdictID}); err != nil {
+		return fmt.Errorf("answers: %w", err)
+	}
+	verdict, err := rawObject(answers[DecisionVerdictID], DecisionVerdictID)
+	if err != nil {
+		return err
+	}
+	if err := exactObjectKeys(verdict,
+		[]string{"type", "choice", "confidence", "probabilities"},
+		[]string{"type", "choice"}); err != nil {
+		return fmt.Errorf("verdict answer: %w", err)
+	}
+	usage, err := rawObject(top["usage"], "usage")
+	if err != nil {
+		return err
+	}
+	if err := exactObjectKeys(usage,
+		[]string{"input_tokens", "output_tokens", "cost"}, nil); err != nil {
+		return fmt.Errorf("usage: %w", err)
+	}
+	return nil
+}
+
+func rawObject(raw json.RawMessage, name string) (map[string]json.RawMessage, error) {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil || object == nil {
+		return nil, fmt.Errorf("%s must be a JSON object", name)
+	}
+	return object, nil
+}
+
+func exactObjectKeys(object map[string]json.RawMessage, allowed, required []string) error {
+	allow := make(map[string]bool, len(allowed))
+	for _, key := range allowed {
+		allow[key] = true
+	}
+	for key := range object {
+		if !allow[key] {
+			return fmt.Errorf("unexpected property %q", key)
+		}
+	}
+	for _, key := range required {
+		if _, ok := object[key]; !ok {
+			return fmt.Errorf("missing required property %q", key)
+		}
+	}
+	return nil
+}
+
 func parseStrictChatResponse(body []byte, expectedModel, expectedProvider string, labels []string, latency time.Duration) (*ChatObservation, error) {
 	if err := rejectDuplicateKeys(body); err != nil {
 		return nil, &TransportError{Code: "schema", Message: "decode chat response: " + err.Error(), Cause: err, Latency: latency, Attempts: 1}
+	}
+	if err := validateChatResponseShape(body); err != nil {
+		return nil, &TransportError{Code: "schema", Message: err.Error(), Cause: err, Latency: latency, Attempts: 1}
 	}
 	var resp ChatResponse
 	if err := decodeStrictSingle(body, &resp); err != nil {
@@ -549,20 +707,74 @@ func parseStrictChatResponse(body []byte, expectedModel, expectedProvider string
 	}, nil
 }
 
+func validateChatResponseShape(body []byte) error {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(body, &top); err != nil {
+		return fmt.Errorf("decode chat response: %w", err)
+	}
+	if err := exactObjectKeys(top,
+		[]string{"id", "model", "provider", "choices", "usage"},
+		[]string{"id", "model", "provider", "choices", "usage"}); err != nil {
+		return fmt.Errorf("chat response: %w", err)
+	}
+	var choices []json.RawMessage
+	if err := json.Unmarshal(top["choices"], &choices); err != nil {
+		return errors.New("chat choices must be an array")
+	}
+	for index, raw := range choices {
+		choice, err := rawObject(raw, fmt.Sprintf("choice %d", index))
+		if err != nil {
+			return err
+		}
+		if err := exactObjectKeys(choice,
+			[]string{"index", "message", "finish_reason"},
+			[]string{"index", "message", "finish_reason"}); err != nil {
+			return fmt.Errorf("choice %d: %w", index, err)
+		}
+		message, err := rawObject(choice["message"], fmt.Sprintf("choice %d message", index))
+		if err != nil {
+			return err
+		}
+		if err := exactObjectKeys(message,
+			[]string{"role", "content", "refusal"},
+			[]string{"role", "content"}); err != nil {
+			return fmt.Errorf("choice %d message: %w", index, err)
+		}
+	}
+	usage, err := rawObject(top["usage"], "usage")
+	if err != nil {
+		return err
+	}
+	if err := exactObjectKeys(usage,
+		[]string{"prompt_tokens", "completion_tokens", "total_tokens", "cost"}, nil); err != nil {
+		return fmt.Errorf("usage: %w", err)
+	}
+	return nil
+}
+
 func decodeExactLabel(content string) (string, error) {
 	if err := rejectDuplicateKeys([]byte(content)); err != nil {
 		return "", fmt.Errorf("chat response content: %w", err)
 	}
-	var value struct {
-		Label string `json:"label"`
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(content), &object); err != nil {
+		return "", fmt.Errorf("chat response content must be an object: %w", err)
 	}
-	if err := decodeStrictSingle([]byte(content), &value); err != nil {
-		return "", fmt.Errorf("chat response content must be exactly one label object: %w", err)
+	if len(object) != 1 {
+		return "", errors.New("chat response content must contain exactly one property named label")
 	}
-	if value.Label == "" {
+	raw, ok := object["label"]
+	if !ok {
+		return "", errors.New("chat response content property must be exact lowercase label")
+	}
+	var label string
+	if err := json.Unmarshal(raw, &label); err != nil {
+		return "", errors.New("chat response label must be a JSON string")
+	}
+	if label == "" {
 		return "", errors.New("chat response label is empty")
 	}
-	return value.Label, nil
+	return label, nil
 }
 
 func sameKeys(values map[string]float64, criteria map[string]DecisionCriteria) bool {

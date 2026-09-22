@@ -13,14 +13,26 @@ headers, request/route identity, timestamps, and presence-aware decimal
 billing/usage fields. Missing, `null`, numeric zero, positive decimal, and
 invalid fields remain distinct. Raw bytes are never copied into one-shot error
 messages; a future runner must persist them privately with mode `0600`.
+Local rejections also retain the frozen request digest and explicitly record
+that no request/response occurred. Wire attempts distinguish request attempted
+from response received. `Retry-After` and `Location` are safe allowlisted
+evidence; the adapter never sleeps or follows the redirect itself.
+
+Only HTTP 200 is admitted for semantic validation. Duplicate response keys or
+non-canonical/extra Jev response properties fail schema admission before
+billing or labels can become authoritative. Billing fields from any
+schema-rejected response are retained as raw evidence but marked invalid.
+Decimal validation accepts only JSON number tokens and uses exact decimal
+arithmetic bounded by the signed 64-bit micro-unit accounting range; strings,
+negative values, fractional token counts, and out-of-range amounts fail.
 
 The strict Nano request shape includes `response_format.json_schema.strict`,
 an exact one-field `label` enum schema, `max_tokens`, and provider routing
 fields. The strict response path accepts one completed assistant choice and one
 JSON object containing exactly one in-vocabulary string `label`. It rejects
 refusals, truncation, extra or duplicate keys, trailing JSON, model-pin drift,
-and missing/mismatched provider identity. No confidence or probabilities are
-invented for Nano.
+case variants of the exact lowercase `label` key, and missing/mismatched
+provider identity. No confidence or probabilities are invented for Nano.
 
 The request alias and accepted response pin are separate configuration fields.
 For compatibility, `ResponseModel` defaults to `Model`; a pilot must supply an

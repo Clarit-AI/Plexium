@@ -3,8 +3,11 @@ package adapter
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -104,6 +107,7 @@ func TestSubmitDecisionsOnceFailureStillReturnsBillingEvidence(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&calls, 1)
 		w.Header().Set("X-Request-Id", "req-429")
+		w.Header().Set("Retry-After", "3")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = io.WriteString(w, `{"error":{"message":"slow down"},"usage":{"input_tokens":7,"output_tokens":0,"cost":0.0000004}}`)
 	}))
@@ -116,6 +120,9 @@ func TestSubmitDecisionsOnceFailureStillReturnsBillingEvidence(t *testing.T) {
 	}
 	if obs.Status != 429 || obs.RequestID != "req-429" || !obs.Billing.Cost.Valid || obs.Billing.Cost.Raw != "0.0000004" {
 		t.Fatalf("failure evidence missing: %+v", obs)
+	}
+	if obs.RetryAfter != "3" || obs.ResponseHeaders["Retry-After"] != "3" {
+		t.Fatalf("Retry-After evidence missing: %+v", obs)
 	}
 	if strings.Contains(err.Error(), "slow down") {
 		t.Fatal("raw provider body leaked through error string")
@@ -146,8 +153,10 @@ func TestOnceRejectsWrongEndpointPathBeforeSend(t *testing.T) {
 	}))
 	defer srv.Close()
 	c, _ := NewClient(Config{Endpoint: srv.URL + "/wrong", Model: "alias", Timeout: time.Second})
-	obs, err := c.SubmitDecisionsOnce(context.Background(), frozenDecisionBody(t, "alias"))
-	if err == nil || calls != 0 || obs.Status != 0 || len(obs.RawResponse) != 0 {
+	body := frozenDecisionBody(t, "alias")
+	sum := sha256.Sum256(body)
+	obs, err := c.SubmitDecisionsOnce(context.Background(), body)
+	if err == nil || calls != 0 || obs.Status != 0 || len(obs.RawResponse) != 0 || obs.RequestSHA256 != hex.EncodeToString(sum[:]) || obs.RequestSent || obs.ResponseReceived {
 		t.Fatalf("wrong endpoint must fail before send: err=%v calls=%d obs=%+v", err, calls, obs)
 	}
 }
@@ -167,6 +176,99 @@ func TestSubmitDecisionsOnceDoesNotFollowRedirect(t *testing.T) {
 	obs, err := c.SubmitDecisionsOnce(context.Background(), frozenDecisionBody(t, "alias"))
 	if err == nil || obs.Status != http.StatusTemporaryRedirect || sourceCalls != 1 || targetCalls != 0 {
 		t.Fatalf("redirect was not stopped: status=%d err=%v source=%d target=%d", obs.Status, err, sourceCalls, targetCalls)
+	}
+}
+
+func TestOnceRejectsRedirectWithValidBodyForBothArms(t *testing.T) {
+	jevBody := `{"id":"r","model":"pin","answers":{"verdict":{"type":"choice","choice":"supported","probabilities":{"supported":0.7,"insufficient-evidence":0.3}}},"usage":{"input_tokens":1,"output_tokens":1,"cost":0}}`
+	chatBody := `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"cost":0}}`
+	for name, tc := range map[string]struct {
+		path     string
+		response string
+		invoke   func(string) (AttemptObservation, error)
+	}{
+		"jev": {
+			path: "/api/alpha/decisions", response: jevBody,
+			invoke: func(endpoint string) (AttemptObservation, error) {
+				c, _ := NewClient(Config{Endpoint: endpoint, Model: "alias", ResponseModel: "pin", Timeout: time.Second})
+				return c.SubmitDecisionsOnce(context.Background(), frozenDecisionBody(t, "alias"))
+			},
+		},
+		"chat": {
+			path: "/api/v1/chat/completions", response: chatBody,
+			invoke: func(endpoint string) (AttemptObservation, error) {
+				c, _ := NewChatClient(ChatConfig{Endpoint: endpoint, Model: "alias", ResponseModel: "pin", ResponseProvider: "OpenAI", Timeout: time.Second})
+				return c.CompleteOnce(context.Background(), frozenChatBody(t, "alias", "OpenAI"))
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Location", "https://example.invalid/next")
+				w.WriteHeader(http.StatusTemporaryRedirect)
+				_, _ = io.WriteString(w, tc.response)
+			}))
+			defer srv.Close()
+			obs, err := tc.invoke(srv.URL + tc.path)
+			if err == nil || obs.Status != http.StatusTemporaryRedirect || obs.Decision != nil || obs.Chat != nil || obs.ResponseHeaders["Location"] == "" {
+				t.Fatalf("valid-looking redirect admitted: err=%v obs=%+v", err, obs)
+			}
+		})
+	}
+}
+
+func TestSubmitDecisionsOnceRejectsAmbiguousResponseJSON(t *testing.T) {
+	tests := map[string]string{
+		"duplicate-choice":        `{"id":"r","model":"pin","answers":{"verdict":{"type":"choice","choice":"bad","choice":"supported"}},"usage":{"input_tokens":1,"output_tokens":1,"cost":0}}`,
+		"duplicate-verdict":       `{"id":"r","model":"pin","answers":{"verdict":{"type":"choice","choice":"bad"},"verdict":{"type":"choice","choice":"supported"}},"usage":{"input_tokens":1,"output_tokens":1,"cost":0}}`,
+		"duplicate-model":         `{"id":"r","model":"bad","model":"pin","answers":{"verdict":{"type":"choice","choice":"supported"}},"usage":{"input_tokens":1,"output_tokens":1,"cost":0}}`,
+		"duplicate-cost":          `{"id":"r","model":"pin","answers":{"verdict":{"type":"choice","choice":"supported"}},"usage":{"input_tokens":1,"output_tokens":1,"cost":10,"cost":0}}`,
+		"unexpected-answer-field": `{"id":"r","model":"pin","answers":{"verdict":{"type":"choice","choice":"supported","unexpected":true}},"usage":{"input_tokens":1,"output_tokens":1,"cost":0}}`,
+	}
+	for name, response := range tests {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, response) }))
+			defer srv.Close()
+			c, _ := NewClient(Config{Endpoint: srv.URL + "/api/alpha/decisions", Model: "alias", ResponseModel: "pin", Timeout: time.Second})
+			obs, err := c.SubmitDecisionsOnce(context.Background(), frozenDecisionBody(t, "alias"))
+			if err == nil || obs.Decision != nil || obs.Billing.Cost.Valid || obs.Billing.Error == "" {
+				t.Fatalf("ambiguous Jev response admitted: err=%v billing=%+v decision=%+v", err, obs.Billing, obs.Decision)
+			}
+		})
+	}
+}
+
+func TestDuplicateBillingOnHTTPErrorIsMarkedAmbiguous(t *testing.T) {
+	for name, tc := range map[string]struct {
+		path   string
+		invoke func(string) (AttemptObservation, error)
+	}{
+		"jev": {
+			path: "/api/alpha/decisions",
+			invoke: func(endpoint string) (AttemptObservation, error) {
+				c, _ := NewClient(Config{Endpoint: endpoint, Model: "alias", Timeout: time.Second})
+				return c.SubmitDecisionsOnce(context.Background(), frozenDecisionBody(t, "alias"))
+			},
+		},
+		"chat": {
+			path: "/api/v1/chat/completions",
+			invoke: func(endpoint string) (AttemptObservation, error) {
+				c, _ := NewChatClient(ChatConfig{Endpoint: endpoint, Model: "alias", ResponseProvider: "OpenAI", Timeout: time.Second})
+				return c.CompleteOnce(context.Background(), frozenChatBody(t, "alias", "OpenAI"))
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = io.WriteString(w, `{"error":{},"usage":{"cost":10,"cost":0}}`)
+			}))
+			defer srv.Close()
+			obs, err := tc.invoke(srv.URL + tc.path)
+			if err == nil || obs.Billing.Cost.Valid || obs.Billing.Error == "" {
+				t.Fatalf("ambiguous error billing admitted: err=%v billing=%+v", err, obs.Billing)
+			}
+		})
 	}
 }
 
@@ -207,6 +309,8 @@ func TestCompleteOnceRejectsStrictFailureMatrix(t *testing.T) {
 		"missing-provider": `{"id":"c","model":"pin","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
 		"wrong-provider":   `{"id":"c","model":"pin","provider":"Other","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
 		"trailing-json":    `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}{}"},"finish_reason":"stop"}],"usage":{}}`,
+		"uppercase-label":  `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"LABEL\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
+		"mixed-case-label": `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"insufficient-evidence\",\"LABEL\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
 	}
 	for name, response := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -218,6 +322,18 @@ func TestCompleteOnceRejectsStrictFailureMatrix(t *testing.T) {
 				t.Fatalf("expected preserved strict failure, err=%v obs=%+v", err, obs)
 			}
 		})
+	}
+}
+
+func TestSchemaRejectedChatDoesNotExposeValidBilling(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\",\"extra\":true}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"cost":0}}`)
+	}))
+	defer srv.Close()
+	c, _ := NewChatClient(ChatConfig{Endpoint: srv.URL + "/api/v1/chat/completions", Model: "alias", ResponseModel: "pin", ResponseProvider: "OpenAI", Timeout: time.Second})
+	obs, err := c.CompleteOnce(context.Background(), frozenChatBody(t, "alias", "OpenAI"))
+	if err == nil || obs.Chat != nil || obs.Billing.Cost.Valid || obs.Billing.Cost.Error == "" || obs.Billing.Error == "" {
+		t.Fatalf("schema-rejected billing still appears valid: err=%v billing=%+v", err, obs.Billing)
 	}
 }
 
@@ -234,6 +350,25 @@ func TestBillingPresenceStatesRemainDistinct(t *testing.T) {
 	}
 }
 
+func TestDecimalFromRejectsNonNumericAndOutOfRangeValues(t *testing.T) {
+	for name, raw := range map[string]string{
+		"quoted-zero":         `"0"`,
+		"quoted-decimal":      `"0.004"`,
+		"negative-underflow":  `-1e-999`,
+		"accounting-overflow": `1e309`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			field := decimalFrom(json.RawMessage(raw), false)
+			if field.Valid || field.Error == "" {
+				t.Fatalf("invalid decimal admitted: raw=%s field=%+v", raw, field)
+			}
+		})
+	}
+	if field := decimalFrom(json.RawMessage(`1e-999`), false); !field.Valid || field.Number.String() != "1e-999" {
+		t.Fatalf("exact tiny positive decimal should remain valid: %+v", field)
+	}
+}
+
 func TestOnceRejectsInvalidBillingButPreservesIt(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"id":"r","model":"pin","answers":{"verdict":{"type":"choice","choice":"supported","probabilities":{"supported":0.7,"insufficient-evidence":0.3}}},"usage":{"input_tokens":1.5,"output_tokens":0,"cost":0}}`)
@@ -244,6 +379,26 @@ func TestOnceRejectsInvalidBillingButPreservesIt(t *testing.T) {
 	var te *TransportError
 	if !errors.As(err, &te) || te.Code != "billing" || obs.Billing.InputTokens.Valid || obs.Billing.InputTokens.Error == "" {
 		t.Fatalf("invalid billing not preserved/rejected: err=%v field=%+v", err, obs.Billing.InputTokens)
+	}
+}
+
+func TestOnceRejectsQuotedAndNegativeUnderflowCost(t *testing.T) {
+	for name, cost := range map[string]string{
+		"quoted":             `"0.5"`,
+		"negative-underflow": `-1e-999`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.WriteString(w, fmt.Sprintf(`{"id":"r","model":"pin","answers":{"verdict":{"type":"choice","choice":"supported"}},"usage":{"input_tokens":1,"output_tokens":1,"cost":%s}}`, cost))
+			}))
+			defer srv.Close()
+			c, _ := NewClient(Config{Endpoint: srv.URL + "/api/alpha/decisions", Model: "alias", ResponseModel: "pin", Timeout: time.Second})
+			obs, err := c.SubmitDecisionsOnce(context.Background(), frozenDecisionBody(t, "alias"))
+			var te *TransportError
+			if !errors.As(err, &te) || te.Code != "billing" || obs.Billing.Cost.Valid || obs.Billing.Cost.Error == "" || obs.Billing.Error == "" {
+				t.Fatalf("invalid exact cost admitted: cost=%s err=%v billing=%+v", cost, err, obs.Billing)
+			}
+		})
 	}
 }
 
@@ -282,7 +437,7 @@ func TestOnceCapturesPartialReadError(t *testing.T) {
 	})}
 	c, _ := NewClient(Config{Endpoint: "https://example.invalid/api/alpha/decisions", Model: "alias", Timeout: time.Second, HTTPClient: client})
 	obs, err := c.SubmitDecisionsOnce(context.Background(), frozenDecisionBody(t, "alias"))
-	if err == nil || obs.ReadError == "" || len(obs.RawResponse) == 0 || !obs.Billing.Cost.Valid {
+	if err == nil || obs.ReadError == "" || len(obs.RawResponse) == 0 || obs.Billing.Cost.Valid || obs.Billing.Error == "" {
 		t.Fatalf("partial read evidence lost: err=%v obs=%+v", err, obs)
 	}
 }
