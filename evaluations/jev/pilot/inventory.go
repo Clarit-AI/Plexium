@@ -50,10 +50,10 @@ type GoldFreeCandidate struct {
 }
 
 type Payload struct {
-	Arm       Arm             `json:"arm"`
-	Body      json.RawMessage `json:"body"`
-	SHA256    string          `json:"sha256"`
-	InputHash string          `json:"inputHash"`
+	Arm       Arm    `json:"arm"`
+	Body      []byte `json:"bodyBase64"`
+	SHA256    string `json:"sha256"`
+	InputHash string `json:"inputHash"`
 }
 
 type InventoryEntry struct {
@@ -281,6 +281,39 @@ func ValidateInventory(inv *Inventory) error {
 			return fmt.Errorf("pilot: duplicate logical slot %s", key)
 		}
 		seenSlots[key] = true
+	}
+	return nil
+}
+
+func ValidateScoringCorpus(inv *Inventory, loaded *loader.Loaded, manifestPath string) error {
+	if err := ValidateInventory(inv); err != nil {
+		return err
+	}
+	if loaded == nil || loaded.Drift != nil {
+		return errors.New("pilot: scoring corpus has drift")
+	}
+	manifestBytes, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return err
+	}
+	if loaded.Manifest.SHA256FixtureFile != inv.Corpus.FixtureFileSHA || hashBytes(manifestBytes) != inv.Corpus.ManifestSHA {
+		return errors.New("pilot: scoring corpus digest does not match frozen inventory")
+	}
+	fixtures := loader.FilterBySplit(loaded.Fixtures, protocol.SplitTuning)
+	if inv.Corpus.Split != string(protocol.SplitTuning) || len(fixtures) != inv.Corpus.FixtureCount {
+		return errors.New("pilot: scoring corpus split/count does not match frozen inventory")
+	}
+	ids := make(map[string]bool, len(fixtures))
+	for _, f := range fixtures {
+		ids[f.ID] = true
+	}
+	if len(ids) != len(inv.Entries) {
+		return errors.New("pilot: scoring corpus case set differs from inventory")
+	}
+	for _, e := range inv.Entries {
+		if !ids[e.Input.FixtureID] {
+			return fmt.Errorf("pilot: scoring corpus missing frozen case %s", e.Input.FixtureID)
+		}
 	}
 	return nil
 }

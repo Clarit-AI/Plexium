@@ -32,6 +32,7 @@ type ExecutionConfig struct {
 	LiveContractsVerified bool
 	RunLockPath           string
 	EvidenceDir           string
+	ContractSHA           string
 	Jev, Nano             ArmBudget
 }
 
@@ -44,6 +45,7 @@ type Outcome struct {
 	CostMicrodollars ledger.MicroUnit
 	RequestSent      bool
 	Status           int
+	Observation      *ObservationEvidence
 }
 
 type Runner struct {
@@ -76,6 +78,9 @@ func (r *Runner) Validate() error {
 	if r.Config.RunLockPath == "" || r.Config.EvidenceDir == "" {
 		return errors.New("pilot: run lock path and private evidence directory required")
 	}
+	if r.Config.ContractSHA == "" {
+		return errors.New("pilot: execution contract hash required")
+	}
 	return nil
 }
 
@@ -89,12 +94,15 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 	}
 	r.lock = lock
 	defer func() { _ = lock.Close(); _ = os.Remove(r.Config.RunLockPath) }()
+	if err := r.Journal.BindRun(RunBinding{InventoryHash: r.Config.InventoryHash, AuthorizationRef: r.Config.AuthorizationRef, CombinedCap: int64(r.Config.CombinedCap), ContractSHA: r.Config.ContractSHA}); err != nil {
+		return nil, err
+	}
 	state := r.Journal.State()
 	if state.Halted {
 		return nil, fmt.Errorf("pilot: journal halted: %s", state.HaltReason)
 	}
-	if err := r.validateReplayReservations(state); err != nil {
-		return nil, err
+	if err := r.validateReplayState(state, 0); err != nil {
+		return nil, r.halt(err.Error())
 	}
 	for ordinal, st := range state.Slots {
 		if st.Intent && !st.Reconciled {
@@ -104,6 +112,9 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 	var outcomes []Outcome
 	armStopped := map[Arm]bool{}
 	for _, slot := range r.Inventory.Schedule {
+		if err := r.validateReplayState(r.Journal.State(), 0); err != nil {
+			return outcomes, r.halt(err.Error())
+		}
 		if st := r.Journal.State().Slots[slot.Ordinal]; st.Reconciled {
 			continue
 		}
@@ -155,6 +166,9 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		if err := r.Journal.Append(re); err != nil {
 			return outcomes, err
 		}
+		if err := r.validateReplayState(r.Journal.State(), slot.Ordinal); err != nil {
+			return outcomes, r.halt(err.Error())
+		}
 		if err := r.Journal.Append(withType(base, EventSend)); err != nil {
 			return outcomes, err
 		}
@@ -163,7 +177,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 			return outcomes, r.halt("missing arm attempt function")
 		}
 		obs, attemptErr := fn(ctx, payload.Body)
-		responsePath, persistErr := r.persistEvidence(slot, obs.RawResponse)
+		responsePath, responseSHA, observationPath, observationSHA, persistErr := persistAttemptEvidence(r.Config.EvidenceDir, slot, obs)
 		if persistErr != nil {
 			return outcomes, r.halt("persist response evidence: " + persistErr.Error())
 		}
@@ -171,8 +185,10 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		oe.RequestSent = obs.RequestSent
 		oe.ResponseSeen = obs.ResponseReceived
 		oe.Status = obs.Status
-		oe.ResponseSHA = obs.RawSHA256
+		oe.ResponseSHA = responseSHA
 		oe.ResponsePath = responsePath
+		oe.ObservationPath = observationPath
+		oe.ObservationSHA = observationSHA
 		oe.BillingCostRaw = obs.Billing.Cost.Raw
 		if attemptErr != nil {
 			oe.Error = attemptErr.Error()
@@ -180,7 +196,8 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		if err := r.Journal.Append(oe); err != nil {
 			return outcomes, err
 		}
-		out := Outcome{Slot: slot, RequestSent: obs.RequestSent, Status: obs.Status}
+		evidence := evidenceFromObservation(obs)
+		out := Outcome{Slot: slot, RequestSent: obs.RequestSent, Status: obs.Status, Observation: &evidence}
 		if obs.RequestSent && !obs.ResponseReceived {
 			out.Error = "uncertain-delivery"
 			outcomes = append(outcomes, out)
@@ -195,6 +212,11 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		out.Billing = billing
 		out.BillingRaw = obs.Billing.Cost.Raw
 		out.CostMicrodollars = cost
+		if in > budget.InputBound || outTokens > budget.OutputBound {
+			out.Error = fmt.Sprintf("observed usage exceeds bounds: input %d/%d output %d/%d", in, budget.InputBound, outTokens, budget.OutputBound)
+			outcomes = append(outcomes, out)
+			return outcomes, r.halt(out.Error)
+		}
 		if cost > 0 {
 			if _, err := budget.Ledger.Settle(ctx, ref, cost, in, outTokens, budget.RateIn, budget.RateOut); err != nil {
 				out.Error = err.Error()
@@ -214,6 +236,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		if out.Label == "" && out.Error == "" {
 			out.Error = "validated response contained no label"
 		}
+		haltForContract := mustHaltAttempt(attemptErr) || (attemptErr == nil && out.Label == "")
 		final := withType(base, EventReconciled)
 		final.ReservationID = ref
 		final.BillingCostRaw = obs.Billing.Cost.Raw
@@ -231,37 +254,11 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 			return outcomes, err
 		}
 		outcomes = append(outcomes, out)
+		if haltForContract {
+			return outcomes, r.halt("adapter contract failure: " + out.Error)
+		}
 	}
 	return outcomes, nil
-}
-
-func (r *Runner) persistEvidence(slot Slot, raw []byte) (string, error) {
-	if err := os.MkdirAll(r.Config.EvidenceDir, 0700); err != nil {
-		return "", err
-	}
-	if err := os.Chmod(r.Config.EvidenceDir, 0700); err != nil {
-		return "", err
-	}
-	path := fmt.Sprintf("%04d-%s-%s.response", slot.Ordinal, slot.FixtureID, slot.Arm)
-	full := r.Config.EvidenceDir + string(os.PathSeparator) + path
-	f, err := os.OpenFile(full, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return "", err
-	}
-	if _, err = f.Write(raw); err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err != nil {
-		return "", err
-	}
-	if closeErr != nil {
-		return "", closeErr
-	}
-	if err := syncDirectory(r.Config.EvidenceDir); err != nil {
-		return "", err
-	}
-	return path, nil
 }
 
 func (r *Runner) halt(reason string) error {
@@ -293,8 +290,10 @@ func (r *Runner) lookup(s Slot) (InventoryEntry, Payload, error) {
 	return InventoryEntry{}, Payload{}, errors.New("fixture missing")
 }
 
-func (r *Runner) validateReplayReservations(state ReplayState) error {
+func (r *Runner) validateReplayState(state ReplayState, allowPendingOrdinal int) error {
 	refs := map[Arm]map[string]ledger.MicroUnit{ArmJev: {}, ArmNano: {}}
+	terminalRefs := map[Arm]map[string]bool{ArmJev: {}, ArmNano: {}}
+	journalRefs := map[Arm]map[string]int{ArmJev: {}, ArmNano: {}}
 	for _, arm := range []Arm{ArmJev, ArmNano} {
 		budget := r.budget(arm)
 		if budget == nil || budget.Ledger == nil {
@@ -303,6 +302,9 @@ func (r *Runner) validateReplayReservations(state ReplayState) error {
 		for _, entry := range budget.Ledger.Entries() {
 			if entry.Type == ledger.EntryReservation {
 				refs[arm][entry.ID] = entry.Amount
+			}
+			if entry.RefID != "" && (entry.Type == ledger.EntrySettlement || entry.Type == ledger.EntryAdjustment || entry.Type == ledger.EntryMismatch) {
+				terminalRefs[arm][entry.RefID] = true
 			}
 		}
 	}
@@ -314,8 +316,47 @@ func (r *Runner) validateReplayReservations(state ReplayState) error {
 		if !ok || int64(amount) != st.ReservedAmount {
 			return fmt.Errorf("pilot: journal/ledger reservation mismatch for slot %d", ordinal)
 		}
+		journalRefs[st.Event.Arm][st.ReservationID] = ordinal
+		if !st.Reconciled && ordinal != allowPendingOrdinal {
+			return fmt.Errorf("pilot: slot %d has an uncertain outcome; never resend", ordinal)
+		}
+		if st.Reconciled && st.Event.Outcome == "settled-positive" && !terminalRefs[st.Event.Arm][st.ReservationID] {
+			return fmt.Errorf("pilot: slot %d journal settlement missing from ledger", ordinal)
+		}
+		if st.Reconciled && st.Event.Outcome == "zero-known-reservation-retained" && terminalRefs[st.Event.Arm][st.ReservationID] {
+			return fmt.Errorf("pilot: slot %d zero-retained reservation unexpectedly terminal in ledger", ordinal)
+		}
+		if st.Observed {
+			if st.Observation == nil {
+				return fmt.Errorf("pilot: slot %d lost observation binding", ordinal)
+			}
+			if _, err := loadAttemptEvidence(r.Config.EvidenceDir, *st.Observation); err != nil {
+				return fmt.Errorf("pilot: slot %d evidence invalid: %w", ordinal, err)
+			}
+		}
+	}
+	for arm, armRefs := range refs {
+		for ref := range armRefs {
+			if _, ok := journalRefs[arm][ref]; !ok {
+				return fmt.Errorf("pilot: orphan %s ledger reservation %s has no journal outcome; never resend", arm, ref)
+			}
+		}
 	}
 	return nil
+}
+func mustHaltAttempt(err error) bool {
+	if err == nil {
+		return false
+	}
+	var transportErr *adapter.TransportError
+	if !errors.As(err, &transportErr) {
+		return true
+	}
+	switch transportErr.Code {
+	case "model-pin", "provider-pin", "schema", "auth", "cancelled", "payload":
+		return true
+	}
+	return false
 }
 func withType(e JournalEvent, t EventType) JournalEvent { e.Type = t; return e }
 
@@ -361,6 +402,7 @@ func decimalMicrodollars(raw string) (ledger.MicroUnit, error) {
 	}
 	return ledger.MicroUnit(q.Int64()), nil
 }
+func CostMicrodollars(raw string) (ledger.MicroUnit, error) { return decimalMicrodollars(raw) }
 func decimalInteger(raw string) (int64, error) {
 	if raw == "" {
 		return 0, errors.New("missing token count")
@@ -374,7 +416,7 @@ func decimalInteger(raw string) (int64, error) {
 
 func MarshalInventory(inv *Inventory) ([]byte, error) { return json.MarshalIndent(inv, "", "  ") }
 
-func ReplayOutcomes(inv *Inventory, state ReplayState) []Outcome {
+func ReplayOutcomes(inv *Inventory, state ReplayState, evidenceDir string) ([]Outcome, error) {
 	outcomes := make([]Outcome, 0, len(inv.Schedule))
 	for _, slot := range inv.Schedule {
 		st, ok := state.Slots[slot.Ordinal]
@@ -389,7 +431,10 @@ func ReplayOutcomes(inv *Inventory, state ReplayState) []Outcome {
 		e := st.Event
 		errText := e.Error
 		if !st.Reconciled && errText == "" {
-			errText = "incomplete-attempt-never-resend"
+			errText = state.HaltReason
+			if errText == "" {
+				errText = "incomplete-attempt-never-resend"
+			}
 		}
 		billing := ""
 		if e.Outcome == "zero-known-reservation-retained" {
@@ -399,7 +444,18 @@ func ReplayOutcomes(inv *Inventory, state ReplayState) []Outcome {
 			billing = "known-positive"
 		}
 		cost, _ := decimalMicrodollars(e.BillingCostRaw)
-		outcomes = append(outcomes, Outcome{Slot: slot, Label: e.Label, Error: errText, Billing: billing, BillingRaw: e.BillingCostRaw, CostMicrodollars: cost, RequestSent: e.RequestSent, Status: e.Status})
+		var evidence *ObservationEvidence
+		if st.Observed {
+			if st.Observation == nil {
+				return nil, fmt.Errorf("pilot: slot %d lost observation binding", slot.Ordinal)
+			}
+			loaded, err := loadAttemptEvidence(evidenceDir, *st.Observation)
+			if err != nil {
+				return nil, err
+			}
+			evidence = loaded
+		}
+		outcomes = append(outcomes, Outcome{Slot: slot, Label: e.Label, Error: errText, Billing: billing, BillingRaw: e.BillingCostRaw, CostMicrodollars: cost, RequestSent: e.RequestSent, Status: e.Status, Observation: evidence})
 	}
-	return outcomes
+	return outcomes, nil
 }

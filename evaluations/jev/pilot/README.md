@@ -4,6 +4,8 @@ This directory contains the frozen, gold-free 24-case × 2-arm request inventory
 
 `request-inventory.json` and `corpus-reference.json` are generated once with `jev-pilot prepare` using exclusive creation and read-only file permissions. Gold remains in `review-pilot/fixtures.jsonl` and is joined locally only by `pilot.Project` during scoring.
 
+Exact request bodies are stored as base64 byte strings. This prevents JSON pretty-printing from rewriting the frozen wire bytes; each decoded body must match its recorded SHA-256 before use.
+
 ## Network-free preparation
 
 ```sh
@@ -23,6 +25,7 @@ go run ./cmd/jev-pilot prepare \
 go run ./cmd/jev-pilot report \
   -journal /run/journal.jsonl \
   -inventory /run/request-inventory.json \
+  -evidence-dir /run/evidence \
   -fixtures review-pilot/fixtures.jsonl \
   -manifest review-pilot/fixtures.manifest.json
 ```
@@ -33,4 +36,4 @@ go run ./cmd/jev-pilot report \
 
 The historical 8,064 + 24,144 microdollar figures are planning inputs only and are intentionally not embedded as executable defaults. Before any live run, independent review must verify provider billing fields and fee semantics, enforceable billed-token bounds, exact alias-to-response-pin mappings, response-linked provider identity, environment-backed credentials, and a spend authorization bound to this exact inventory and run directory.
 
-The runner performs one attempt per fixture/arm and never retries a fixture. Its append-only fsynced journal records intent, reservation, send start, bounded private response evidence, observation, and reconciliation. `RequestSent` means only that `http.Client.Do` was attempted. Any incomplete journaled attempt or attempted request without a response is never resent automatically. Missing, null, invalid, or schema-rejected billing halts both arms. Explicit numeric zero is recorded separately and retains the full reservation; it is never converted to a fake positive settlement.
+The runner performs one attempt per fixture/arm and never retries a fixture. Its append-only fsynced journal begins with the inventory, authorization reference, combined cap, and complete execution-manifest hash, then records intent, reservation, send start, bounded private response evidence, structured observation, and reconciliation. Resume cross-checks journal reservations in both directions against both ledgers and verifies every raw and structured evidence file by hash. `RequestSent` means only that `http.Client.Do` was attempted. Any incomplete or orphaned attempt is never resent automatically. Missing, null, invalid, or schema-rejected billing; observed usage beyond either token bound; and schema/identity/auth/payload contract failures halt both arms. Explicit numeric zero is recorded separately and retains the full reservation; it is never converted to a fake positive settlement.

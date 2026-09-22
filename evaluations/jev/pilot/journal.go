@@ -13,6 +13,7 @@ import (
 type EventType string
 
 const (
+	EventInit       EventType = "run-init"
 	EventIntent     EventType = "attempt-intent"
 	EventReserved   EventType = "reserved"
 	EventSend       EventType = "send-started"
@@ -23,24 +24,30 @@ const (
 )
 
 type JournalEvent struct {
-	Sequence       int64     `json:"sequence"`
-	At             time.Time `json:"at"`
-	Type           EventType `json:"type"`
-	SlotOrdinal    int       `json:"slotOrdinal,omitempty"`
-	FixtureID      string    `json:"fixtureId,omitempty"`
-	Arm            Arm       `json:"arm,omitempty"`
-	PayloadSHA     string    `json:"payloadSha256,omitempty"`
-	ReservationID  string    `json:"reservationId,omitempty"`
-	Reserved       int64     `json:"reservedMicrodollars,omitempty"`
-	RequestSent    bool      `json:"requestSent,omitempty"`
-	ResponseSeen   bool      `json:"responseReceived,omitempty"`
-	Status         int       `json:"status,omitempty"`
-	ResponseSHA    string    `json:"responseSha256,omitempty"`
-	ResponsePath   string    `json:"responsePath,omitempty"`
-	BillingCostRaw string    `json:"billingCostRaw,omitempty"`
-	Outcome        string    `json:"outcome,omitempty"`
-	Label          string    `json:"label,omitempty"`
-	Error          string    `json:"error,omitempty"`
+	Sequence         int64     `json:"sequence"`
+	At               time.Time `json:"at"`
+	Type             EventType `json:"type"`
+	SlotOrdinal      int       `json:"slotOrdinal,omitempty"`
+	FixtureID        string    `json:"fixtureId,omitempty"`
+	Arm              Arm       `json:"arm,omitempty"`
+	PayloadSHA       string    `json:"payloadSha256,omitempty"`
+	ReservationID    string    `json:"reservationId,omitempty"`
+	Reserved         int64     `json:"reservedMicrodollars,omitempty"`
+	RequestSent      bool      `json:"requestSent,omitempty"`
+	ResponseSeen     bool      `json:"responseReceived,omitempty"`
+	Status           int       `json:"status,omitempty"`
+	ResponseSHA      string    `json:"responseSha256,omitempty"`
+	ResponsePath     string    `json:"responsePath,omitempty"`
+	ObservationPath  string    `json:"observationPath,omitempty"`
+	ObservationSHA   string    `json:"observationSha256,omitempty"`
+	InventoryHash    string    `json:"inventoryHash,omitempty"`
+	AuthorizationRef string    `json:"authorizationReference,omitempty"`
+	CombinedCap      int64     `json:"combinedCapMicrodollars,omitempty"`
+	ContractSHA      string    `json:"executionContractSha256,omitempty"`
+	BillingCostRaw   string    `json:"billingCostRaw,omitempty"`
+	Outcome          string    `json:"outcome,omitempty"`
+	Label            string    `json:"label,omitempty"`
+	Error            string    `json:"error,omitempty"`
 }
 
 type SlotState struct {
@@ -48,12 +55,18 @@ type SlotState struct {
 	ReservationID                                string
 	ReservedAmount                               int64
 	Event                                        JournalEvent
+	Observation                                  *JournalEvent
+}
+type RunBinding struct {
+	InventoryHash, AuthorizationRef, ContractSHA string
+	CombinedCap                                  int64
 }
 type ReplayState struct {
 	Sequence   int64
 	Halted     bool
 	HaltReason string
 	Slots      map[int]SlotState
+	Binding    *RunBinding
 }
 
 type Journal struct {
@@ -130,15 +143,31 @@ func ReplayJournal(path string) (ReplayState, error) {
 }
 
 func applyEvent(s *ReplayState, e JournalEvent) error {
+	if e.Type == EventInit {
+		if s.Sequence != 0 || s.Binding != nil || e.InventoryHash == "" || e.AuthorizationRef == "" || e.CombinedCap <= 0 || e.ContractSHA == "" {
+			return errors.New("pilot: invalid or duplicate run-init")
+		}
+		s.Binding = &RunBinding{InventoryHash: e.InventoryHash, AuthorizationRef: e.AuthorizationRef, CombinedCap: e.CombinedCap, ContractSHA: e.ContractSHA}
+		return nil
+	}
 	if e.Type == EventHalt {
+		if s.Binding == nil {
+			return errors.New("pilot: halt before run-init")
+		}
 		s.Halted = true
 		s.HaltReason = e.Error
 		return nil
+	}
+	if s.Binding == nil {
+		return errors.New("pilot: journal transition before run-init")
 	}
 	if e.SlotOrdinal <= 0 {
 		return errors.New("pilot: journal event missing slot ordinal")
 	}
 	st := s.Slots[e.SlotOrdinal]
+	if st.Intent && (st.Event.FixtureID != e.FixtureID || st.Event.Arm != e.Arm || st.Event.PayloadSHA != e.PayloadSHA) {
+		return fmt.Errorf("pilot: slot %d identity changed across journal transitions", e.SlotOrdinal)
+	}
 	switch e.Type {
 	case EventIntent:
 		if st.Intent {
@@ -162,6 +191,8 @@ func applyEvent(s *ReplayState, e JournalEvent) error {
 			return fmt.Errorf("pilot: invalid observation transition for slot %d", e.SlotOrdinal)
 		}
 		st.Observed = true
+		copy := e
+		st.Observation = &copy
 	case EventReconciled:
 		if !st.Observed || st.Reconciled {
 			return fmt.Errorf("pilot: invalid reconcile transition for slot %d", e.SlotOrdinal)
@@ -177,6 +208,19 @@ func applyEvent(s *ReplayState, e JournalEvent) error {
 	}
 	st.Event = e
 	s.Slots[e.SlotOrdinal] = st
+	return nil
+}
+
+func (j *Journal) BindRun(binding RunBinding) error {
+	if j.state.Sequence == 0 {
+		return j.Append(JournalEvent{Type: EventInit, InventoryHash: binding.InventoryHash, AuthorizationRef: binding.AuthorizationRef, CombinedCap: binding.CombinedCap, ContractSHA: binding.ContractSHA})
+	}
+	if j.state.Binding == nil {
+		return errors.New("pilot: existing journal has no run-init binding")
+	}
+	if *j.state.Binding != binding {
+		return errors.New("pilot: execution authorization/shared-cap/contract drift")
+	}
 	return nil
 }
 

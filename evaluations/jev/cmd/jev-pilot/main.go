@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -20,24 +22,24 @@ import (
 )
 
 type armManifest struct {
-	Endpoint            string           `json:"endpoint"`
-	RequestModel        string           `json:"requestModel"`
-	ResponseModel       string           `json:"responseModel"`
-	ResponseProvider    string           `json:"responseProvider"`
-	APIKeyEnv           string           `json:"apiKeyEnv"`
-	LedgerPath          string           `json:"ledgerPath"`
-	RatesVersion        string           `json:"ratesVersion"`
-	RateEvidence        string           `json:"rateEvidence"`
-	TokenBoundEvidence  string           `json:"tokenBoundEvidence"`
-	PinMappingEvidence  string           `json:"pinMappingEvidence"`
-	ProviderEvidence    string           `json:"providerEvidence"`
-	OutputLimitEvidence string           `json:"outputLimitEvidence"`
-	Subcap              ledger.MicroUnit `json:"subcapMicrodollars"`
-	Reservation         ledger.MicroUnit `json:"reservationMicrodollars"`
-	RateIn              ledger.MicroUnit `json:"rateInPerMillionMicrodollars"`
-	RateOut             ledger.MicroUnit `json:"rateOutPerMillionMicrodollars"`
-	InputBound          int64            `json:"maxBilledInputTokens"`
-	OutputBound         int64            `json:"maxBilledOutputTokens"`
+	Endpoint            string            `json:"endpoint"`
+	RequestModel        string            `json:"requestModel"`
+	ResponseModel       string            `json:"responseModel"`
+	ResponseProvider    string            `json:"responseProvider"`
+	APIKeyEnv           string            `json:"apiKeyEnv"`
+	LedgerPath          string            `json:"ledgerPath"`
+	RatesVersion        string            `json:"ratesVersion"`
+	RateEvidence        string            `json:"rateEvidence"`
+	TokenBoundEvidence  string            `json:"tokenBoundEvidence"`
+	PinMappingEvidence  string            `json:"pinMappingEvidence"`
+	ProviderEvidence    string            `json:"providerEvidence"`
+	OutputLimitEvidence string            `json:"outputLimitEvidence"`
+	Subcap              ledger.MicroUnit  `json:"subcapMicrodollars"`
+	Reservation         ledger.MicroUnit  `json:"reservationMicrodollars"`
+	RateIn              ledger.MicroUnit  `json:"rateInPerMillionMicrodollars"`
+	RateOut             *ledger.MicroUnit `json:"rateOutPerMillionMicrodollars"`
+	InputBound          int64             `json:"maxBilledInputTokens"`
+	OutputBound         int64             `json:"maxBilledOutputTokens"`
 }
 type executionManifest struct {
 	InventoryPath          string           `json:"inventoryPath"`
@@ -120,9 +122,15 @@ func execute(args []string) error {
 		return errors.New("run requires an explicit execution-manifest")
 	}
 	var m executionManifest
-	if err := readJSON(*path, &m); err != nil {
+	manifestBytes, err := os.ReadFile(*path)
+	if err != nil {
 		return err
 	}
+	if err := json.Unmarshal(manifestBytes, &m); err != nil {
+		return err
+	}
+	contractSum := sha256.Sum256(manifestBytes)
+	contractSHA := hex.EncodeToString(contractSum[:])
 	if !m.LiveContractsVerified {
 		return errors.New("live execution denied: provider, rate, token, and pin contracts are not verified")
 	}
@@ -173,13 +181,13 @@ func execute(args []string) error {
 	if err != nil {
 		return err
 	}
-	r := pilot.Runner{Inventory: &inv, Journal: j, Config: pilot.ExecutionConfig{InventoryHash: m.InventoryHash, AuthorizationRef: m.AuthorizationReference, CombinedCap: m.CombinedCap, LiveContractsVerified: m.LiveContractsVerified, RunLockPath: m.RunLockPath, EvidenceDir: m.EvidenceDir, Jev: jb, Nano: nb}, Attempts: map[pilot.Arm]pilot.AttemptFunc{pilot.ArmJev: jc.SubmitDecisionsOnce, pilot.ArmNano: nc.CompleteOnce}}
+	r := pilot.Runner{Inventory: &inv, Journal: j, Config: pilot.ExecutionConfig{InventoryHash: m.InventoryHash, AuthorizationRef: m.AuthorizationReference, CombinedCap: m.CombinedCap, LiveContractsVerified: m.LiveContractsVerified, RunLockPath: m.RunLockPath, EvidenceDir: m.EvidenceDir, ContractSHA: contractSHA, Jev: jb, Nano: nb}, Attempts: map[pilot.Arm]pilot.AttemptFunc{pilot.ArmJev: jc.SubmitDecisionsOnce, pilot.ArmNano: nc.CompleteOnce}}
 	_, err = r.Run(context.Background())
 	return err
 }
 
 func validateArmContracts(name string, a armManifest) error {
-	if a.Endpoint == "" || a.RequestModel == "" || a.ResponseModel == "" || a.ResponseProvider == "" || a.APIKeyEnv == "" || a.LedgerPath == "" || a.RatesVersion == "" {
+	if a.Endpoint == "" || a.RequestModel == "" || a.ResponseModel == "" || a.ResponseProvider == "" || a.APIKeyEnv == "" || a.LedgerPath == "" || a.RatesVersion == "" || a.RateOut == nil {
 		return fmt.Errorf("%s arm identity/endpoint/credential contract is incomplete", name)
 	}
 	if a.RateEvidence == "" || a.TokenBoundEvidence == "" || a.PinMappingEvidence == "" || a.ProviderEvidence == "" || a.OutputLimitEvidence == "" {
@@ -194,11 +202,12 @@ func report(args []string) error {
 	inventoryPath := fs.String("inventory", "", "frozen request inventory")
 	fixturesPath := fs.String("fixtures", "", "local adjudicated fixtures for scoring")
 	manifestPath := fs.String("manifest", "", "local adjudicated fixture manifest")
+	evidenceDir := fs.String("evidence-dir", "", "private attempt evidence directory")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *path == "" || *inventoryPath == "" {
-		return errors.New("report requires journal and inventory")
+	if *path == "" || *inventoryPath == "" || *evidenceDir == "" {
+		return errors.New("report requires journal, inventory, and evidence-dir")
 	}
 	s, err := pilot.ReplayJournal(*path)
 	if err != nil {
@@ -211,7 +220,13 @@ func report(args []string) error {
 	if err := pilot.ValidateInventory(&inv); err != nil {
 		return err
 	}
-	outcomes := pilot.ReplayOutcomes(&inv, s)
+	if s.Binding == nil || s.Binding.InventoryHash != inv.InventoryHash {
+		return errors.New("report journal is not bound to this inventory")
+	}
+	outcomes, err := pilot.ReplayOutcomes(&inv, s, *evidenceDir)
+	if err != nil {
+		return err
+	}
 	reconciled, failures, sent := 0, 0, 0
 	billingCounts := map[string]int{}
 	knownCost := ledger.MicroUnit(0)
@@ -228,7 +243,19 @@ func report(args []string) error {
 		billingCounts[out.Billing]++
 		knownCost += out.CostMicrodollars
 	}
-	result := map[string]any{"events": s.Sequence, "scheduledSlots": len(inv.Schedule), "reconciledSlots": reconciled, "requestAttempts": sent, "operationalFailures": failures, "billingCounts": billingCounts, "knownCostMicrodollars": knownCost, "halted": s.Halted, "haltReason": s.HaltReason, "outcomes": outcomes}
+	exposure := ledger.MicroUnit(0)
+	for _, st := range s.Slots {
+		if !st.Reserved {
+			continue
+		}
+		if st.Event.Outcome == "settled-positive" {
+			cost, _ := pilot.CostMicrodollars(st.Event.BillingCostRaw)
+			exposure += cost
+		} else {
+			exposure += ledger.MicroUnit(st.ReservedAmount)
+		}
+	}
+	result := map[string]any{"events": s.Sequence, "scheduledSlots": len(inv.Schedule), "reconciledSlots": reconciled, "requestAttempts": sent, "operationalFailures": failures, "billingCounts": billingCounts, "actualKnownSpendMicrodollars": knownCost, "conservativeLedgerExposureMicrodollars": exposure, "halted": s.Halted, "haltReason": s.HaltReason, "outcomes": outcomes}
 	if *fixturesPath != "" || *manifestPath != "" {
 		if *fixturesPath == "" || *manifestPath == "" {
 			return errors.New("report scoring requires both fixtures and manifest")
@@ -237,8 +264,8 @@ func report(args []string) error {
 		if err != nil {
 			return err
 		}
-		if loaded.Drift != nil {
-			return errors.New("report denied: local scoring corpus drift")
+		if err := pilot.ValidateScoringCorpus(&inv, loaded, *manifestPath); err != nil {
+			return err
 		}
 		reports := map[pilot.Arm]scoring.Report{}
 		for _, arm := range []pilot.Arm{pilot.ArmJev, pilot.ArmNano} {
@@ -254,17 +281,17 @@ func report(args []string) error {
 }
 
 func openBudget(runID, name, inventoryHash string, a armManifest) (*ledger.Ledger, pilot.ArmBudget, error) {
-	if a.LedgerPath == "" || a.RequestModel == "" || a.ResponseModel == "" || a.ResponseProvider == "" || a.RatesVersion == "" || a.Subcap <= 0 || a.Reservation <= 0 || a.InputBound <= 0 || a.OutputBound <= 0 || a.RateIn <= 0 || a.RateOut < 0 {
+	if a.LedgerPath == "" || a.RequestModel == "" || a.ResponseModel == "" || a.ResponseProvider == "" || a.RatesVersion == "" || a.Subcap <= 0 || a.Reservation <= 0 || a.InputBound <= 0 || a.OutputBound <= 0 || a.RateIn <= 0 || a.RateOut == nil || *a.RateOut < 0 {
 		return nil, pilot.ArmBudget{}, fmt.Errorf("%s arm has unresolved execution contracts", name)
 	}
 	bounds := ledger.TokenBounds{MaxInputTokens: a.InputBound, MaxOutputTokens: a.OutputBound}
-	out := a.RateOut
+	out := *a.RateOut
 	cfg := ledger.LedgerConfig{Path: a.LedgerPath, AuthorizedCap: a.Subcap, RunID: runID + "-" + name, Model: a.ResponseModel, ManifestKey: ledger.ManifestKey{FixtureFileSHA: inventoryHash, ProtocolVersion: protocol.ProtocolVersion, ModelPin: a.ResponseModel, RatesVersion: a.RatesVersion, TokenBoundsHash: ledger.ComputeTokenBoundsHash(bounds, 0, 0, 0, 0)}, TokenBounds: bounds, RetryPolicy: ledger.ReservationRetryPolicy{}, RateIn: a.RateIn, RateOut: &out}
 	l, err := ledger.Open(cfg)
 	if err != nil {
 		return nil, pilot.ArmBudget{}, err
 	}
-	return l, pilot.ArmBudget{Ledger: l, Subcap: a.Subcap, Reservation: a.Reservation, InputBound: a.InputBound, OutputBound: a.OutputBound, RateIn: a.RateIn, RateOut: a.RateOut}, nil
+	return l, pilot.ArmBudget{Ledger: l, Subcap: a.Subcap, Reservation: a.Reservation, InputBound: a.InputBound, OutputBound: a.OutputBound, RateIn: a.RateIn, RateOut: *a.RateOut}, nil
 }
 
 func readJSON(path string, dst any) error {
