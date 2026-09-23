@@ -20,7 +20,7 @@ func TestStudyCorpusTargetsAndReviewMetadata(t *testing.T) {
 		t.Fatalf("corpus drift: %+v", loaded.Drift)
 	}
 	tuningByTask := map[protocol.Task]int{}
-	heldNegativeGroups := map[protocol.Task]map[string]struct{}{
+	heldNegativeSourceGroups := map[protocol.Task]map[string]struct{}{
 		protocol.TaskRelationship: {},
 		protocol.TaskClaimSupport: {},
 	}
@@ -47,7 +47,7 @@ func TestStudyCorpusTargetsAndReviewMetadata(t *testing.T) {
 				(fixture.Task == protocol.TaskClaimSupport && fixture.ExpectedLabel != "supported")
 			if negative {
 				heldNegativeCases[fixture.Task]++
-				heldNegativeGroups[fixture.Task][fixture.SourceGroup] = struct{}{}
+				heldNegativeSourceGroups[fixture.Task][fixture.SourceGroup] = struct{}{}
 			}
 			if fixture.Task == protocol.TaskClaimSupport && fixture.ExpectedLabel == "contradicted" {
 				contradicted++
@@ -66,8 +66,8 @@ func TestStudyCorpusTargetsAndReviewMetadata(t *testing.T) {
 		if got := heldNegativeCases[task]; got != 150 {
 			t.Errorf("held-out negative cases for %s=%d, want 150", task, got)
 		}
-		if got := len(heldNegativeGroups[task]); got < 150 {
-			t.Errorf("independent held-out negative groups for %s=%d, want >=150", task, got)
+		if got := len(heldNegativeSourceGroups[task]); got != 150 {
+			t.Errorf("held-out negative source groups for %s=%d, want 150", task, got)
 		}
 	}
 	for group, count := range heldGroupCases {
@@ -102,9 +102,173 @@ func TestStudyCorpusStructuralSplitIndependence(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, item := range independence {
-		if !item.Independent || !item.EntityDisjoint || !item.BodyEntityDisjoint || !item.TemplateFamilyDisjoint {
+		if !item.Independent || !item.EntityDisjoint || !item.BodyEntityDisjoint || !item.CrossChannelEntityDisjoint || !item.TemplateFamilyDisjoint {
 			t.Errorf("split %s lacks structural independence: %+v", item.Split, item)
 		}
+	}
+}
+
+func TestOrganizationEndpointGoldFollowsNamedEvidenceObject(t *testing.T) {
+	loaded, err := loader.Load("fixtures.jsonl", "fixtures.manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRelated := map[string]bool{
+		"sg-held-002-rel-positive": false, // design
+		"sg-held-003-rel-positive": false, // specification
+		"sg-held-004-rel-positive": false, // readings
+		"sg-held-013-rel-positive": false, // holdings
+		"sg-tune-006-rel":          false, // collection
+	}
+	for _, fixture := range loaded.Fixtures {
+		if _, ok := wantRelated[fixture.ID]; !ok {
+			continue
+		}
+		if fixture.ExpectedLabel != "related-to" {
+			t.Errorf("%s label=%q, want related-to for organization-mediated object", fixture.ID, fixture.ExpectedLabel)
+		}
+		if !strings.Contains(strings.ToLower(fixture.RationaleEvidence), "associat") {
+			t.Errorf("%s rationale does not explain mediated association: %q", fixture.ID, fixture.RationaleEvidence)
+		}
+		wantRelated[fixture.ID] = true
+	}
+	for id, found := range wantRelated {
+		if !found {
+			t.Errorf("missing endpoint regression fixture %s", id)
+		}
+	}
+}
+
+func TestOrganizationTypingDoesNotCallSubjectOnlyRecorder(t *testing.T) {
+	loaded, err := loader.Load("fixtures.jsonl", "fixtures.manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	organizations := map[string]string{
+		"sg-tune-005-et": "Elmglass Records House",
+		"sg-tune-016-et": "Pineward Civic Forum",
+		"sg-tune-027-et": "Bluecap Mineral Board",
+	}
+	for id, organization := range organizations {
+		var fixture *protocol.Fixture
+		for i := range loaded.Fixtures {
+			if loaded.Fixtures[i].ID == id {
+				fixture = &loaded.Fixtures[i]
+				break
+			}
+		}
+		if fixture == nil {
+			t.Fatalf("missing %s", id)
+		}
+		if fixture.ExpectedLabel != "organization" {
+			t.Fatalf("unexpected organization fixture %s: %+v", id, fixture)
+		}
+		if strings.Contains(fixture.Excerpts[0].Text, "[["+organization+"]] is mentioned only as the recorder") {
+			t.Errorf("%s calls its organization subject only the recorder", id)
+		}
+	}
+}
+
+func TestHeldOutNegativeConstructionClustersAreDisclosedAsTwoPerTask(t *testing.T) {
+	loaded, err := loader.Load("fixtures.jsonl", "fixtures.manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	families := map[protocol.Task]map[string]struct{}{
+		protocol.TaskRelationship: {},
+		protocol.TaskClaimSupport: {},
+	}
+	for _, fixture := range loaded.Fixtures {
+		if fixture.Split != protocol.SplitHeldOut {
+			continue
+		}
+		negative := (fixture.Task == protocol.TaskRelationship && (fixture.ExpectedLabel == "no-supported-relationship" || fixture.ExpectedLabel == "insufficient-evidence")) ||
+			(fixture.Task == protocol.TaskClaimSupport && fixture.ExpectedLabel != "supported")
+		if negative {
+			families[fixture.Task][fixture.TemplateFamily] = struct{}{}
+		}
+	}
+	for task, got := range families {
+		if len(got) != 2 {
+			t.Errorf("%s negative construction families=%d (%v), want exactly 2 and no n=150 independence claim", task, len(got), got)
+		}
+	}
+}
+
+func TestHeldOutQuestionOnlyOracleIsAtChance(t *testing.T) {
+	loaded, err := loader.Load("fixtures.jsonl", "fixtures.manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type labelCounts map[string]int
+	byTaskQuestion := map[protocol.Task]map[string]labelCounts{
+		protocol.TaskRelationship: {},
+		protocol.TaskClaimSupport: {},
+	}
+	for _, fixture := range loaded.Fixtures {
+		if fixture.Split != protocol.SplitHeldOut {
+			continue
+		}
+		if _, ok := byTaskQuestion[fixture.Task]; !ok {
+			continue
+		}
+		if byTaskQuestion[fixture.Task][fixture.Question] == nil {
+			byTaskQuestion[fixture.Task][fixture.Question] = labelCounts{}
+		}
+		byTaskQuestion[fixture.Task][fixture.Question][fixture.ExpectedLabel]++
+	}
+	for task, questions := range byTaskQuestion {
+		total, oracleCorrect := 0, 0
+		for question, counts := range questions {
+			questionTotal, best := 0, 0
+			for _, count := range counts {
+				questionTotal += count
+				if count > best {
+					best = count
+				}
+			}
+			if questionTotal != 2 || best != 1 {
+				t.Errorf("%s question %q has label counts %v; want one positive and one negative", task, question, counts)
+			}
+			total += questionTotal
+			oracleCorrect += best
+		}
+		if total != 300 || oracleCorrect*2 != total {
+			t.Errorf("%s question-only oracle=%d/%d, want exactly chance", task, oracleCorrect, total)
+		}
+	}
+}
+
+func TestHeldOutGenuineReverseEdgesAndRawEvidence(t *testing.T) {
+	loaded, err := loader.Load("fixtures.jsonl", "fixtures.manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversed, unmarked := 0, 0
+	for _, fixture := range loaded.Fixtures {
+		if fixture.Split != protocol.SplitHeldOut {
+			continue
+		}
+		marked := false
+		for _, excerpt := range fixture.Excerpts {
+			marked = marked || strings.Contains(excerpt.Text, "[[")
+		}
+		if !marked {
+			unmarked++
+		}
+		if fixture.TemplateFamily != "held-reverse-association" {
+			continue
+		}
+		reversed++
+		if fixture.ExpectedLabel != "related-to" || !strings.Contains(fixture.Excerpts[0].Text, "depends on") || !strings.Contains(fixture.Excerpts[0].Text, "inverse narrow predicate") {
+			t.Errorf("%s is not a genuine reverse-edge association case: %+v", fixture.ID, fixture)
+		}
+	}
+	if reversed != 30 {
+		t.Errorf("genuine reverse-edge cases=%d, want 30", reversed)
+	}
+	if unmarked != 120 {
+		t.Errorf("fully unmarked held-out cases=%d, want 120", unmarked)
 	}
 }
 

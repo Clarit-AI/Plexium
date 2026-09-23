@@ -205,6 +205,9 @@ func ValidateFixtures(fixtures []protocol.Fixture) error {
 //     [[Title|alias]]. A conservative legacy extractor also recognizes
 //     multiword title-cased names so old salted-candidate leaks such as
 //     "Vornholt Pass" are rejected.
+//  5. No candidate title or alias in one split appears in body text in
+//     another split. Candidate matching is case-insensitive, including bare
+//     lower-case body mentions, so changing channels cannot hide reuse.
 //
 // Repeated perturbations from the same family are not independent samples.
 // Sample-size sufficiency is reported separately from these structural
@@ -215,6 +218,7 @@ func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroup
 	templates := map[protocol.Split]map[string]struct{}{}
 	entities := map[protocol.Split]map[string]struct{}{}
 	bodyEntities := map[protocol.Split]map[string]struct{}{}
+	allKnownEntities := map[string]struct{}{}
 	for _, s := range splits {
 		groups[s] = map[string]struct{}{}
 		templates[s] = map[string]struct{}{}
@@ -229,14 +233,31 @@ func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroup
 		for _, c := range f.Candidates {
 			if t := normalizeEntityToken(c.Title); t != "" {
 				entities[f.Split][t] = struct{}{}
+				allKnownEntities[t] = struct{}{}
 			}
 			if t := normalizeEntityToken(c.Alias); t != "" {
 				entities[f.Split][t] = struct{}{}
+				allKnownEntities[t] = struct{}{}
 			}
 		}
 		for _, excerpt := range f.Excerpts {
 			for _, entity := range extractBodyEntities(excerpt.Text) {
 				bodyEntities[f.Split][entity] = struct{}{}
+				allKnownEntities[entity] = struct{}{}
+			}
+		}
+	}
+	// Scan again after discovering explicit links, title-cased legacy names,
+	// and every candidate token across the complete corpus. This catches a
+	// bare lower-case occurrence in one split when the same identity is
+	// discoverable in another split or channel.
+	for _, f := range fixtures {
+		for _, excerpt := range f.Excerpts {
+			bodyToken := normalizeEntityToken(excerpt.Text)
+			for entity := range allKnownEntities {
+				if len(entity) >= 4 && strings.Contains(bodyToken, entity) {
+					bodyEntities[f.Split][entity] = struct{}{}
+				}
 			}
 		}
 	}
@@ -252,6 +273,8 @@ func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroup
 		var entityNote string
 		bodyEntityDisjoint := true
 		var bodyEntityNote string
+		crossChannelEntityDisjoint := true
+		var crossChannelEntityNote string
 		templateDisjoint := true
 		var templateNote string
 		for _, g := range sortedKeys(groups[s]) {
@@ -282,6 +305,13 @@ func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroup
 				}
 				continue
 			}
+			if prev, ok := seenBodyEntity[e]; ok {
+				ind = false
+				crossChannelEntityDisjoint = false
+				if crossChannelEntityNote == "" {
+					crossChannelEntityNote = fmt.Sprintf("entity %q appears as body text in %s and as a candidate in %s", e, prev, s)
+				}
+			}
 			seenEntity[e] = string(s)
 		}
 		for _, e := range sortedKeys(bodyEntities[s]) {
@@ -293,19 +323,28 @@ func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroup
 				}
 				continue
 			}
+			if prev, ok := seenEntity[e]; ok && prev != string(s) {
+				ind = false
+				crossChannelEntityDisjoint = false
+				if crossChannelEntityNote == "" {
+					crossChannelEntityNote = fmt.Sprintf("entity %q appears as a candidate in %s and as body text in %s", e, prev, s)
+				}
+			}
 			seenBodyEntity[e] = string(s)
 		}
 		out = append(out, protocol.SplitGroupIndependence{
-			Split:                   s,
-			GroupCount:              len(groups[s]),
-			Independent:             ind,
-			ViolationNote:           note,
-			EntityDisjoint:          entityDisjoint,
-			EntityViolationNote:     entityNote,
-			BodyEntityDisjoint:      bodyEntityDisjoint,
-			BodyEntityViolationNote: bodyEntityNote,
-			TemplateFamilyDisjoint:  templateDisjoint,
-			TemplateViolationNote:   templateNote,
+			Split:                           s,
+			GroupCount:                      len(groups[s]),
+			Independent:                     ind,
+			ViolationNote:                   note,
+			EntityDisjoint:                  entityDisjoint,
+			EntityViolationNote:             entityNote,
+			BodyEntityDisjoint:              bodyEntityDisjoint,
+			BodyEntityViolationNote:         bodyEntityNote,
+			CrossChannelEntityDisjoint:      crossChannelEntityDisjoint,
+			CrossChannelEntityViolationNote: crossChannelEntityNote,
+			TemplateFamilyDisjoint:          templateDisjoint,
+			TemplateViolationNote:           templateNote,
 		})
 	}
 	for _, item := range out {
@@ -325,6 +364,9 @@ func firstViolationNote(item protocol.SplitGroupIndependence) string {
 	}
 	if item.BodyEntityViolationNote != "" {
 		return item.BodyEntityViolationNote
+	}
+	if item.CrossChannelEntityViolationNote != "" {
+		return item.CrossChannelEntityViolationNote
 	}
 	if item.TemplateViolationNote != "" {
 		return item.TemplateViolationNote

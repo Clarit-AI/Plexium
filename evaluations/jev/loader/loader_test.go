@@ -180,6 +180,57 @@ func TestVerifySplitIndependenceDetectsV03BodyEntityLeakBehindSaltedCandidates(t
 	}
 }
 
+func TestVerifySplitIndependenceDetectsCandidateToBodyCrossChannelLeak(t *testing.T) {
+	fs := []protocol.Fixture{
+		{ID: "f1", Task: protocol.TaskClaimSupport, SourceGroup: "tune-group", TemplateFamily: "tune-prose", Split: protocol.SplitTuning, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "tune-e1", Title: "Copper Finch Registry", Alias: "Copper Finch Office"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "A distinct record is discussed."}}},
+		{ID: "f2", Task: protocol.TaskClaimSupport, SourceGroup: "held-group", TemplateFamily: "held-docket", Split: protocol.SplitHeldOut, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "held-e1", Title: "Silver Heron Ledger", Alias: "Silver Heron File"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "The Copper Finch Registry approved the filing."}}},
+	}
+	_, err := VerifySplitIndependence(fs)
+	if err == nil || !strings.Contains(err.Error(), "candidate") || !strings.Contains(err.Error(), "body text") {
+		t.Fatalf("candidate-to-body cross-channel leak was not rejected: %v", err)
+	}
+}
+
+func TestVerifySplitIndependenceDetectsBareCaseVariantAcrossChannels(t *testing.T) {
+	fs := []protocol.Fixture{
+		{ID: "f1", Task: protocol.TaskClaimSupport, SourceGroup: "tune-group", TemplateFamily: "tune-prose", Split: protocol.SplitTuning, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "tune-e1", Title: "Grey Cloak Workshop", Alias: "Grey Cloak"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "A distinct record is discussed."}}},
+		{ID: "f2", Task: protocol.TaskClaimSupport, SourceGroup: "held-group", TemplateFamily: "held-docket", Split: protocol.SplitHeldOut, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "held-e1", Title: "Silver Heron Ledger", Alias: "Silver Heron File"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "the grey cloak workshop approved the filing."}}},
+	}
+	_, err := VerifySplitIndependence(fs)
+	if err == nil || !strings.Contains(err.Error(), "candidate") || !strings.Contains(err.Error(), "body text") {
+		t.Fatalf("bare lower-case case variant was not rejected: %v", err)
+	}
+}
+
+func TestVerifySplitIndependenceDetectsBareCaseVariantAcrossBodies(t *testing.T) {
+	fs := []protocol.Fixture{
+		{ID: "f1", Task: protocol.TaskClaimSupport, SourceGroup: "tune-group", TemplateFamily: "tune-prose", Split: protocol.SplitTuning, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "tune-e1", Title: "Copper Finch Registry"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "The Grey Cloak Workshop approved the filing."}}},
+		{ID: "f2", Task: protocol.TaskClaimSupport, SourceGroup: "held-group", TemplateFamily: "held-docket", Split: protocol.SplitHeldOut, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "held-e1", Title: "Silver Heron Ledger"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "the grey cloak workshop approved the filing."}}},
+	}
+	_, err := VerifySplitIndependence(fs)
+	if err == nil || !strings.Contains(err.Error(), "body entity") {
+		t.Fatalf("bare lower-case body-to-body case variant was not rejected: %v", err)
+	}
+}
+
 func TestVerifySplitIndependenceAcceptsNormalizedDistinctEntities(t *testing.T) {
 	// Same surface form but case differs; the loader must not flag a
 	// case-difference as an entity collision. The fixture-supplied
