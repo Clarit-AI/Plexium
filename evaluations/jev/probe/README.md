@@ -63,5 +63,10 @@ belong to that source's declared selection. Reports predating selection fields
 retain the legacy full-plan fallback only when both fields are absent. Within
 one source, any repeated attempt ordinal is rejected before coverage or cost
 aggregation, regardless of outcome. Across sources, the same ordinal is a
-legitimate retry only when its concrete reservation/response identity differs;
-repeated source content or repeated concrete evidence is rejected.
+legitimate retry only when it has both a new reservation reference and new,
+comparable response evidence (raw-response or persisted-evidence hash).
+Mutable provenance such as start time or provider request ID never establishes
+a new attempt. Repeated source content or reused/conflicting stable evidence is
+rejected. JSON property presence is distinct from slice length: the legacy
+full-plan fallback applies only when both selection properties are absent;
+present empty or null selections are rejected.

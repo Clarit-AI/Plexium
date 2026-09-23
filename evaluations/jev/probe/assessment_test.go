@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAssessGatesUsesSelectedIdentityCoverage(t *testing.T) {
@@ -95,7 +96,7 @@ func TestDerivedAssessmentCombinesImmutableRunsAndSeparatesAccounting(t *testing
 	dir := t.TempDir()
 	run1Path := filepath.Join(dir, "run-1.json")
 	run2Path := filepath.Join(dir, "run-2.json")
-	writeAssessmentTestReport(t, run1Path, &run1)
+	writeAssessmentLegacyTestReport(t, run1Path, &run1)
 	writeAssessmentTestReport(t, run2Path, &run2)
 	before1 := fileDigest(t, run1Path)
 	before2 := fileDigest(t, run2Path)
@@ -251,7 +252,7 @@ func TestDerivedAssessmentEnforcesSourceSelectionMembershipAndLegacyFallback(t *
 		report := Report{Version: PlanVersion, InventorySHA256: plan.InventorySHA256, Attempts: []Attempt{attempt}}
 		dir := t.TempDir()
 		source := filepath.Join(dir, "source.json")
-		writeAssessmentTestReport(t, source, &report)
+		writeAssessmentLegacyTestReport(t, source, &report)
 		assessment, err := DeriveAssessmentToFile(assessmentInventoryPath(), []string{source}, filepath.Join(dir, "derived.json"))
 		if err != nil {
 			t.Fatal(err)
@@ -271,8 +272,8 @@ func TestDerivedAssessmentRejectsRepeatedSourceOrConcreteEvidence(t *testing.T) 
 		dir := t.TempDir()
 		first := filepath.Join(dir, "first.json")
 		second := filepath.Join(dir, "second.json")
-		writeAssessmentTestReport(t, first, &report)
-		writeAssessmentTestReport(t, second, &report)
+		writeAssessmentLegacyTestReport(t, first, &report)
+		writeAssessmentLegacyTestReport(t, second, &report)
 		_, err := DeriveAssessmentToFile(assessmentInventoryPath(), []string{first, second}, filepath.Join(dir, "derived.json"))
 		if err == nil || !strings.Contains(err.Error(), "duplicates source content") {
 			t.Fatalf("repeated source content was not rejected: %v", err)
@@ -282,15 +283,99 @@ func TestDerivedAssessmentRejectsRepeatedSourceOrConcreteEvidence(t *testing.T) 
 		dir := t.TempDir()
 		first := filepath.Join(dir, "first.json")
 		second := filepath.Join(dir, "second.json")
-		writeAssessmentTestReport(t, first, &report)
+		writeAssessmentLegacyTestReport(t, first, &report)
 		changed := report
 		changed.LedgerBalance = 1
-		writeAssessmentTestReport(t, second, &changed)
+		writeAssessmentLegacyTestReport(t, second, &changed)
 		_, err := DeriveAssessmentToFile(assessmentInventoryPath(), []string{first, second}, filepath.Join(dir, "derived.json"))
-		if err == nil || !strings.Contains(err.Error(), "repeats concrete attempt evidence") {
+		if err == nil || !strings.Contains(err.Error(), "repeats or conflicts with concrete attempt evidence") {
 			t.Fatalf("repeated concrete evidence was not rejected: %v", err)
 		}
 	})
+}
+
+func TestDerivedAssessmentRejectsStableEvidenceReuseDespiteMutableMetadata(t *testing.T) {
+	plan := assessmentTestPlan(t)
+	binding := plan.SelectedRequests[1]
+	base := acceptedAssessmentAttemptWithCost(binding, "0.000008613")
+	setAssessmentAttemptIdentity(&base, "stable-ordinal2")
+	base.StartedAt = time.Unix(1_700_000_000, 0).UTC()
+
+	tests := []struct {
+		name   string
+		mutate func(*Attempt)
+	}{
+		{
+			name: "start-time-is-not-identity",
+			mutate: func(attempt *Attempt) {
+				attempt.StartedAt = attempt.StartedAt.Add(time.Nanosecond)
+			},
+		},
+		{
+			name: "provider-request-id-is-not-identity",
+			mutate: func(attempt *Attempt) {
+				attempt.ProviderRequestID = "different-provider-request-id"
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			changed := base
+			test.mutate(&changed)
+			dir := t.TempDir()
+			paths := []string{filepath.Join(dir, "run-a.json"), filepath.Join(dir, "run-b.json")}
+			for i, attempt := range []Attempt{base, changed} {
+				report := Report{
+					Version: PlanVersion, InventorySHA256: plan.InventorySHA256,
+					SelectedOrdinals: []int{2}, SelectedRequests: []RequestBinding{binding}, Attempts: []Attempt{attempt},
+				}
+				writeAssessmentTestReport(t, paths[i], &report)
+			}
+			output := filepath.Join(dir, "derived.json")
+			_, err := DeriveAssessmentToFile(assessmentInventoryPath(), paths, output)
+			if err == nil || !strings.Contains(err.Error(), "repeats or conflicts with concrete attempt evidence") {
+				t.Fatalf("stable evidence reuse was not rejected: %v", err)
+			}
+			if _, statErr := os.Stat(output); !os.IsNotExist(statErr) {
+				t.Fatalf("reused evidence emitted derived totals: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestDerivedAssessmentDistinguishesAbsentFromEmptySelectionFields(t *testing.T) {
+	plan := assessmentTestPlan(t)
+	binding := plan.SelectedRequests[0]
+	attempt := acceptedAssessmentAttempt(binding)
+	setAssessmentAttemptIdentity(&attempt, "selection-presence")
+	report := Report{Version: PlanVersion, InventorySHA256: plan.InventorySHA256, Attempts: []Attempt{attempt}}
+
+	tests := []struct {
+		name       string
+		ordinals   *json.RawMessage
+		requests   *json.RawMessage
+		wantDetail string
+	}{
+		{name: "both-empty-arrays", ordinals: rawJSON(`[]`), requests: rawJSON(`[]`), wantDetail: "selectedRequests is present but empty or null"},
+		{name: "requests-empty-ordinals-absent", requests: rawJSON(`[]`), wantDetail: "selectedRequests is present but empty or null"},
+		{name: "ordinals-empty-requests-absent", ordinals: rawJSON(`[]`), wantDetail: "selectedOrdinals is present but empty or null"},
+		{name: "both-null", ordinals: rawJSON(`null`), requests: rawJSON(`null`), wantDetail: "selectedRequests is present but empty or null"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			source := filepath.Join(dir, "source.json")
+			writeAssessmentReportWithSelectionFields(t, source, &report, test.ordinals, test.requests)
+			output := filepath.Join(dir, "derived.json")
+			_, err := DeriveAssessmentToFile(assessmentInventoryPath(), []string{source}, output)
+			if err == nil || !strings.Contains(err.Error(), test.wantDetail) {
+				t.Fatalf("explicit empty selection was not rejected: %v", err)
+			}
+			if _, statErr := os.Stat(output); !os.IsNotExist(statErr) {
+				t.Fatalf("empty selection emitted derived output: %v", statErr)
+			}
+		})
+	}
 }
 
 func assessmentTestPlan(t *testing.T) *Plan {
@@ -331,11 +416,65 @@ func setAssessmentAttemptIdentity(attempt *Attempt, identity string) {
 	attempt.ProviderRequestID = "provider-" + identity
 	sum := sha256.Sum256([]byte(identity))
 	attempt.RawResponseSHA256 = hex.EncodeToString(sum[:])
+	attempt.EvidenceSHA256 = hex.EncodeToString(sum[:])
 }
 
 func writeAssessmentTestReport(t *testing.T, path string, report *Report) {
 	t.Helper()
 	data, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeAssessmentLegacyTestReport(t *testing.T, path string, report *Report) {
+	t.Helper()
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var properties map[string]json.RawMessage
+	if err := json.Unmarshal(data, &properties); err != nil {
+		t.Fatal(err)
+	}
+	delete(properties, "selectedOrdinals")
+	delete(properties, "selectedRequests")
+	data, err = json.MarshalIndent(properties, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func rawJSON(value string) *json.RawMessage {
+	raw := json.RawMessage(value)
+	return &raw
+}
+
+func writeAssessmentReportWithSelectionFields(t *testing.T, path string, report *Report, ordinals, requests *json.RawMessage) {
+	t.Helper()
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var properties map[string]json.RawMessage
+	if err := json.Unmarshal(data, &properties); err != nil {
+		t.Fatal(err)
+	}
+	delete(properties, "selectedOrdinals")
+	delete(properties, "selectedRequests")
+	if ordinals != nil {
+		properties["selectedOrdinals"] = *ordinals
+	}
+	if requests != nil {
+		properties["selectedRequests"] = *requests
+	}
+	data, err = json.MarshalIndent(properties, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}

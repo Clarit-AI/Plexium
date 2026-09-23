@@ -11,7 +11,6 @@ import (
 	"math/big"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -118,7 +117,7 @@ func deriveAssessment(inventoryPath string, sourcePaths []string) (*DerivedAsses
 	untrusted := new(big.Rat)
 	var exposure ledger.MicroUnit
 	seenSourceDigests := make(map[string]string, len(sourcePaths))
-	seenConcreteEvidence := make(map[string]string)
+	seenStableEvidence := make(map[string][]stableAttemptIdentity)
 
 	for _, path := range sourcePaths {
 		data, readErr := os.ReadFile(path)
@@ -134,10 +133,14 @@ func deriveAssessment(inventoryPath string, sourcePaths []string) (*DerivedAsses
 		if err := decodeOneJSON(data, &report); err != nil {
 			return nil, fmt.Errorf("probe: decode source report %s: %w", path, err)
 		}
+		selectionFields, err := selectionFieldPresence(data)
+		if err != nil {
+			return nil, fmt.Errorf("probe: inspect source report %s selection fields: %w", path, err)
+		}
 		if report.InventorySHA256 != plan.InventorySHA256 {
 			return nil, fmt.Errorf("probe: source report %s inventory digest mismatch", path)
 		}
-		bindings, err := reportBindings(&report, planBindings)
+		bindings, err := reportBindings(&report, planBindings, selectionFields)
 		if err != nil {
 			return nil, fmt.Errorf("probe: source report %s: %w", path, err)
 		}
@@ -165,11 +168,14 @@ func deriveAssessment(inventoryPath string, sourcePaths []string) (*DerivedAsses
 			if !attemptIdentityMatches(attempt, binding) {
 				return nil, fmt.Errorf("probe: source report %s attempt identity mismatch for ordinal %d", path, attempt.Ordinal)
 			}
-			concreteKey := concreteAttemptIdentity(attempt)
-			if earlierPath, duplicate := seenConcreteEvidence[concreteKey]; duplicate {
-				return nil, fmt.Errorf("probe: source report %s repeats concrete attempt evidence from %s for ordinal %d", path, earlierPath, attempt.Ordinal)
+			stable := stableIdentity(attempt, path)
+			namespace := attempt.RequestID + "\x00" + attempt.RequestSHA256
+			for _, earlier := range seenStableEvidence[namespace] {
+				if stableEvidenceConflicts(earlier, stable) {
+					return nil, fmt.Errorf("probe: source report %s repeats or conflicts with concrete attempt evidence from %s for ordinal %d", path, earlier.SourcePath, attempt.Ordinal)
+				}
 			}
-			seenConcreteEvidence[concreteKey] = path
+			seenStableEvidence[namespace] = append(seenStableEvidence[namespace], stable)
 		}
 		for _, attempt := range report.Attempts {
 			binding := selectedInSource[attempt.Ordinal]
@@ -234,8 +240,26 @@ func deriveAssessment(inventoryPath string, sourcePaths []string) (*DerivedAsses
 	}, nil
 }
 
-func reportBindings(report *Report, plan map[int]RequestBinding) ([]RequestBinding, error) {
-	if len(report.SelectedRequests) > 0 {
+type selectionPresence struct {
+	Ordinals bool
+	Requests bool
+}
+
+func selectionFieldPresence(data []byte) (selectionPresence, error) {
+	var properties map[string]json.RawMessage
+	if err := decodeOneJSON(data, &properties); err != nil {
+		return selectionPresence{}, err
+	}
+	_, ordinals := properties["selectedOrdinals"]
+	_, requests := properties["selectedRequests"]
+	return selectionPresence{Ordinals: ordinals, Requests: requests}, nil
+}
+
+func reportBindings(report *Report, plan map[int]RequestBinding, presence selectionPresence) ([]RequestBinding, error) {
+	if presence.Requests {
+		if len(report.SelectedRequests) == 0 {
+			return nil, errors.New("selectedRequests is present but empty or null")
+		}
 		bindings := make([]RequestBinding, len(report.SelectedRequests))
 		seen := make(map[int]bool, len(report.SelectedRequests))
 		for i, binding := range report.SelectedRequests {
@@ -246,7 +270,10 @@ func reportBindings(report *Report, plan map[int]RequestBinding) ([]RequestBindi
 			seen[binding.Ordinal] = true
 			bindings[i] = binding
 		}
-		if len(report.SelectedOrdinals) > 0 {
+		if presence.Ordinals {
+			if len(report.SelectedOrdinals) == 0 {
+				return nil, errors.New("selectedOrdinals is present but empty or null")
+			}
 			if len(report.SelectedOrdinals) != len(bindings) {
 				return nil, errors.New("selected ordinals and request bindings differ in length")
 			}
@@ -260,7 +287,10 @@ func reportBindings(report *Report, plan map[int]RequestBinding) ([]RequestBindi
 		}
 		return bindings, nil
 	}
-	if len(report.SelectedOrdinals) > 0 {
+	if presence.Ordinals {
+		if len(report.SelectedOrdinals) == 0 {
+			return nil, errors.New("selectedOrdinals is present but empty or null")
+		}
 		bindings := make([]RequestBinding, 0, len(report.SelectedOrdinals))
 		seen := make(map[int]bool)
 		for _, ordinal := range report.SelectedOrdinals {
@@ -286,14 +316,41 @@ func reportBindings(report *Report, plan map[int]RequestBinding) ([]RequestBindi
 	return bindings, nil
 }
 
-func concreteAttemptIdentity(attempt Attempt) string {
-	// Provider request ID and reservation reference distinguish legitimate
-	// re-attempts of the same approved ordinal across separate run reports.
-	return strings.Join([]string{
-		strconv.Itoa(attempt.Ordinal), attempt.RequestID, attempt.RequestSHA256,
-		attempt.ReservationRef, attempt.ProviderRequestID, attempt.RawResponseSHA256,
-		attempt.EvidenceSHA256, attempt.StartedAt.UTC().Format(time.RFC3339Nano),
-	}, "\x00")
+type stableAttemptIdentity struct {
+	ReservationRef  string
+	RawResponseHash string
+	EvidenceHash    string
+	SourcePath      string
+}
+
+func stableIdentity(attempt Attempt, sourcePath string) stableAttemptIdentity {
+	return stableAttemptIdentity{
+		ReservationRef: attempt.ReservationRef, RawResponseHash: attempt.RawResponseSHA256,
+		EvidenceHash: attempt.EvidenceSHA256, SourcePath: sourcePath,
+	}
+}
+
+func stableEvidenceConflicts(left, right stableAttemptIdentity) bool {
+	// A retry is distinct only when it has both a new reservation and
+	// comparable, different response evidence. Mutable provenance such as the
+	// start time or provider-request header cannot establish a new attempt.
+	if left.ReservationRef == "" || right.ReservationRef == "" || left.ReservationRef == right.ReservationRef {
+		return true
+	}
+	comparableResponseEvidence := false
+	if left.RawResponseHash != "" && right.RawResponseHash != "" {
+		if left.RawResponseHash == right.RawResponseHash {
+			return true
+		}
+		comparableResponseEvidence = true
+	}
+	if left.EvidenceHash != "" && right.EvidenceHash != "" {
+		if left.EvidenceHash == right.EvidenceHash {
+			return true
+		}
+		comparableResponseEvidence = true
+	}
+	return !comparableResponseEvidence
 }
 
 func decodeOneJSON(data []byte, value any) error {
