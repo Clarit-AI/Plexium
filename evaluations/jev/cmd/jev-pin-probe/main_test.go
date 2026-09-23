@@ -65,6 +65,77 @@ func TestDryRunBindsApprovedRequestSubset(t *testing.T) {
 	}
 }
 
+func TestDeriveAssessmentReadsNoCredentialAndPreservesSource(t *testing.T) {
+	inventory := filepath.Join("..", "..", "pilot", "request-inventory.json")
+	plan, err := probe.BuildPlan(inventory, probe.Endpoints{Jev: probe.JevEndpoint, Nano: probe.NanoEndpoint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := probe.Report{
+		Version: probe.PlanVersion, InventorySHA256: plan.InventorySHA256,
+		SelectedOrdinals: append([]int(nil), plan.SelectedOrdinals...),
+		SelectedRequests: append([]probe.RequestBinding(nil), plan.SelectedRequests...),
+	}
+	for _, binding := range plan.SelectedRequests {
+		report.Attempts = append(report.Attempts, probe.Attempt{
+			Ordinal: binding.Ordinal, RequestID: binding.ID, Arm: binding.Arm, Kind: binding.Kind,
+			FixtureID: binding.FixtureID, RequestedAlias: binding.RequestedAlias,
+			ExpectedPin: binding.CandidatePin, ExpectedProvider: binding.CandidateProvider,
+			RequestSHA256: binding.RequestSHA256, State: "settled", RequestSent: true,
+			ResponseReceived: true, Status: 200, ProviderRequestID: "provider-request",
+			ResolvedModel: binding.CandidatePin, ResponseProvider: binding.CandidateProvider,
+			Billing: probe.BillingEvidence{Cost: probe.DecimalEvidence{Present: true, Valid: true, Raw: "0.000001"}},
+		})
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.json")
+	data, err := json.MarshalIndent(&report, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(source, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := sha256.Sum256(data)
+	output := filepath.Join(dir, "derived.json")
+
+	var credentialReads, factoryCalls int32
+	lookup := func(string) (string, bool) {
+		atomic.AddInt32(&credentialReads, 1)
+		return "must-not-be-read", true
+	}
+	factory := func(inventoryPath, state, key string) probe.RunConfig {
+		atomic.AddInt32(&factoryCalls, 1)
+		return probe.DefaultRunConfig(inventoryPath, state, key)
+	}
+	var out bytes.Buffer
+	err = runCLIWithConfigAndCredential([]string{
+		"--derive-assessment", "--inventory", inventory,
+		"--source-reports", source, "--assessment-out", output,
+	}, &out, factory, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha256.Sum256(after) != before || credentialReads != 0 || factoryCalls != 0 {
+		t.Fatalf("source changed or forbidden callback ran: credentialReads=%d factoryCalls=%d", credentialReads, factoryCalls)
+	}
+	var assessment probe.DerivedAssessment
+	if err := json.Unmarshal(out.Bytes(), &assessment); err != nil {
+		t.Fatalf("decode assessment: %v output=%s", err, out.String())
+	}
+	if assessment.Gates[0].Status != "EVIDENCE_COLLECTED" || assessment.Gates[1].Status != "EVIDENCE_COLLECTED" {
+		t.Fatalf("derived gate coverage missing: %+v", assessment.Gates)
+	}
+	if _, err := os.Stat(output); err != nil {
+		t.Fatalf("derived output missing: %v", err)
+	}
+}
+
 func TestExecuteRequiresCredentialBeforeAnyRun(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "")
 	var out bytes.Buffer

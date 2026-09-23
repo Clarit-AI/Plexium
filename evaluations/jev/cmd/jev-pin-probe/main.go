@@ -79,22 +79,54 @@ func runCLIWithConfigAndCredential(args []string, out io.Writer, makeConfig conf
 	fs.SetOutput(io.Discard)
 	dryRun := singleBoolFlag{name: "dry-run"}
 	execute := singleBoolFlag{name: "execute"}
+	deriveAssessment := singleBoolFlag{name: "derive-assessment"}
 	inventory := singleStringFlag{name: "inventory", value: "evaluations/jev/pilot/request-inventory.json"}
 	stateDir := singleStringFlag{name: "state-dir"}
 	requestOrdinals := singleStringFlag{name: "request-ordinals"}
+	sourceReports := singleStringFlag{name: "source-reports"}
+	assessmentOut := singleStringFlag{name: "assessment-out"}
 	fs.Var(&dryRun, "dry-run", "validate and print the four-request plan without reading credentials or dialing")
 	fs.Var(&execute, "execute", "execute the bounded one-shot probe")
+	fs.Var(&deriveAssessment, "derive-assessment", "derive a corrected offline assessment from immutable probe reports")
 	fs.Var(&inventory, "inventory", "accepted frozen request inventory")
 	fs.Var(&stateDir, "state-dir", "new private state directory for ledger, report, and raw evidence")
 	fs.Var(&requestOrdinals, "request-ordinals", "explicit approved request subset as comma-separated ordinals (for example 2,3,4)")
+	fs.Var(&sourceReports, "source-reports", "comma-separated immutable source report paths for offline assessment")
+	fs.Var(&assessmentOut, "assessment-out", "new path for the derived assessment; never overwrites a source report")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if len(fs.Args()) != 0 {
 		return fmt.Errorf("unexpected positional arguments: %q", fs.Args())
 	}
-	if dryRun.value == execute.value {
-		return errors.New("exactly one of --dry-run or --execute is required")
+	modes := 0
+	for _, selected := range []bool{dryRun.value, execute.value, deriveAssessment.value} {
+		if selected {
+			modes++
+		}
+	}
+	if modes != 1 {
+		return errors.New("exactly one of --dry-run, --execute, or --derive-assessment is required")
+	}
+	if deriveAssessment.value {
+		if stateDir.set || requestOrdinals.set {
+			return errors.New("--derive-assessment does not accept --state-dir or --request-ordinals")
+		}
+		paths, err := parseSourceReports(sourceReports.value)
+		if err != nil {
+			return err
+		}
+		if !assessmentOut.set || assessmentOut.value == "" {
+			return errors.New("--assessment-out is required for --derive-assessment")
+		}
+		assessment, err := probe.DeriveAssessmentToFile(inventory.value, paths, assessmentOut.value)
+		if err != nil {
+			return err
+		}
+		return writeJSON(out, assessment)
+	}
+	if sourceReports.set || assessmentOut.set {
+		return errors.New("--source-reports and --assessment-out require --derive-assessment")
 	}
 	var selectedOrdinals []int
 	if requestOrdinals.set {
@@ -130,6 +162,24 @@ func runCLIWithConfigAndCredential(args []string, out io.Writer, makeConfig conf
 		}
 	}
 	return err
+}
+
+func parseSourceReports(raw string) ([]string, error) {
+	if raw == "" {
+		return nil, errors.New("--source-reports is required for --derive-assessment")
+	}
+	paths := strings.Split(raw, ",")
+	seen := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		if path == "" || strings.HasPrefix(path, "-") {
+			return nil, errors.New("--source-reports must contain nonempty comma-separated paths that do not begin with '-'")
+		}
+		if seen[path] {
+			return nil, fmt.Errorf("--source-reports contains duplicate path %q", path)
+		}
+		seen[path] = true
+	}
+	return paths, nil
 }
 
 func parseRequestOrdinals(raw string) ([]int, error) {

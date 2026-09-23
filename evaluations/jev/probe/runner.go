@@ -811,14 +811,22 @@ func assessGates(report *Report) []Gate {
 		}
 		return gates
 	}
-	if len(report.Attempts) != MaxRequests {
-		return gates
+	jevNanoCovered := scopeCovered(report.SelectedRequests, report.Attempts, []pilot.Arm{pilot.ArmJev, pilot.ArmNano}, "")
+	if jevNanoCovered {
+		gates[0] = Gate{ID: 1, Name: gates[0].Name, Status: "EVIDENCE_COLLECTED", Reason: "selected Jev and Nano requests have identity-matched accepted attempts; immutable alias semantics still require review"}
+		gates[1] = Gate{ID: 2, Name: gates[1].Name, Status: "EVIDENCE_COLLECTED", Reason: "selected Jev and Nano requests have response-linked provider fields matching candidates; request-side routing enforcement remains unproved"}
 	}
-	gates[0] = Gate{ID: 1, Name: gates[0].Name, Status: "EVIDENCE_COLLECTED", Reason: "requested aliases and exact returned model strings are recorded; immutable alias semantics still require review"}
-	gates[1] = Gate{ID: 2, Name: gates[1].Name, Status: "EVIDENCE_COLLECTED", Reason: "response-linked provider fields matched candidates; Decisions request-side routing enforcement remains unproved"}
-	gates[2] = Gate{ID: 3, Name: gates[2].Name, Status: "UNRESOLVED", Reason: "Nano accepted max_tokens=256 and returned usage, but short responses do not establish full output-limit semantics or all billable categories"}
-	gates[3] = Gate{ID: 4, Name: gates[3].Name, Status: "OPEN", Reason: "observed Jev output usage is not an authoritative finite maximum unless the response explicitly supplies one"}
-	gates[4] = Gate{ID: 5, Name: gates[4].Name, Status: "UNRESOLVED", Reason: "returned costs and usage are preserved, but do not establish current tariff, currency, or fee semantics"}
-	gates[5] = Gate{ID: 6, Name: gates[5].Name, Status: "UNRESOLVED", Reason: "provider counts cover largest-by-byte samples only; largest bytes is not largest tokens and the other frozen payloads remain unmeasured"}
+	if scopeCovered(report.SelectedRequests, report.Attempts, []pilot.Arm{pilot.ArmNano}, "") {
+		gates[2] = Gate{ID: 3, Name: gates[2].Name, Status: "UNRESOLVED", Reason: "selected Nano requests were accepted with usage, but short responses do not establish full output-limit semantics or all billable categories"}
+	}
+	if scopeCovered(report.SelectedRequests, report.Attempts, []pilot.Arm{pilot.ArmJev}, "") {
+		gates[3] = Gate{ID: 4, Name: gates[3].Name, Status: "OPEN", Reason: "observed Jev output usage is not an authoritative finite maximum unless the response explicitly supplies one"}
+	}
+	if jevNanoCovered {
+		gates[4] = Gate{ID: 5, Name: gates[4].Name, Status: "UNRESOLVED", Reason: "returned costs and usage are preserved, but do not establish current tariff, currency, or fee semantics"}
+	}
+	if scopeCovered(report.SelectedRequests, report.Attempts, []pilot.Arm{pilot.ArmJev, pilot.ArmNano}, "largest-frozen-payload") {
+		gates[5] = Gate{ID: 6, Name: gates[5].Name, Status: "UNRESOLVED", Reason: "provider counts cover largest-by-byte samples only; largest bytes is not largest tokens and the other frozen payloads remain unmeasured"}
+	}
 	return gates
 }

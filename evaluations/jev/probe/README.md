@@ -38,3 +38,21 @@ ordinals have been approved for plan completion. Existing state still refuses
 before dial, and all reservation, one-shot, anomaly-halt, settlement,
 credential-screening, gate-status, accounting-basis, and execution-readiness
 rules remain identical to the full-plan path.
+
+## Offline derived assessment
+
+`--derive-assessment` recomputes gate coverage from immutable report rows
+without reading credentials or dialing. It requires comma-separated source
+reports and a new output path:
+
+```text
+--derive-assessment --source-reports=<run-1-report>,<run-2-report> \
+  --assessment-out=<new-derived-report> --inventory=<accepted-inventory>
+```
+
+The output is created exclusively and cannot overwrite a source. Source
+SHA-256 values are captured and rechecked after the write. Gate promotion is
+based on selected request bindings plus identity-matched accepted attempts,
+not attempt cardinality. The derived accounting keeps provider-reported raw
+cost, admitted cost, untrusted reported cost, and conservative ledger exposure
+separate; provider-reported raw cost is not described as verified spend.
