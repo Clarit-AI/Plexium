@@ -90,13 +90,15 @@ type PromptTokenDetailsEvidence struct {
 }
 
 type CompletionTokenDetailsEvidence struct {
-	Present         bool            `json:"present"`
-	Null            bool            `json:"null"`
-	Valid           bool            `json:"valid"`
-	ReasoningTokens DecimalEvidence `json:"reasoningTokens"`
-	ImageTokens     DecimalEvidence `json:"imageTokens"`
-	AudioTokens     DecimalEvidence `json:"audioTokens"`
-	Error           string          `json:"error,omitempty"`
+	Present                  bool            `json:"present"`
+	Null                     bool            `json:"null"`
+	Valid                    bool            `json:"valid"`
+	ReasoningTokens          DecimalEvidence `json:"reasoningTokens"`
+	ImageTokens              DecimalEvidence `json:"imageTokens"`
+	AudioTokens              DecimalEvidence `json:"audioTokens"`
+	AcceptedPredictionTokens DecimalEvidence `json:"acceptedPredictionTokens"`
+	RejectedPredictionTokens DecimalEvidence `json:"rejectedPredictionTokens"`
+	Error                    string          `json:"error,omitempty"`
 }
 
 type CostDetailsEvidence struct {
@@ -446,7 +448,10 @@ func billingEvidence(b adapter.BillingObservation, credential string) BillingEvi
 		CompletionTokenDetails: CompletionTokenDetailsEvidence{
 			Present: b.CompletionTokenDetails.Present, Null: b.CompletionTokenDetails.Null, Valid: b.CompletionTokenDetails.Valid,
 			ReasoningTokens: convert(b.CompletionTokenDetails.ReasoningTokens), ImageTokens: convert(b.CompletionTokenDetails.ImageTokens),
-			AudioTokens: convert(b.CompletionTokenDetails.AudioTokens), Error: sanitizeString(b.CompletionTokenDetails.Error, credential),
+			AudioTokens:              convert(b.CompletionTokenDetails.AudioTokens),
+			AcceptedPredictionTokens: convert(b.CompletionTokenDetails.AcceptedPredictionTokens),
+			RejectedPredictionTokens: convert(b.CompletionTokenDetails.RejectedPredictionTokens),
+			Error:                    sanitizeString(b.CompletionTokenDetails.Error, credential),
 		},
 		CostDetails: CostDetailsEvidence{
 			Present: b.CostDetails.Present, Null: b.CostDetails.Null, Valid: b.CostDetails.Valid,

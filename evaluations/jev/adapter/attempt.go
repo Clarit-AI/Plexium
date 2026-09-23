@@ -53,13 +53,15 @@ type PromptTokenDetailsObservation struct {
 }
 
 type CompletionTokenDetailsObservation struct {
-	Present         bool
-	Null            bool
-	Valid           bool
-	ReasoningTokens DecimalField
-	ImageTokens     DecimalField
-	AudioTokens     DecimalField
-	Error           string
+	Present                  bool
+	Null                     bool
+	Valid                    bool
+	ReasoningTokens          DecimalField
+	ImageTokens              DecimalField
+	AudioTokens              DecimalField
+	AcceptedPredictionTokens DecimalField
+	RejectedPredictionTokens DecimalField
+	Error                    string
 }
 
 type CostDetailsObservation struct {
@@ -345,6 +347,8 @@ func invalidBilling(b BillingObservation) error {
 		"completion reasoning tokens":         b.CompletionTokenDetails.ReasoningTokens,
 		"completion image tokens":             b.CompletionTokenDetails.ImageTokens,
 		"completion audio tokens":             b.CompletionTokenDetails.AudioTokens,
+		"accepted prediction tokens":          b.CompletionTokenDetails.AcceptedPredictionTokens,
+		"rejected prediction tokens":          b.CompletionTokenDetails.RejectedPredictionTokens,
 		"upstream inference cost":             b.CostDetails.UpstreamInferenceCost,
 		"upstream inference prompt cost":      b.CostDetails.UpstreamInferencePromptCost,
 		"upstream inference completions cost": b.CostDetails.UpstreamInferenceCompletionsCost,
@@ -381,7 +385,8 @@ func invalidateBillingForSchema(b *BillingObservation, reason string) {
 		&b.PromptTokenDetails.CachedTokens, &b.PromptTokenDetails.CacheWriteTokens,
 		&b.PromptTokenDetails.AudioTokens, &b.PromptTokenDetails.VideoTokens,
 		&b.CompletionTokenDetails.ReasoningTokens, &b.CompletionTokenDetails.ImageTokens,
-		&b.CompletionTokenDetails.AudioTokens, &b.CostDetails.UpstreamInferenceCost,
+		&b.CompletionTokenDetails.AudioTokens, &b.CompletionTokenDetails.AcceptedPredictionTokens,
+		&b.CompletionTokenDetails.RejectedPredictionTokens, &b.CostDetails.UpstreamInferenceCost,
 		&b.CostDetails.UpstreamInferencePromptCost, &b.CostDetails.UpstreamInferenceCompletionsCost,
 	} {
 		if field.Present {
@@ -518,7 +523,15 @@ func completionTokenDetailsFrom(raw json.RawMessage) CompletionTokenDetailsObser
 	result.ReasoningTokens = decimalFrom(object["reasoning_tokens"], true)
 	result.ImageTokens = decimalFrom(object["image_tokens"], true)
 	result.AudioTokens = decimalFrom(object["audio_tokens"], true)
-	result.Valid = decimalFieldsValid(result.ReasoningTokens, result.ImageTokens, result.AudioTokens)
+	result.AcceptedPredictionTokens = decimalFrom(object["accepted_prediction_tokens"], true)
+	result.RejectedPredictionTokens = decimalFrom(object["rejected_prediction_tokens"], true)
+	result.Valid = decimalFieldsValid(
+		result.ReasoningTokens,
+		result.ImageTokens,
+		result.AudioTokens,
+		result.AcceptedPredictionTokens,
+		result.RejectedPredictionTokens,
+	)
 	return result
 }
 
@@ -946,6 +959,12 @@ func validateChatResponseShape(body []byte) error {
 		[]string{"id", "model", "provider", "choices", "usage"}); err != nil {
 		return fmt.Errorf("chat response: %w", err)
 	}
+	if raw, present := top["object"]; present {
+		var object string
+		if err := json.Unmarshal(raw, &object); err != nil || object != "chat.completion" {
+			return errors.New(`chat response object must be the exact JSON string "chat.completion"`)
+		}
+	}
 	var choices []json.RawMessage
 	if err := json.Unmarshal(top["choices"], &choices); err != nil {
 		return errors.New("chat choices must be an array")
@@ -965,9 +984,14 @@ func validateChatResponseShape(body []byte) error {
 			return err
 		}
 		if err := exactObjectKeys(message,
-			[]string{"role", "content", "refusal", "reasoning"},
+			[]string{"role", "content", "refusal", "reasoning", "annotations"},
 			[]string{"role", "content"}); err != nil {
 			return fmt.Errorf("choice %d message: %w", index, err)
+		}
+		if annotationsRaw, present := message["annotations"]; present {
+			if err := validateChatAnnotations(annotationsRaw); err != nil {
+				return fmt.Errorf("choice %d message annotations: %w", index, err)
+			}
 		}
 	}
 	usage, err := rawObject(top["usage"], "usage")
@@ -980,7 +1004,7 @@ func validateChatResponseShape(body []byte) error {
 	}
 	for name, allowed := range map[string][]string{
 		"prompt_tokens_details":     {"cached_tokens", "cache_write_tokens", "audio_tokens", "video_tokens"},
-		"completion_tokens_details": {"reasoning_tokens", "image_tokens", "audio_tokens"},
+		"completion_tokens_details": {"reasoning_tokens", "image_tokens", "audio_tokens", "accepted_prediction_tokens", "rejected_prediction_tokens"},
 		"cost_details":              {"upstream_inference_cost", "upstream_inference_prompt_cost", "upstream_inference_completions_cost"},
 	} {
 		raw, ok := usage[name]
@@ -993,6 +1017,52 @@ func validateChatResponseShape(body []byte) error {
 		}
 		if err := exactObjectKeys(details, allowed, nil); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func validateChatAnnotations(raw json.RawMessage) error {
+	var annotations []json.RawMessage
+	if err := json.Unmarshal(raw, &annotations); err != nil || annotations == nil {
+		return errors.New("must be a JSON array")
+	}
+	for index, rawAnnotation := range annotations {
+		annotation, err := rawObject(rawAnnotation, fmt.Sprintf("annotation %d", index))
+		if err != nil {
+			return err
+		}
+		if err := exactObjectKeys(annotation, []string{"type", "url_citation"}, []string{"type", "url_citation"}); err != nil {
+			return fmt.Errorf("annotation %d: %w", index, err)
+		}
+		var annotationType string
+		if err := json.Unmarshal(annotation["type"], &annotationType); err != nil || annotationType != "url_citation" {
+			return fmt.Errorf("annotation %d type must be the exact JSON string %q", index, "url_citation")
+		}
+		citation, err := rawObject(annotation["url_citation"], fmt.Sprintf("annotation %d url_citation", index))
+		if err != nil {
+			return err
+		}
+		if err := exactObjectKeys(citation,
+			[]string{"end_index", "start_index", "title", "url"},
+			[]string{"end_index", "start_index", "title", "url"}); err != nil {
+			return fmt.Errorf("annotation %d url_citation: %w", index, err)
+		}
+		var endIndex, startIndex int
+		var title, citationURL string
+		if bytes.Equal(bytes.TrimSpace(citation["end_index"]), []byte("null")) ||
+			json.Unmarshal(citation["end_index"], &endIndex) != nil || endIndex < 0 {
+			return fmt.Errorf("annotation %d url_citation end_index must be a non-negative integer", index)
+		}
+		if bytes.Equal(bytes.TrimSpace(citation["start_index"]), []byte("null")) ||
+			json.Unmarshal(citation["start_index"], &startIndex) != nil || startIndex < 0 {
+			return fmt.Errorf("annotation %d url_citation start_index must be a non-negative integer", index)
+		}
+		if bytes.Equal(bytes.TrimSpace(citation["title"]), []byte("null")) || json.Unmarshal(citation["title"], &title) != nil {
+			return fmt.Errorf("annotation %d url_citation title must be a JSON string", index)
+		}
+		if bytes.Equal(bytes.TrimSpace(citation["url"]), []byte("null")) || json.Unmarshal(citation["url"], &citationURL) != nil {
+			return fmt.Errorf("annotation %d url_citation url must be a JSON string", index)
 		}
 	}
 	return nil

@@ -312,6 +312,7 @@ func TestBillingEvidenceMapsObservedNanoTaxonomyAndRateDiscrepancy(t *testing.T)
 		},
 		CompletionTokenDetails: adapter.CompletionTokenDetailsObservation{
 			Present: true, Valid: true, ReasoningTokens: decimal("0"), ImageTokens: decimal("0"), AudioTokens: decimal("0"),
+			AcceptedPredictionTokens: decimal("20"), RejectedPredictionTokens: decimal("205"),
 		},
 		CostDetails: adapter.CostDetailsObservation{
 			Present: true, Valid: true, UpstreamInferenceCost: decimal("0.0000087"),
@@ -324,11 +325,38 @@ func TestBillingEvidenceMapsObservedNanoTaxonomyAndRateDiscrepancy(t *testing.T)
 	if !got.PromptTokenDetails.Valid || !got.CompletionTokenDetails.Valid || !got.CostDetails.Valid || !got.IsBYOK.Valid {
 		t.Fatalf("nested taxonomy validity lost: %+v", got)
 	}
-	if got.CostDetails.UpstreamInferenceCost.Raw != "0.0000087" || got.PromptTokenDetails.CachedTokens.Raw != "0" || got.IsBYOK.Raw != "false" {
+	if got.CostDetails.UpstreamInferenceCost.Raw != "0.0000087" || got.PromptTokenDetails.CachedTokens.Raw != "0" || got.IsBYOK.Raw != "false" ||
+		got.CompletionTokenDetails.AcceptedPredictionTokens.Raw != "20" || got.CompletionTokenDetails.RejectedPredictionTokens.Raw != "205" {
 		t.Fatalf("nested taxonomy lexical evidence changed: %+v", got)
 	}
 	if !strings.Contains(got.RateSemanticsDiscrepancy, "tariff/currency/fee semantics unresolved") {
 		t.Fatalf("rate discrepancy missing: %+v", got)
+	}
+}
+
+func TestBillingEvidenceScreensPredictionTokenRawWithoutChangingValidity(t *testing.T) {
+	const secret = "test-key-never-printed"
+	observation := adapter.BillingObservation{
+		CompletionTokenDetails: adapter.CompletionTokenDetailsObservation{
+			Present:                  true,
+			Valid:                    false,
+			AcceptedPredictionTokens: adapter.DecimalField{Present: true, Valid: false, Raw: `"test-key-never-printed"`},
+			RejectedPredictionTokens: adapter.DecimalField{Present: true, Valid: false, Raw: `"\u0074est-key-never-printed"`},
+		},
+	}
+	got := billingEvidence(observation, secret)
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDecodedJSONHasNoCredential(t, encoded, secret)
+	for name, field := range map[string]DecimalEvidence{
+		"accepted": got.CompletionTokenDetails.AcceptedPredictionTokens,
+		"rejected": got.CompletionTokenDetails.RejectedPredictionTokens,
+	} {
+		if field.Valid || field.Raw != `"[REDACTED_CREDENTIAL]"` || field.RawEvidence == "" {
+			t.Fatalf("%s prediction-token evidence was not screened as invalid/untrusted: %+v", name, field)
+		}
 	}
 }
 

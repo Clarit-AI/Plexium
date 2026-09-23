@@ -66,10 +66,27 @@ type ChatChoice struct {
 // ChatResponseMessage is kept separate from ChatMessage so response-only
 // routing evidence cannot become accepted request input.
 type ChatResponseMessage struct {
-	Role      string  `json:"role"`
-	Content   string  `json:"content"`
-	Refusal   *string `json:"refusal,omitempty"`
-	Reasoning *string `json:"reasoning,omitempty"`
+	Role        string           `json:"role"`
+	Content     string           `json:"content"`
+	Refusal     *string          `json:"refusal,omitempty"`
+	Reasoning   *string          `json:"reasoning,omitempty"`
+	Annotations []ChatAnnotation `json:"annotations,omitempty"`
+}
+
+// ChatAnnotation is the only annotation variant admitted by the supported
+// OpenAI chat-completion profile. Tool calls, audio, and other response
+// capabilities are intentionally outside the frozen Nano request profile.
+type ChatAnnotation struct {
+	Type        string          `json:"type"`
+	URLCitation ChatURLCitation `json:"url_citation"`
+}
+
+// ChatURLCitation is the documented closed shape of a url_citation annotation.
+type ChatURLCitation struct {
+	EndIndex   int    `json:"end_index"`
+	StartIndex int    `json:"start_index"`
+	Title      string `json:"title"`
+	URL        string `json:"url"`
 }
 
 type ChatPromptTokenDetails struct {
@@ -80,9 +97,11 @@ type ChatPromptTokenDetails struct {
 }
 
 type ChatCompletionTokenDetails struct {
-	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
-	ImageTokens     int `json:"image_tokens,omitempty"`
-	AudioTokens     int `json:"audio_tokens,omitempty"`
+	ReasoningTokens          int `json:"reasoning_tokens,omitempty"`
+	ImageTokens              int `json:"image_tokens,omitempty"`
+	AudioTokens              int `json:"audio_tokens,omitempty"`
+	AcceptedPredictionTokens int `json:"accepted_prediction_tokens,omitempty"`
+	RejectedPredictionTokens int `json:"rejected_prediction_tokens,omitempty"`
 }
 
 type ChatCostDetails struct {
@@ -103,7 +122,10 @@ type ChatUsage struct {
 	IsBYOK                  *bool                       `json:"is_byok,omitempty"`
 }
 
-// ChatResponse is the parsed body of /api/v1/chat/completions.
+// ChatResponse is the parsed body of /api/v1/chat/completions. The admitted
+// response profile is a deliberately closed subset of the documented OpenAI
+// Chat Completions response and OpenRouter's compatible envelope; see README.md
+// for the exact key sets and primary references.
 type ChatResponse struct {
 	ID                string       `json:"id"`
 	Object            string       `json:"object,omitempty"`

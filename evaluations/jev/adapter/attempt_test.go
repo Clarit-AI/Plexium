@@ -309,7 +309,7 @@ func TestCompleteOnceStrictSuccess(t *testing.T) {
 }
 
 func TestCompleteOnceAdmitsCapturedOpenRouterNanoEnvelopeAndBillingTaxonomy(t *testing.T) {
-	const capturedShape = `{"id":"gen-observed","model":"openai/gpt-4.1-nano","object":"chat.completion","created":1790139785,"choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}","refusal":null,"reasoning":null},"finish_reason":"stop","native_finish_reason":"completed","logprobs":null}],"provider":"OpenAI","system_fingerprint":null,"service_tier":"default","usage":{"prompt_tokens":63,"completion_tokens":6,"total_tokens":69,"cost":0.000008613,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.0000087,"upstream_inference_prompt_cost":0.0000063,"upstream_inference_completions_cost":0.0000024},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0,"audio_tokens":0}}}`
+	const capturedShape = `{"id":"gen-observed","model":"openai/gpt-4.1-nano","object":"chat.completion","created":1790139785,"choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}","refusal":null,"reasoning":null,"annotations":[]},"finish_reason":"stop","native_finish_reason":"completed","logprobs":null}],"provider":"OpenAI","system_fingerprint":null,"service_tier":"default","usage":{"prompt_tokens":63,"completion_tokens":6,"total_tokens":69,"cost":0.000008613,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.0000087,"upstream_inference_prompt_cost":0.0000063,"upstream_inference_completions_cost":0.0000024},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0,"audio_tokens":0,"accepted_prediction_tokens":0,"rejected_prediction_tokens":0}}}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, capturedShape)
 	}))
@@ -337,6 +337,8 @@ func TestCompleteOnceAdmitsCapturedOpenRouterNanoEnvelopeAndBillingTaxonomy(t *t
 		"reasoning":           obs.Billing.CompletionTokenDetails.ReasoningTokens,
 		"image":               obs.Billing.CompletionTokenDetails.ImageTokens,
 		"completion-audio":    obs.Billing.CompletionTokenDetails.AudioTokens,
+		"accepted-prediction": obs.Billing.CompletionTokenDetails.AcceptedPredictionTokens,
+		"rejected-prediction": obs.Billing.CompletionTokenDetails.RejectedPredictionTokens,
 		"upstream":            obs.Billing.CostDetails.UpstreamInferenceCost,
 		"upstream-prompt":     obs.Billing.CostDetails.UpstreamInferencePromptCost,
 		"upstream-completion": obs.Billing.CostDetails.UpstreamInferenceCompletionsCost,
@@ -348,11 +350,72 @@ func TestCompleteOnceAdmitsCapturedOpenRouterNanoEnvelopeAndBillingTaxonomy(t *t
 	if obs.Billing.Cost.Raw != "0.000008613" || obs.Billing.InputTokens.Raw != "63" || obs.Billing.OutputTokens.Raw != "6" || obs.Billing.TotalTokens.Raw != "69" {
 		t.Fatalf("primary billing lexemes changed: %+v", obs.Billing)
 	}
+	if obs.Billing.CompletionTokenDetails.AcceptedPredictionTokens.Raw != "0" || obs.Billing.CompletionTokenDetails.RejectedPredictionTokens.Raw != "0" {
+		t.Fatalf("prediction-token lexemes changed: %+v", obs.Billing.CompletionTokenDetails)
+	}
 	if !obs.Billing.IsBYOK.Present || !obs.Billing.IsBYOK.Valid || obs.Billing.IsBYOK.Value {
 		t.Fatalf("is_byok taxonomy missing: %+v", obs.Billing.IsBYOK)
 	}
 	if !strings.Contains(obs.Billing.RateSemanticsDiscrepancy, "0.000008613") || !strings.Contains(obs.Billing.RateSemanticsDiscrepancy, "0.0000087") {
 		t.Fatalf("rate-semantics discrepancy not reported: %q", obs.Billing.RateSemanticsDiscrepancy)
+	}
+}
+
+func TestCompleteOnceObjectPresenceIsStrict(t *testing.T) {
+	const base = `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{"cost":0}}`
+	tests := []struct {
+		name       string
+		objectJSON string
+		wantError  bool
+	}{
+		{name: "absent"},
+		{name: "exact", objectJSON: `"chat.completion"`},
+		{name: "empty", objectJSON: `""`, wantError: true},
+		{name: "null", objectJSON: `null`, wantError: true},
+		{name: "plural", objectJSON: `"chat.completions"`, wantError: true},
+		{name: "non-string", objectJSON: `1`, wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := base
+			if test.objectJSON != "" {
+				response = strings.Replace(base, `"model":"pin",`, `"model":"pin","object":`+test.objectJSON+`,`, 1)
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, response)
+			}))
+			defer srv.Close()
+			c, _ := NewChatClient(ChatConfig{
+				Endpoint: srv.URL + "/api/v1/chat/completions", Model: "alias", ResponseModel: "pin",
+				ResponseProvider: "OpenAI", Timeout: time.Second,
+			})
+			obs, err := c.CompleteOnce(context.Background(), frozenChatBody(t, "alias", "OpenAI"))
+			if test.wantError {
+				if err == nil || obs.Chat != nil || obs.Billing.Cost.Valid || obs.Billing.Error == "" {
+					t.Fatalf("invalid present object admitted or billing left valid: err=%v obs=%+v", err, obs)
+				}
+				return
+			}
+			if err != nil || obs.Chat == nil || !obs.Billing.Cost.Valid {
+				t.Fatalf("compatible object form rejected: err=%v obs=%+v", err, obs)
+			}
+		})
+	}
+}
+
+func TestCompleteOnceAdmitsClosedURLCitationAnnotation(t *testing.T) {
+	response := `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}","annotations":[{"type":"url_citation","url_citation":{"end_index":8,"start_index":0,"title":"Source","url":"https://example.test/source"}}]},"finish_reason":"stop"}],"usage":{"cost":0}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, response)
+	}))
+	defer srv.Close()
+	c, _ := NewChatClient(ChatConfig{
+		Endpoint: srv.URL + "/api/v1/chat/completions", Model: "alias", ResponseModel: "pin",
+		ResponseProvider: "OpenAI", Timeout: time.Second,
+	})
+	obs, err := c.CompleteOnce(context.Background(), frozenChatBody(t, "alias", "OpenAI"))
+	if err != nil || obs.Chat == nil || !obs.Billing.Cost.Valid {
+		t.Fatalf("documented url_citation annotation rejected: err=%v obs=%+v", err, obs)
 	}
 }
 
@@ -374,6 +437,12 @@ func TestCompleteOnceRejectsStrictFailureMatrix(t *testing.T) {
 		"trailing-envelope":       `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}} {}`,
 		"unexpected-envelope":     `{"id":"c","model":"pin","provider":"OpenAI","unexpected":true,"choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
 		"unexpected-usage-detail": `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{"prompt_tokens_details":{"cached_tokens":0,"unexpected":0}}}`,
+		"unexpected-message":      `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}","unexpected":true},"finish_reason":"stop"}],"usage":{}}`,
+		"unexpected-completion":   `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{"completion_tokens_details":{"reasoning_tokens":0,"unexpected":0}}}`,
+		"unexpected-annotation":   `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}","annotations":[{"type":"url_citation","url_citation":{"end_index":1,"start_index":0,"title":"t","url":"https://example.test"},"unexpected":true}]},"finish_reason":"stop"}],"usage":{}}`,
+		"unexpected-citation":     `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}","annotations":[{"type":"url_citation","url_citation":{"end_index":1,"start_index":0,"title":"t","url":"https://example.test","unexpected":true}}]},"finish_reason":"stop"}],"usage":{}}`,
+		"wrong-annotation-type":   `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}","annotations":[{"type":"other","url_citation":{"end_index":1,"start_index":0,"title":"t","url":"https://example.test"}}]},"finish_reason":"stop"}],"usage":{}}`,
+		"null-annotations":        `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}","annotations":null},"finish_reason":"stop"}],"usage":{}}`,
 	}
 	for name, response := range tests {
 		t.Run(name, func(t *testing.T) {
