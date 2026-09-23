@@ -28,6 +28,9 @@ func TestDryPlanUsesFourValidatedGoldFreeRequests(t *testing.T) {
 	if len(plan.Requests) != 4 || plan.AuthorizedCap != 1_000_000 || plan.ProbeSubcap != 200_000 {
 		t.Fatalf("unexpected plan: %+v", plan)
 	}
+	if fmt.Sprint(plan.SelectedOrdinals) != "[1 2 3 4]" || len(plan.SelectedRequests) != 4 {
+		t.Fatalf("default plan selection is not bound to all four requests: %+v", plan)
+	}
 	if plan.AccountingBasis == "" || plan.ExecutionReady || !strings.Contains(plan.ExecutionReadiness, "cannot guarantee") {
 		t.Fatalf("machine plan lacks accounting/readiness qualifiers: %+v", plan)
 	}
@@ -50,6 +53,9 @@ func TestRunSuccessfulProbeObservation(t *testing.T) {
 	if *calls != 4 || report.Halted || len(report.Attempts) != 4 {
 		t.Fatalf("calls=%d report=%+v", *calls, report)
 	}
+	if fmt.Sprint(report.SelectedOrdinals) != "[1 2 3 4]" || len(report.SelectedRequests) != 4 {
+		t.Fatalf("default report selection changed: %+v", report)
+	}
 	for _, attempt := range report.Attempts {
 		if attempt.State != "settled" || attempt.RawResponseSHA256 == "" || attempt.RawEvidencePath == "" {
 			t.Fatalf("incomplete successful attempt: %+v", attempt)
@@ -63,6 +69,26 @@ func TestRunSuccessfulProbeObservation(t *testing.T) {
 	}
 	if report.AccountingBasis == "" || report.ExecutionReady || !strings.Contains(report.ExecutionReadiness, "cannot guarantee") {
 		t.Fatalf("machine report lacks accounting/readiness qualifiers: %+v", report)
+	}
+}
+
+func TestRunSubsetBindsOnlySelectedPlanEntries(t *testing.T) {
+	server, calls := probeServer(t, responseMode{})
+	defer server.Close()
+	cfg := testConfig(t, server)
+	cfg.RequestOrdinals = []int{4, 2, 3}
+	report, err := Run(context.Background(), cfg)
+	if err != nil || report.Halted || *calls != 3 {
+		t.Fatalf("err=%v calls=%d report=%+v", err, *calls, report)
+	}
+	if fmt.Sprint(report.SelectedOrdinals) != "[2 3 4]" || len(report.SelectedRequests) != 3 || len(report.Attempts) != 3 {
+		t.Fatalf("subset binding mismatch: %+v", report)
+	}
+	for index, ordinal := range []int{2, 3, 4} {
+		binding, attempt := report.SelectedRequests[index], report.Attempts[index]
+		if binding.Ordinal != ordinal || attempt.Ordinal != ordinal || binding.RequestSHA256 != attempt.RequestSHA256 || binding.ID != attempt.RequestID {
+			t.Fatalf("selected request %d not bound to attempt: binding=%+v attempt=%+v", ordinal, binding, attempt)
+		}
 	}
 }
 
@@ -130,6 +156,36 @@ func TestRunRefusesExistingReportWithoutDial(t *testing.T) {
 	}
 	if _, err := Run(context.Background(), cfg); err == nil || *calls != 0 {
 		t.Fatalf("err=%v calls=%d", err, *calls)
+	}
+}
+
+func TestRunSubsetRefusesExistingStateWithoutDial(t *testing.T) {
+	server, calls := probeServer(t, responseMode{})
+	defer server.Close()
+	cfg := testConfig(t, server)
+	cfg.RequestOrdinals = []int{2, 3, 4}
+	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.StateDir, reportName), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(context.Background(), cfg); err == nil || *calls != 0 {
+		t.Fatalf("subset permitted pre-existing state: err=%v calls=%d", err, *calls)
+	}
+}
+
+func TestRunSubsetAnomalyRetainsReservation(t *testing.T) {
+	server, calls := probeServer(t, responseMode{jevModel: "typesafe/jev-unexpected"})
+	defer server.Close()
+	cfg := testConfig(t, server)
+	cfg.RequestOrdinals = []int{1, 2}
+	report, err := Run(context.Background(), cfg)
+	if err == nil || !report.Halted || *calls != 1 || report.LedgerBalance != ReservationPerCall {
+		t.Fatalf("subset anomaly did not halt conservatively: err=%v calls=%d report=%+v", err, *calls, report)
+	}
+	if fmt.Sprint(report.SelectedOrdinals) != "[1 2]" || len(report.Attempts) != 1 || report.Attempts[0].Ordinal != 1 {
+		t.Fatalf("subset anomaly evidence is not bound: %+v", report)
 	}
 }
 

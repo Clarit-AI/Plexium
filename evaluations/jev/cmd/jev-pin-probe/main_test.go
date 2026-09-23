@@ -2,16 +2,22 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Clarit-AI/Plexium/evaluations/jev/adapter"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/probe"
 )
 
@@ -31,6 +37,34 @@ func TestDryRunDoesNotRequireCredentialAndPrintsPlan(t *testing.T) {
 	}
 }
 
+func TestDryRunBindsApprovedRequestSubset(t *testing.T) {
+	var credentialReads int32
+	lookup := func(string) (string, bool) {
+		atomic.AddInt32(&credentialReads, 1)
+		return "must-not-be-read", true
+	}
+	var out bytes.Buffer
+	err := runCLIWithConfigAndCredential([]string{
+		"--dry-run", "--request-ordinals=2,3,4",
+		"--inventory", filepath.Join("..", "..", "pilot", "request-inventory.json"),
+	}, &out, probe.DefaultRunConfig, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan probe.Plan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatalf("decode dry plan: %v output=%s", err, out.String())
+	}
+	if credentialReads != 0 || fmt.Sprint(plan.SelectedOrdinals) != "[2 3 4]" || len(plan.SelectedRequests) != 3 {
+		t.Fatalf("credentialReads=%d selection=%v bindings=%+v", credentialReads, plan.SelectedOrdinals, plan.SelectedRequests)
+	}
+	for index, ordinal := range []int{2, 3, 4} {
+		if plan.SelectedRequests[index].Ordinal != ordinal || plan.SelectedRequests[index].RequestSHA256 == "" {
+			t.Fatalf("dry plan selection row %d is unbound: %+v", ordinal, plan.SelectedRequests[index])
+		}
+	}
+}
+
 func TestExecuteRequiresCredentialBeforeAnyRun(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "")
 	var out bytes.Buffer
@@ -40,6 +74,110 @@ func TestExecuteRequiresCredentialBeforeAnyRun(t *testing.T) {
 	}, &out)
 	if err == nil || !strings.Contains(err.Error(), "OPENROUTER_API_KEY") {
 		t.Fatalf("err=%v output=%s", err, out.String())
+	}
+}
+
+func TestExecuteRequestSubsetSendsOnlyBoundPlanEntries(t *testing.T) {
+	inventory := filepath.Join("..", "..", "pilot", "request-inventory.json")
+	plan, err := probe.BuildPlan(inventory, probe.Endpoints{Jev: probe.JevEndpoint, Nano: probe.NanoEndpoint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := make(map[int]string, len(plan.Requests))
+	for _, request := range plan.Requests {
+		expected[request.Ordinal] = request.RequestSHA256
+	}
+
+	server, calls, hashes := cliProbeServer(t)
+	defer server.Close()
+	factory := func(inventoryPath, state, key string) probe.RunConfig {
+		cfg := probe.DefaultRunConfig(inventoryPath, state, key)
+		cfg.Endpoints = probe.Endpoints{Jev: server.URL + "/api/alpha/decisions", Nano: server.URL + "/api/v1/chat/completions"}
+		cfg.HTTPClient = server.Client()
+		cfg.Timeout = time.Second
+		return cfg
+	}
+
+	for _, test := range []struct {
+		name         string
+		selectionArg []string
+		ordinals     []int
+	}{
+		{name: "approved-subset", selectionArg: []string{"--request-ordinals=2,3,4"}, ordinals: []int{2, 3, 4}},
+		{name: "no-flag-full-plan", ordinals: []int{1, 2, 3, 4}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			atomic.StoreInt32(calls, 0)
+			hashes.reset()
+			t.Setenv(probe.CredentialEnv, "mock-only-credential")
+			args := []string{"--execute", "--state-dir", t.TempDir(), "--inventory", inventory}
+			args = append(args, test.selectionArg...)
+			var out bytes.Buffer
+			if err := runCLIWithConfig(args, &out, factory); err != nil {
+				t.Fatalf("execute: %v output=%s", err, out.String())
+			}
+			if int(atomic.LoadInt32(calls)) != len(test.ordinals) {
+				t.Fatalf("calls=%d want=%d", atomic.LoadInt32(calls), len(test.ordinals))
+			}
+			seen := hashes.values()
+			if len(seen) != len(test.ordinals) {
+				t.Fatalf("seen hashes=%v", seen)
+			}
+			for index, ordinal := range test.ordinals {
+				if seen[index] != expected[ordinal] {
+					t.Fatalf("call %d hash=%s want ordinal %d hash=%s", index, seen[index], ordinal, expected[ordinal])
+				}
+			}
+			if test.name == "approved-subset" {
+				for _, seenHash := range seen {
+					if seenHash == expected[1] {
+						t.Fatalf("ordinal 1 was dialed under approved subset: %v", seen)
+					}
+				}
+			}
+			var report probe.Report
+			if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+				t.Fatalf("decode report: %v output=%s", err, out.String())
+			}
+			if fmt.Sprint(report.SelectedOrdinals) != fmt.Sprint(test.ordinals) || len(report.SelectedRequests) != len(test.ordinals) || len(report.Attempts) != len(test.ordinals) {
+				t.Fatalf("report selection mismatch: %+v", report)
+			}
+			for index, ordinal := range test.ordinals {
+				if report.SelectedRequests[index].Ordinal != ordinal || report.SelectedRequests[index].RequestSHA256 != expected[ordinal] || report.Attempts[index].Ordinal != ordinal {
+					t.Fatalf("report row %d not bound to ordinal %d: selected=%+v attempt=%+v", index, ordinal, report.SelectedRequests[index], report.Attempts[index])
+				}
+			}
+		})
+	}
+}
+
+func TestInvalidRequestSelectionsRefuseBeforeCredentialReadOrDial(t *testing.T) {
+	inventory := filepath.Join("..", "..", "pilot", "request-inventory.json")
+	for _, selection := range []string{"0", "5", "1,1", "2-4", "all", "", "2,", "x", "2,3,4,5"} {
+		t.Run("selection-"+selection, func(t *testing.T) {
+			var credentialReads, factoryCalls, dialCalls int32
+			lookup := func(string) (string, bool) {
+				atomic.AddInt32(&credentialReads, 1)
+				return "must-not-be-read", true
+			}
+			factory := func(inventoryPath, state, key string) probe.RunConfig {
+				atomic.AddInt32(&factoryCalls, 1)
+				cfg := probe.DefaultRunConfig(inventoryPath, state, key)
+				cfg.HTTPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					atomic.AddInt32(&dialCalls, 1)
+					return nil, fmt.Errorf("unexpected dial")
+				})}
+				return cfg
+			}
+			var out bytes.Buffer
+			err := runCLIWithConfigAndCredential([]string{
+				"--execute", "--state-dir", t.TempDir(), "--inventory", inventory,
+				"--request-ordinals=" + selection,
+			}, &out, factory, lookup)
+			if err == nil || credentialReads != 0 || factoryCalls != 0 || dialCalls != 0 || out.Len() != 0 {
+				t.Fatalf("selection=%q err=%v credentialReads=%d factoryCalls=%d dialCalls=%d output=%s", selection, err, credentialReads, factoryCalls, dialCalls, out.String())
+			}
+		})
 	}
 }
 
@@ -180,4 +318,81 @@ func decodedHasCredential(data []byte, credential string) error {
 		return nil
 	}
 	return walk(value)
+}
+
+type requestHashes struct {
+	mu     sync.Mutex
+	hashes []string
+}
+
+func (h *requestHashes) add(body []byte) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	sum := sha256.Sum256(body)
+	h.hashes = append(h.hashes, fmt.Sprintf("%x", sum[:]))
+}
+
+func (h *requestHashes) reset() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.hashes = nil
+}
+
+func (h *requestHashes) values() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.hashes...)
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
+func cliProbeServer(t *testing.T) (*httptest.Server, *int32, *requestHashes) {
+	t.Helper()
+	var calls int32
+	hashes := &requestHashes{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Errorf("read request: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		hashes.add(body)
+		switch request.URL.Path {
+		case "/api/alpha/decisions":
+			var payload adapter.DecisionRequest
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Errorf("decode Decisions request: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			labels := make([]string, 0, len(payload.Questions[adapter.DecisionVerdictID].Criteria))
+			for label := range payload.Questions[adapter.DecisionVerdictID].Criteria {
+				labels = append(labels, label)
+			}
+			sort.Strings(labels)
+			fmt.Fprintf(w, `{"id":"d","model":%q,"provider":%q,"answers":{"verdict":{"type":"choice","choice":%q}},"usage":{"input_tokens":20,"output_tokens":2,"cost":0.000001}}`, probe.JevCandidatePin, probe.JevCandidateProvider, labels[0])
+		case "/api/v1/chat/completions":
+			var payload adapter.ChatRequest
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Errorf("decode Nano request: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			properties := payload.ResponseFormat.JSONSchema.Schema["properties"].(map[string]any)
+			labelSchema := properties["label"].(map[string]any)
+			enum := labelSchema["enum"].([]any)
+			label := enum[0].(string)
+			content, _ := json.Marshal(map[string]string{"label": label})
+			fmt.Fprintf(w, `{"id":"c","object":"chat.completion","model":%q,"provider":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q,"annotations":[]},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":2,"total_tokens":22,"cost":0.000001,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0}}}`, probe.NanoCandidatePin, probe.NanoProvider, string(content))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	return server, &calls, hashes
 }

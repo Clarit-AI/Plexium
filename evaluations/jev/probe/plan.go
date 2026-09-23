@@ -61,7 +61,28 @@ type Plan struct {
 	ExecutionReady       bool             `json:"executionReady"`
 	ExecutionReadiness   string           `json:"executionReadiness"`
 	Requests             []Request        `json:"requests"`
+	SelectedOrdinals     []int            `json:"selectedOrdinals"`
+	SelectedRequests     []RequestBinding `json:"selectedRequests"`
 	FailClosedConditions []string         `json:"failClosedConditions"`
+}
+
+// RequestBinding identifies one immutable approved-plan entry without carrying
+// its request body. It binds subset execution evidence to the exact request
+// bytes, route, alias, response pin, and provider expectation that were
+// reviewed in the four-request plan.
+type RequestBinding struct {
+	Ordinal           int              `json:"ordinal"`
+	ID                string           `json:"id"`
+	Arm               pilot.Arm        `json:"arm"`
+	Kind              string           `json:"kind"`
+	FixtureID         string           `json:"fixtureId,omitempty"`
+	Endpoint          string           `json:"endpoint"`
+	RequestedAlias    string           `json:"requestedAlias"`
+	CandidatePin      string           `json:"candidateResponsePin"`
+	CandidateProvider string           `json:"candidateProvider"`
+	RequestSHA256     string           `json:"requestSha256"`
+	RequestBytes      int              `json:"requestBytes"`
+	Reservation       ledger.MicroUnit `json:"reservationMicrodollars"`
 }
 
 func BuildPlan(inventoryPath string, endpoints Endpoints) (*Plan, error) {
@@ -108,7 +129,7 @@ func BuildPlan(inventoryPath string, endpoints Endpoints) (*Plan, error) {
 			return nil, fmt.Errorf("probe: validate %s: %w", request.ID, err)
 		}
 	}
-	return &Plan{
+	plan := &Plan{
 		Version: PlanVersion, InventorySHA256: inv.InventoryHash, CredentialEnv: CredentialEnv,
 		AuthorizedCap: AuthorizedCap, ProbeSubcap: ProbeSubcap, ReservationPerCall: ReservationPerCall,
 		AccountingBasis: AccountingBasis, ExecutionReady: false, ExecutionReadiness: ReadinessReason,
@@ -120,7 +141,68 @@ func BuildPlan(inventoryPath string, endpoints Endpoints) (*Plan, error) {
 			"token usage outside the conservative accounting envelope",
 			"existing state, uncertain prior send, raw-evidence write failure, or report drift",
 		},
-	}, nil
+	}
+	if _, err := SelectPlanRequests(plan, nil); err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+// SelectPlanRequests binds an optional ordinal set to the approved plan and
+// returns the corresponding immutable entries in plan order. A nil or empty
+// selection is the compatibility default and selects the full plan. CLI code
+// distinguishes an omitted flag from an explicitly empty flag before calling
+// this function.
+func SelectPlanRequests(plan *Plan, ordinals []int) ([]Request, error) {
+	if plan == nil || len(plan.Requests) != MaxRequests {
+		return nil, fmt.Errorf("probe: approved plan must contain exactly %d requests", MaxRequests)
+	}
+	selected := make(map[int]bool, len(ordinals))
+	if len(ordinals) == 0 {
+		for _, request := range plan.Requests {
+			selected[request.Ordinal] = true
+		}
+	} else {
+		for _, ordinal := range ordinals {
+			if ordinal <= 0 {
+				return nil, fmt.Errorf("probe: request ordinal must be positive: %d", ordinal)
+			}
+			if selected[ordinal] {
+				return nil, fmt.Errorf("probe: duplicate request ordinal %d", ordinal)
+			}
+			selected[ordinal] = true
+		}
+	}
+
+	known := make(map[int]bool, len(plan.Requests))
+	requests := make([]Request, 0, len(selected))
+	bindings := make([]RequestBinding, 0, len(selected))
+	boundOrdinals := make([]int, 0, len(selected))
+	for _, request := range plan.Requests {
+		known[request.Ordinal] = true
+		if !selected[request.Ordinal] {
+			continue
+		}
+		requests = append(requests, request)
+		boundOrdinals = append(boundOrdinals, request.Ordinal)
+		bindings = append(bindings, RequestBinding{
+			Ordinal: request.Ordinal, ID: request.ID, Arm: request.Arm, Kind: request.Kind,
+			FixtureID: request.FixtureID, Endpoint: request.Endpoint, RequestedAlias: request.RequestedAlias,
+			CandidatePin: request.CandidatePin, CandidateProvider: request.CandidateProvider,
+			RequestSHA256: request.RequestSHA256, RequestBytes: request.RequestBytes, Reservation: request.Reservation,
+		})
+	}
+	for ordinal := range selected {
+		if !known[ordinal] {
+			return nil, fmt.Errorf("probe: request ordinal %d is not in the approved plan", ordinal)
+		}
+	}
+	if len(requests) == 0 {
+		return nil, errors.New("probe: request selection must not be empty")
+	}
+	plan.SelectedOrdinals = boundOrdinals
+	plan.SelectedRequests = bindings
+	return requests, nil
 }
 
 type selectedPayload struct {

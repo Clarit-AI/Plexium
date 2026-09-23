@@ -37,13 +37,16 @@ type RunConfig struct {
 	InventoryPath string
 	StateDir      string
 	APIKey        string
-	Endpoints     Endpoints
-	HTTPClient    *http.Client
-	Timeout       time.Duration
-	JevPin        string
-	JevProvider   string
-	NanoPin       string
-	NanoProvider  string
+	// RequestOrdinals is an explicitly approved subset of the immutable
+	// four-request plan. Nil/empty preserves the full-plan compatibility path.
+	RequestOrdinals []int
+	Endpoints       Endpoints
+	HTTPClient      *http.Client
+	Timeout         time.Duration
+	JevPin          string
+	JevProvider     string
+	NanoPin         string
+	NanoProvider    string
 }
 
 func DefaultRunConfig(inventoryPath, stateDir, apiKey string) RunConfig {
@@ -177,6 +180,8 @@ type Report struct {
 	AccountingBasis    string           `json:"accountingBasis"`
 	ExecutionReady     bool             `json:"executionReady"`
 	ExecutionReadiness string           `json:"executionReadiness"`
+	SelectedOrdinals   []int            `json:"selectedOrdinals"`
+	SelectedRequests   []RequestBinding `json:"selectedRequests"`
 	ReservedTotal      ledger.MicroUnit `json:"reservedTotalMicrodollars"`
 	LedgerBalance      ledger.MicroUnit `json:"ledgerBalanceMicrodollars"`
 	StartedAt          time.Time        `json:"startedAt"`
@@ -237,10 +242,15 @@ func runWithLimits(ctx context.Context, cfg RunConfig, limits runLimits) (*Repor
 			plan.Requests[i].CandidatePin, plan.Requests[i].CandidateProvider = cfg.NanoPin, cfg.NanoProvider
 		}
 	}
+	selectedRequests, err := SelectPlanRequests(plan, cfg.RequestOrdinals)
+	if err != nil {
+		return nil, err
+	}
 	report := &Report{
 		Version: PlanVersion, InventorySHA256: plan.InventorySHA256, AuthorizedCap: limits.AuthorizedCap,
 		ProbeSubcap: limits.ProbeSubcap, AccountingBasis: AccountingBasis,
 		ExecutionReady: false, ExecutionReadiness: ReadinessReason,
+		SelectedOrdinals: append([]int(nil), plan.SelectedOrdinals...), SelectedRequests: append([]RequestBinding(nil), plan.SelectedRequests...),
 		StartedAt: time.Now().UTC(), Gates: initialGates(), credential: cfg.APIKey,
 	}
 	if err := persistReport(reportPath, report); err != nil {
@@ -282,7 +292,7 @@ func runWithLimits(ctx context.Context, cfg RunConfig, limits runLimits) (*Repor
 		return halt(reportPath, report, "create Nano client: "+err.Error(), l)
 	}
 
-	for _, request := range plan.Requests {
+	for _, request := range selectedRequests {
 		if report.ReservedTotal+request.Reservation > limits.ProbeSubcap {
 			return halt(reportPath, report, "probe subcap exhausted before "+request.ID, l)
 		}
