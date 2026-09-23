@@ -343,6 +343,82 @@ func TestDerivedAssessmentRejectsStableEvidenceReuseDespiteMutableMetadata(t *te
 	}
 }
 
+func TestDerivedAssessmentRequiresStableEvidenceOnEveryRow(t *testing.T) {
+	plan := assessmentTestPlan(t)
+	binding := plan.SelectedRequests[1]
+
+	tests := []struct {
+		name       string
+		mutate     func(*Attempt)
+		wantDetail string
+	}{
+		{
+			name: "sole-row-missing-reservation",
+			mutate: func(attempt *Attempt) {
+				attempt.ReservationRef = ""
+			},
+			wantDetail: "reservation reference is empty",
+		},
+		{
+			name: "sole-row-missing-response-hashes",
+			mutate: func(attempt *Attempt) {
+				attempt.RawResponseSHA256 = ""
+				attempt.EvidenceSHA256 = ""
+			},
+			wantDetail: "raw-response and persisted-evidence hashes are both empty",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			attempt := acceptedAssessmentAttemptWithCost(binding, "0.000008613")
+			setAssessmentAttemptIdentity(&attempt, test.name)
+			test.mutate(&attempt)
+			report := Report{
+				Version: PlanVersion, InventorySHA256: plan.InventorySHA256,
+				SelectedOrdinals: []int{2}, SelectedRequests: []RequestBinding{binding}, Attempts: []Attempt{attempt},
+			}
+			dir := t.TempDir()
+			source := filepath.Join(dir, "source.json")
+			output := filepath.Join(dir, "derived.json")
+			writeAssessmentTestReport(t, source, &report)
+			_, err := DeriveAssessmentToFile(assessmentInventoryPath(), []string{source}, output)
+			if err == nil || !strings.Contains(err.Error(), test.wantDetail) {
+				t.Fatalf("row without mandatory stable evidence was not rejected: %v", err)
+			}
+			if _, statErr := os.Stat(output); !os.IsNotExist(statErr) {
+				t.Fatalf("invalid row emitted derived output: %v", statErr)
+			}
+		})
+	}
+
+	t.Run("all-run2-rows-cleared", func(t *testing.T) {
+		bindings := plan.SelectedRequests[1:]
+		costs := []string{"0.000008613", "0.000061908", "0.000056529"}
+		report := Report{Version: PlanVersion, InventorySHA256: plan.InventorySHA256}
+		for i, binding := range bindings {
+			attempt := acceptedAssessmentAttemptWithCost(binding, costs[i])
+			setAssessmentAttemptIdentity(&attempt, "cleared-"+binding.ID)
+			attempt.ReservationRef = ""
+			attempt.RawResponseSHA256 = ""
+			attempt.EvidenceSHA256 = ""
+			report.SelectedOrdinals = append(report.SelectedOrdinals, binding.Ordinal)
+			report.SelectedRequests = append(report.SelectedRequests, binding)
+			report.Attempts = append(report.Attempts, attempt)
+		}
+		dir := t.TempDir()
+		source := filepath.Join(dir, "run2-copy.json")
+		output := filepath.Join(dir, "derived.json")
+		writeAssessmentTestReport(t, source, &report)
+		_, err := DeriveAssessmentToFile(assessmentInventoryPath(), []string{source}, output)
+		if err == nil || !strings.Contains(err.Error(), "lacks mandatory stable evidence") {
+			t.Fatalf("all-rows-cleared reproduction was not rejected: %v", err)
+		}
+		if _, statErr := os.Stat(output); !os.IsNotExist(statErr) {
+			t.Fatalf("all-rows-cleared reproduction emitted raw 127.05 or gate coverage: %v", statErr)
+		}
+	})
+}
+
 func TestDerivedAssessmentDistinguishesAbsentFromEmptySelectionFields(t *testing.T) {
 	plan := assessmentTestPlan(t)
 	binding := plan.SelectedRequests[0]

@@ -169,6 +169,9 @@ func deriveAssessment(inventoryPath string, sourcePaths []string) (*DerivedAsses
 				return nil, fmt.Errorf("probe: source report %s attempt identity mismatch for ordinal %d", path, attempt.Ordinal)
 			}
 			stable := stableIdentity(attempt, path)
+			if err := validateStableIdentity(stable); err != nil {
+				return nil, fmt.Errorf("probe: source report %s attempt ordinal %d lacks mandatory stable evidence: %w", path, attempt.Ordinal, err)
+			}
 			namespace := attempt.RequestID + "\x00" + attempt.RequestSHA256
 			for _, earlier := range seenStableEvidence[namespace] {
 				if stableEvidenceConflicts(earlier, stable) {
@@ -328,6 +331,19 @@ func stableIdentity(attempt Attempt, sourcePath string) stableAttemptIdentity {
 		ReservationRef: attempt.ReservationRef, RawResponseHash: attempt.RawResponseSHA256,
 		EvidenceHash: attempt.EvidenceSHA256, SourcePath: sourcePath,
 	}
+}
+
+func validateStableIdentity(identity stableAttemptIdentity) error {
+	// Every row must independently bind the attempted reservation to response
+	// evidence before it can contribute coverage or accounting. Pairwise reuse
+	// checks alone cannot validate a first or sole row.
+	if identity.ReservationRef == "" {
+		return errors.New("reservation reference is empty")
+	}
+	if identity.RawResponseHash == "" && identity.EvidenceHash == "" {
+		return errors.New("raw-response and persisted-evidence hashes are both empty")
+	}
+	return nil
 }
 
 func stableEvidenceConflicts(left, right stableAttemptIdentity) bool {

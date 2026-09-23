@@ -65,6 +65,9 @@ one source, any repeated attempt ordinal is rejected before coverage or cost
 aggregation, regardless of outcome. Across sources, the same ordinal is a
 legitimate retry only when it has both a new reservation reference and new,
 comparable response evidence (raw-response or persisted-evidence hash).
+Every row must independently carry a nonempty reservation reference and at
+least one of those response hashes before it can contribute coverage or cost;
+this check also applies to a first or sole row.
 Mutable provenance such as start time or provider request ID never establishes
 a new attempt. Repeated source content or reused/conflicting stable evidence is
 rejected. JSON property presence is distinct from slice length: the legacy
