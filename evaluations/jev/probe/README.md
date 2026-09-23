@@ -20,7 +20,10 @@ duplicates, ranges, wildcards, words, zero, negative values, and ordinals not
 present in the approved plan are rejected before credential lookup or any
 dial. Every CLI flag is single-occurrence, and the command accepts no
 positional arguments or arguments after `--`; these forms are also rejected
-before credential lookup. Input order is normalized to immutable plan order.
+before credential lookup. String flag values beginning with `-` are rejected
+so a missing value cannot consume the next flag. A real path whose basename
+begins with a hyphen must use a non-hyphen-leading form such as
+`--state-dir ./-weirdname`. Input order is normalized to immutable plan order.
 Omitting the flag retains the full four-request behavior.
 
 Both the plan and the durable report record `selectedOrdinals` and

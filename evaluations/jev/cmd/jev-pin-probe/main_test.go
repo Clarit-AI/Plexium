@@ -215,6 +215,22 @@ func TestUnexpectedArgumentsAndRepeatedFlagsRefuseBeforeCredentialReadOrDial(t *
 			name: "repeated-execute",
 			args: []string{"--execute", "--execute", "--state-dir", "unused", "--inventory", inventory},
 		},
+		{
+			name: "state-dir-swallows-selector",
+			args: []string{"--inventory", inventory, "--execute", "--state-dir", "--request-ordinals=2,3,4"},
+		},
+		{
+			name: "state-dir-flag-looking-value",
+			args: []string{"--execute", "--state-dir", "-x", "--inventory", inventory},
+		},
+		{
+			name: "inventory-swallows-execute",
+			args: []string{"--inventory", "--execute", "--state-dir", "unused"},
+		},
+		{
+			name: "selector-swallows-dry-run",
+			args: []string{"--request-ordinals", "--dry-run"},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var credentialReads, factoryCalls, dialCalls int32
@@ -237,6 +253,28 @@ func TestUnexpectedArgumentsAndRepeatedFlagsRefuseBeforeCredentialReadOrDial(t *
 				t.Fatalf("err=%v credentialReads=%d factoryCalls=%d dialCalls=%d output=%s", err, credentialReads, factoryCalls, dialCalls, out.String())
 			}
 		})
+	}
+}
+
+func TestLeadingHyphenPathWithDotSlashIsAccepted(t *testing.T) {
+	inventory := filepath.Join("..", "..", "pilot", "request-inventory.json")
+	var credentialReads int32
+	lookup := func(string) (string, bool) {
+		atomic.AddInt32(&credentialReads, 1)
+		return "must-not-be-read", true
+	}
+	var out bytes.Buffer
+	err := runCLIWithConfigAndCredential([]string{
+		"--dry-run", "--state-dir", "./-weirdname", "--inventory", inventory,
+	}, &out, probe.DefaultRunConfig, lookup)
+	if err != nil {
+		t.Fatalf("dot-slash leading-hyphen path rejected: %v", err)
+	}
+	if credentialReads != 0 {
+		t.Fatalf("credential reads=%d, want 0", credentialReads)
+	}
+	if out.Len() == 0 {
+		t.Fatal("dry-run emitted no plan")
 	}
 }
 

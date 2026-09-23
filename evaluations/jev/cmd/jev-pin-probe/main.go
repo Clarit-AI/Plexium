@@ -40,6 +40,9 @@ func (f *singleStringFlag) Set(value string) error {
 	if f.set {
 		return fmt.Errorf("--%s may be provided only once", f.name)
 	}
+	if strings.HasPrefix(value, "-") {
+		return fmt.Errorf("--%s value must not begin with '-' (prefix a leading-hyphen path with ./)", f.name)
+	}
 	f.set = true
 	f.value = value
 	return nil
