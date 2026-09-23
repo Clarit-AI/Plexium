@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -46,7 +47,7 @@ func TestExecuteRedactsReflectedCredentialFromCLIAndFiles(t *testing.T) {
 	secret := "fake-cli-key-reflected-579"
 	t.Setenv(probe.CredentialEnv, secret)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, `{"id":"d","model":%q,"provider":%q,"answers":{"verdict":{"type":"choice","choice":"supported"}},"usage":{"input_tokens":20,"output_tokens":2,"cost":0.000001,"diagnostic":%q}}`, probe.JevCandidatePin, probe.JevCandidateProvider, secret)
+		fmt.Fprintf(w, `{"id":"d","model":%q,"provider":%q,"answers":{"verdict":{"type":"choice","choice":"supported"}},"usage":{"input_tokens":20,"output_tokens":2,"cost":0.000001,"diagnostic":"\u0066ake-cli-key-reflected-579"}}`, probe.JevCandidatePin, probe.JevCandidateProvider)
 	}))
 	defer server.Close()
 	stateDir := t.TempDir()
@@ -65,9 +66,10 @@ func TestExecuteRedactsReflectedCredentialFromCLIAndFiles(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected schema halt")
 	}
-	if strings.Contains(out.String(), secret) || strings.Contains(err.Error(), secret) {
+	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("credential leaked to CLI output: stdout=%s stderr=%v", out.String(), err)
 	}
+	assertDecodedNoCredential(t, out.Bytes(), secret)
 	err = filepath.WalkDir(stateDir, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil || entry.IsDir() {
 			return walkErr
@@ -76,12 +78,54 @@ func TestExecuteRedactsReflectedCredentialFromCLIAndFiles(t *testing.T) {
 		if readErr != nil {
 			return readErr
 		}
-		if bytes.Contains(data, []byte(secret)) {
-			return fmt.Errorf("credential leaked in %s", path)
+		if strings.HasSuffix(path, ".json") {
+			if checkErr := decodedHasCredential(data, secret); checkErr != nil {
+				return fmt.Errorf("credential leaked in %s: %w", path, checkErr)
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func assertDecodedNoCredential(t *testing.T, data []byte, credential string) {
+	t.Helper()
+	if err := decodedHasCredential(data, credential); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func decodedHasCredential(data []byte, credential string) error {
+	var value any
+	if err := json.Unmarshal(data, &value); err != nil {
+		return fmt.Errorf("parse JSON: %w", err)
+	}
+	var walk func(any) error
+	walk = func(current any) error {
+		switch typed := current.(type) {
+		case string:
+			if strings.Contains(typed, credential) {
+				return fmt.Errorf("decoded credential remains in %q", typed)
+			}
+		case []any:
+			for _, item := range typed {
+				if err := walk(item); err != nil {
+					return err
+				}
+			}
+		case map[string]any:
+			for key, item := range typed {
+				if strings.Contains(key, credential) {
+					return fmt.Errorf("decoded credential remains in key %q", key)
+				}
+				if err := walk(item); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	return walk(value)
 }

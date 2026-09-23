@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -258,20 +259,33 @@ func runWithLimits(ctx context.Context, cfg RunConfig, limits runLimits) (*Repor
 		} else {
 			obs, err = nanoClient.CompleteOnce(ctx, request.Body)
 		}
-		attempt = observationAttempt(attempt, obs, err, cfg.APIKey)
-		safeRaw := sanitizeBytes(obs.RawResponse, cfg.APIKey)
-		rawPath, evidenceHash, rawErr := persistRaw(cfg.StateDir, request, safeRaw)
-		if rawErr == nil && len(obs.RawResponse) > 0 {
+		safeRaw, redacted, screenErr := screenResponse(obs.RawResponse, cfg.APIKey)
+		attempt = observationAttempt(attempt, obs, err, cfg.APIKey, safeRaw)
+		var rawPath, evidenceHash string
+		var rawErr error
+		if screenErr == nil {
+			rawPath, evidenceHash, rawErr = persistRaw(cfg.StateDir, request, safeRaw)
+		} else if len(obs.RawResponse) > 0 {
+			attempt.EvidenceKind = "hash-only: response could not be screened without changing a JSON key or preserving undecodable text"
+		}
+		if screenErr == nil && rawErr == nil && len(obs.RawResponse) > 0 {
 			attempt.RawEvidencePath = rawPath
 			attempt.EvidenceSHA256 = evidenceHash
-			attempt.EvidenceSanitized = !bytes.Equal(safeRaw, obs.RawResponse)
-			attempt.EvidenceKind = "credential-screened bounded response; original bytes are not persisted"
+			attempt.EvidenceSanitized = redacted
+			if redacted {
+				attempt.EvidenceKind = "credential-redacted JSON response; original bytes withheld and represented only by originalRawResponseSha256"
+			} else {
+				attempt.EvidenceKind = "credential-screened JSON response; persisted bytes equal the original bounded response"
+			}
 		}
 		report.Attempts[len(report.Attempts)-1] = attempt
 
 		billing, billingErr := parseBilling(obs.Billing)
 		usageOverrun := billingErr == nil && (billing.inputTokens > accountingInBound || billing.outputTokens > accountingOutBound)
 		var anomalies []string
+		if screenErr != nil {
+			anomalies = append(anomalies, "screen response evidence: "+sanitizeString(screenErr.Error(), cfg.APIKey))
+		}
 		if rawErr != nil {
 			anomalies = append(anomalies, "persist sanitized evidence: "+sanitizeString(rawErr.Error(), cfg.APIKey))
 		}
@@ -335,7 +349,7 @@ func requirePristineState(stateDir string) error {
 	return nil
 }
 
-func observationAttempt(attempt Attempt, obs adapter.AttemptObservation, callErr error, credential string) Attempt {
+func observationAttempt(attempt Attempt, obs adapter.AttemptObservation, callErr error, credential string, safeRaw []byte) Attempt {
 	attempt.State = "observed"
 	attempt.RequestSent, attempt.ResponseReceived, attempt.Status = obs.RequestSent, obs.ResponseReceived, obs.Status
 	attempt.ProviderRequestID = sanitizeString(obs.RequestID, credential)
@@ -346,7 +360,6 @@ func observationAttempt(attempt Attempt, obs adapter.AttemptObservation, callErr
 	attempt.Billing = billingEvidence(obs.Billing, credential)
 	attempt.RawResponseSHA256, attempt.RawTruncated = obs.RawSHA256, obs.RawTruncated
 	attempt.ReadError = sanitizeString(obs.ReadError, credential)
-	safeRaw := sanitizeBytes(obs.RawResponse, credential)
 	attempt.UsageFields, attempt.IdentityFields, attempt.FinishReasons = responseEvidence(safeRaw)
 	if callErr != nil {
 		attempt.AdapterError = sanitizeString(callErr.Error(), credential)
@@ -356,7 +369,7 @@ func observationAttempt(attempt Attempt, obs adapter.AttemptObservation, callErr
 
 func billingEvidence(b adapter.BillingObservation, credential string) BillingEvidence {
 	convert := func(f adapter.DecimalField) DecimalEvidence {
-		return DecimalEvidence{Present: f.Present, Null: f.Null, Valid: f.Valid, Raw: sanitizeString(f.Raw, credential), Error: sanitizeString(f.Error, credential)}
+		return DecimalEvidence{Present: f.Present, Null: f.Null, Valid: f.Valid, Raw: f.Raw, Error: sanitizeString(f.Error, credential)}
 	}
 	return BillingEvidence{Cost: convert(b.Cost), InputTokens: convert(b.InputTokens), OutputTokens: convert(b.OutputTokens), TotalTokens: convert(b.TotalTokens), Error: sanitizeString(b.Error, credential)}
 }
@@ -455,17 +468,113 @@ func sanitizeString(value, credential string) string {
 	return strings.ReplaceAll(value, credential, "[REDACTED_CREDENTIAL]")
 }
 
-func sanitizeBytes(value []byte, credential string) []byte {
-	copyValue := append([]byte(nil), value...)
-	if credential == "" || len(copyValue) == 0 {
-		return copyValue
+func screenResponse(value []byte, credential string) ([]byte, bool, error) {
+	if len(value) == 0 || credential == "" {
+		return append([]byte(nil), value...), false, nil
 	}
-	redacted := bytes.ReplaceAll(copyValue, []byte(credential), []byte("[REDACTED_CREDENTIAL]"))
-	if encoded, err := json.Marshal(credential); err == nil && len(encoded) >= 2 {
-		escaped := encoded[1 : len(encoded)-1]
-		redacted = bytes.ReplaceAll(redacted, escaped, []byte("[REDACTED_CREDENTIAL]"))
+	dec := json.NewDecoder(bytes.NewReader(value))
+	dec.UseNumber()
+	var out bytes.Buffer
+	redacted, err := screenJSONValue(dec, &out, credential)
+	if err != nil {
+		return nil, false, fmt.Errorf("JSON response is not safely screenable; retain original hash only: %w", err)
 	}
-	return redacted
+	if _, err := dec.Token(); err != io.EOF {
+		if err == nil {
+			err = errors.New("multiple top-level JSON values")
+		}
+		return nil, false, fmt.Errorf("JSON response is not safely screenable; retain original hash only: %w", err)
+	}
+	if !redacted {
+		return append([]byte(nil), value...), false, nil
+	}
+	return out.Bytes(), true, nil
+}
+
+func screenJSONValue(dec *json.Decoder, out *bytes.Buffer, credential string) (bool, error) {
+	token, err := dec.Token()
+	if err != nil {
+		return false, err
+	}
+	switch value := token.(type) {
+	case json.Delim:
+		switch value {
+		case '{':
+			out.WriteByte('{')
+			redacted := false
+			for index := 0; dec.More(); index++ {
+				if index > 0 {
+					out.WriteByte(',')
+				}
+				keyToken, err := dec.Token()
+				if err != nil {
+					return false, err
+				}
+				key, ok := keyToken.(string)
+				if !ok {
+					return false, errors.New("object key is not a string")
+				}
+				if strings.Contains(key, credential) {
+					return false, errors.New("credential appears in a decoded JSON object key")
+				}
+				encodedKey, _ := json.Marshal(key)
+				out.Write(encodedKey)
+				out.WriteByte(':')
+				childRedacted, err := screenJSONValue(dec, out, credential)
+				if err != nil {
+					return false, err
+				}
+				redacted = redacted || childRedacted
+			}
+			end, err := dec.Token()
+			if err != nil || end != json.Delim('}') {
+				return false, errors.New("unterminated JSON object")
+			}
+			out.WriteByte('}')
+			return redacted, nil
+		case '[':
+			out.WriteByte('[')
+			redacted := false
+			for index := 0; dec.More(); index++ {
+				if index > 0 {
+					out.WriteByte(',')
+				}
+				childRedacted, err := screenJSONValue(dec, out, credential)
+				if err != nil {
+					return false, err
+				}
+				redacted = redacted || childRedacted
+			}
+			end, err := dec.Token()
+			if err != nil || end != json.Delim(']') {
+				return false, errors.New("unterminated JSON array")
+			}
+			out.WriteByte(']')
+			return redacted, nil
+		default:
+			return false, fmt.Errorf("unexpected JSON delimiter %q", value)
+		}
+	case string:
+		safe := sanitizeString(value, credential)
+		encoded, _ := json.Marshal(safe)
+		out.Write(encoded)
+		return safe != value, nil
+	case json.Number:
+		out.WriteString(value.String())
+		return false, nil
+	case bool:
+		if value {
+			out.WriteString("true")
+		} else {
+			out.WriteString("false")
+		}
+		return false, nil
+	case nil:
+		out.WriteString("null")
+		return false, nil
+	default:
+		return false, fmt.Errorf("unsupported JSON token %T", token)
+	}
 }
 
 func sanitizeHeaders(headers map[string]string, credential string) map[string]string {
@@ -508,7 +617,7 @@ func persistReport(path string, report *Report) error {
 	if err != nil {
 		return err
 	}
-	data = append(sanitizeBytes(data, report.credential), '\n')
+	data = append(data, '\n')
 	tmp := path + ".tmp"
 	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {

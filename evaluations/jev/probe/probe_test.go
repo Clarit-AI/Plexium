@@ -191,8 +191,8 @@ func TestRunExplicitZeroRetainsFullProbeReservations(t *testing.T) {
 }
 
 func TestRunRedactsReflectedCredentialFromReportAndEvidence(t *testing.T) {
-	secret := "fake-probe-key-reflected-579"
-	server, calls := probeServer(t, responseMode{usageDiagnostic: secret})
+	secret := "test-key-never-printed"
+	server, calls := probeServer(t, responseMode{usageDiagnosticRaw: `"\u0074est-key-never-printed"`})
 	defer server.Close()
 	cfg := testConfig(t, server)
 	cfg.APIKey = secret
@@ -201,9 +201,10 @@ func TestRunRedactsReflectedCredentialFromReportAndEvidence(t *testing.T) {
 		t.Fatalf("err=%v calls=%d", err, *calls)
 	}
 	encoded, _ := json.Marshal(report)
-	if bytes.Contains(encoded, []byte(secret)) || strings.Contains(err.Error(), secret) {
+	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("credential leaked in report/error: report=%s err=%v", encoded, err)
 	}
+	assertDecodedJSONHasNoCredential(t, encoded, secret)
 	err = filepath.WalkDir(cfg.StateDir, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil || entry.IsDir() {
 			return walkErr
@@ -212,8 +213,10 @@ func TestRunRedactsReflectedCredentialFromReportAndEvidence(t *testing.T) {
 		if readErr != nil {
 			return readErr
 		}
-		if bytes.Contains(data, []byte(secret)) {
-			return fmt.Errorf("credential leaked in %s", path)
+		if strings.HasSuffix(path, ".json") {
+			if checkErr := decodedJSONHasCredential(data, secret); checkErr != nil {
+				return fmt.Errorf("credential screening failed in %s: %w", path, checkErr)
+			}
 		}
 		return nil
 	})
@@ -222,13 +225,129 @@ func TestRunRedactsReflectedCredentialFromReportAndEvidence(t *testing.T) {
 	}
 }
 
+func TestRunNumericCredentialPreservesJSONAndNumericEvidence(t *testing.T) {
+	server, calls := probeServer(t, responseMode{})
+	defer server.Close()
+	cfg := testConfig(t, server)
+	cfg.APIKey = "20"
+	report, err := Run(context.Background(), cfg)
+	if err != nil || *calls != 4 {
+		t.Fatalf("err=%v calls=%d report=%+v", err, *calls, report)
+	}
+	for _, attempt := range report.Attempts {
+		if attempt.Billing.InputTokens.Raw != "20" || !attempt.Billing.InputTokens.Valid {
+			t.Fatalf("numeric billing evidence corrupted: %+v", attempt.Billing.InputTokens)
+		}
+	}
+	err = filepath.WalkDir(cfg.StateDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() || !strings.HasSuffix(path, ".json") {
+			return walkErr
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if !json.Valid(data) {
+			return fmt.Errorf("invalid JSON in %s", path)
+		}
+		if strings.Contains(path, "evidence") {
+			var body struct {
+				Usage map[string]json.RawMessage `json:"usage"`
+			}
+			dec := json.NewDecoder(bytes.NewReader(data))
+			dec.UseNumber()
+			if err := dec.Decode(&body); err != nil {
+				return fmt.Errorf("decode evidence %s: %w", path, err)
+			}
+			raw := body.Usage["input_tokens"]
+			if len(raw) == 0 {
+				raw = body.Usage["prompt_tokens"]
+			}
+			if string(raw) != "20" {
+				return fmt.Errorf("numeric token changed in %s: value=%s", path, raw)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestScreenResponseDecodesStringsPreservesNumbersAndDuplicateKeys(t *testing.T) {
+	secret := "test-key-never-printed"
+	raw := []byte(`{"input_tokens":20,"output_tokens":2,"cost":0.000001,"diagnostic":"\u0074est-key-never-printed","nested":["prefix test-key-never-printed suffix"],"duplicate":"safe","duplicate":"test-key-never-printed"}`)
+	safe, redacted, err := screenResponse(raw, secret)
+	if err != nil || !redacted || !json.Valid(safe) {
+		t.Fatalf("safe=%s redacted=%v err=%v", safe, redacted, err)
+	}
+	assertDecodedJSONHasNoCredential(t, safe, secret)
+	if bytes.Count(safe, []byte(`"duplicate"`)) != 2 {
+		t.Fatalf("duplicate keys were collapsed: %s", safe)
+	}
+	var decoded map[string]json.RawMessage
+	dec := json.NewDecoder(bytes.NewReader(safe))
+	dec.UseNumber()
+	if err := dec.Decode(&decoded); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{"input_tokens": "20", "output_tokens": "2", "cost": "0.000001"} {
+		if string(decoded[key]) != want {
+			t.Fatalf("numeric field %s changed: got=%s want=%s", key, decoded[key], want)
+		}
+	}
+}
+
+func assertDecodedJSONHasNoCredential(t *testing.T, data []byte, credential string) {
+	t.Helper()
+	if err := decodedJSONHasCredential(data, credential); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func decodedJSONHasCredential(data []byte, credential string) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return fmt.Errorf("parse screened JSON: %w", err)
+	}
+	var walk func(any) error
+	walk = func(current any) error {
+		switch typed := current.(type) {
+		case string:
+			if strings.Contains(typed, credential) {
+				return fmt.Errorf("decoded credential remains in string value %q", typed)
+			}
+		case []any:
+			for _, item := range typed {
+				if err := walk(item); err != nil {
+					return err
+				}
+			}
+		case map[string]any:
+			for key, item := range typed {
+				if strings.Contains(key, credential) {
+					return fmt.Errorf("decoded credential remains in object key %q", key)
+				}
+				if err := walk(item); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	return walk(value)
+}
+
 type responseMode struct {
-	jevModel        string
-	jevProvider     string
-	omitCost        bool
-	cost            string
-	inputTokens     int64
-	usageDiagnostic string
+	jevModel           string
+	jevProvider        string
+	omitCost           bool
+	cost               string
+	inputTokens        int64
+	usageDiagnostic    string
+	usageDiagnosticRaw string
 }
 
 func probeServer(t *testing.T, mode responseMode) (*httptest.Server, *int32) {
@@ -273,6 +392,8 @@ func probeServer(t *testing.T, mode responseMode) (*httptest.Server, *int32) {
 			diagnostic := ""
 			if mode.usageDiagnostic != "" {
 				diagnostic = fmt.Sprintf(`,"diagnostic":%q`, mode.usageDiagnostic)
+			} else if mode.usageDiagnosticRaw != "" {
+				diagnostic = `,"diagnostic":` + mode.usageDiagnosticRaw
 			}
 			fmt.Fprintf(w, `{"id":"d","model":%q,"provider":%q,"answers":{"verdict":{"type":"choice","choice":%q}},"usage":{"input_tokens":%d,"output_tokens":2%s%s}}`, mode.jevModel, mode.jevProvider, labels[0], mode.inputTokens, cost, diagnostic)
 		case "/api/v1/chat/completions":
