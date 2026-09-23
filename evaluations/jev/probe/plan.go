@@ -29,6 +29,8 @@ const (
 	ProbeSubcap          = ledger.MicroUnit(200_000)
 	ReservationPerCall   = ledger.MicroUnit(50_000)
 	MaxRequests          = 4
+	AccountingBasis      = "fixed authorization-accounting envelope; not a provider tariff or verified maximum charge"
+	ReadinessReason      = "preparation only: unknown tariffs and unenforced token/output bounds mean reservation accounting cannot guarantee the next bill or aggregate spend remains within the authorization"
 )
 
 type Request struct {
@@ -55,6 +57,9 @@ type Plan struct {
 	AuthorizedCap        ledger.MicroUnit `json:"authorizedCapMicrodollars"`
 	ProbeSubcap          ledger.MicroUnit `json:"probeSubcapMicrodollars"`
 	ReservationPerCall   ledger.MicroUnit `json:"reservationPerCallMicrodollars"`
+	AccountingBasis      string           `json:"accountingBasis"`
+	ExecutionReady       bool             `json:"executionReady"`
+	ExecutionReadiness   string           `json:"executionReadiness"`
 	Requests             []Request        `json:"requests"`
 	FailClosedConditions []string         `json:"failClosedConditions"`
 }
@@ -106,6 +111,7 @@ func BuildPlan(inventoryPath string, endpoints Endpoints) (*Plan, error) {
 	return &Plan{
 		Version: PlanVersion, InventorySHA256: inv.InventoryHash, CredentialEnv: CredentialEnv,
 		AuthorizedCap: AuthorizedCap, ProbeSubcap: ProbeSubcap, ReservationPerCall: ReservationPerCall,
+		AccountingBasis: AccountingBasis, ExecutionReady: false, ExecutionReadiness: ReadinessReason,
 		Requests: requests,
 		FailClosedConditions: []string{
 			"any transport, HTTP, schema, model-pin, or provider-pin error",

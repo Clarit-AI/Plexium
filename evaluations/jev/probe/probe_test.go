@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +27,9 @@ func TestDryPlanUsesFourValidatedGoldFreeRequests(t *testing.T) {
 	}
 	if len(plan.Requests) != 4 || plan.AuthorizedCap != 1_000_000 || plan.ProbeSubcap != 200_000 {
 		t.Fatalf("unexpected plan: %+v", plan)
+	}
+	if plan.AccountingBasis == "" || plan.ExecutionReady || !strings.Contains(plan.ExecutionReadiness, "cannot guarantee") {
+		t.Fatalf("machine plan lacks accounting/readiness qualifiers: %+v", plan)
 	}
 	if plan.Requests[2].Kind != "largest-frozen-payload" || plan.Requests[3].Kind != "largest-frozen-payload" {
 		t.Fatalf("largest payload probes missing: %+v", plan.Requests)
@@ -54,16 +58,31 @@ func TestRunSuccessfulProbeObservation(t *testing.T) {
 			t.Fatalf("billing evidence missing: %+v", attempt)
 		}
 	}
-	if report.Gates[3].Status != "open" || report.Gates[5].Status != "evidence-collected" {
+	if report.Gates[2].Status != "UNRESOLVED" || report.Gates[3].Status != "OPEN" || report.Gates[4].Status != "UNRESOLVED" || report.Gates[5].Status != "UNRESOLVED" {
 		t.Fatalf("gate assessment not honest: %+v", report.Gates)
+	}
+	if report.AccountingBasis == "" || report.ExecutionReady || !strings.Contains(report.ExecutionReadiness, "cannot guarantee") {
+		t.Fatalf("machine report lacks accounting/readiness qualifiers: %+v", report)
 	}
 }
 
 func TestRunModelPinMismatchHaltsAfterOneCall(t *testing.T) {
-	server, calls := probeServer(t, responseMode{jevModel: "typesafe/jev-unexpected"})
+	server, calls := probeServer(t, responseMode{jevModel: "typesafe/jev-unexpected", cost: "0.09"})
 	defer server.Close()
 	report, err := Run(context.Background(), testConfig(t, server))
 	if err == nil || !report.Halted || *calls != 1 || !strings.Contains(report.HaltReason, "model") {
+		t.Fatalf("err=%v calls=%d report=%+v", err, *calls, report)
+	}
+	if report.LedgerBalance < 90_000 {
+		t.Fatalf("wrong-pin billed exposure understated: %+v", report)
+	}
+}
+
+func TestRunUsageOverrunAccountsKnownPositiveBillingBeforeHalt(t *testing.T) {
+	server, calls := probeServer(t, responseMode{cost: "0.09", inputTokens: accountingInBound + 1})
+	defer server.Close()
+	report, err := Run(context.Background(), testConfig(t, server))
+	if err == nil || !report.Halted || *calls != 1 || report.LedgerBalance < 90_000 {
 		t.Fatalf("err=%v calls=%d report=%+v", err, *calls, report)
 	}
 }
@@ -114,10 +133,102 @@ func TestRunRefusesExistingReportWithoutDial(t *testing.T) {
 	}
 }
 
+func TestRunRefusesOrphanLedgerAndEvidenceBeforeDial(t *testing.T) {
+	server, calls := probeServer(t, responseMode{})
+	defer server.Close()
+	cfg := testConfig(t, server)
+	if _, err := Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if *calls != 4 {
+		t.Fatalf("first run calls=%d", *calls)
+	}
+	if err := os.Remove(filepath.Join(cfg.StateDir, reportName)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(context.Background(), cfg); err == nil || *calls != 4 {
+		t.Fatalf("orphan state permitted resend: err=%v calls=%d", err, *calls)
+	}
+}
+
+func TestRunConcurrentAdmissionAllowsOnlyOneRun(t *testing.T) {
+	server, calls := probeServer(t, responseMode{})
+	defer server.Close()
+	cfg := testConfig(t, server)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := Run(context.Background(), cfg)
+			results <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	var successes int
+	for err := range results {
+		if err == nil {
+			successes++
+		}
+	}
+	if successes != 1 || *calls != 4 {
+		t.Fatalf("successes=%d calls=%d", successes, *calls)
+	}
+}
+
+func TestRunExplicitZeroRetainsFullProbeReservations(t *testing.T) {
+	server, calls := probeServer(t, responseMode{cost: "0"})
+	defer server.Close()
+	report, err := Run(context.Background(), testConfig(t, server))
+	if err != nil || *calls != 4 || report.LedgerBalance != ProbeSubcap {
+		t.Fatalf("err=%v calls=%d balance=%d report=%+v", err, *calls, report.LedgerBalance, report)
+	}
+}
+
+func TestRunRedactsReflectedCredentialFromReportAndEvidence(t *testing.T) {
+	secret := "fake-probe-key-reflected-579"
+	server, calls := probeServer(t, responseMode{usageDiagnostic: secret})
+	defer server.Close()
+	cfg := testConfig(t, server)
+	cfg.APIKey = secret
+	report, err := Run(context.Background(), cfg)
+	if err == nil || *calls != 1 {
+		t.Fatalf("err=%v calls=%d", err, *calls)
+	}
+	encoded, _ := json.Marshal(report)
+	if bytes.Contains(encoded, []byte(secret)) || strings.Contains(err.Error(), secret) {
+		t.Fatalf("credential leaked in report/error: report=%s err=%v", encoded, err)
+	}
+	err = filepath.WalkDir(cfg.StateDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return walkErr
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if bytes.Contains(data, []byte(secret)) {
+			return fmt.Errorf("credential leaked in %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 type responseMode struct {
-	jevModel    string
-	jevProvider string
-	omitCost    bool
+	jevModel        string
+	jevProvider     string
+	omitCost        bool
+	cost            string
+	inputTokens     int64
+	usageDiagnostic string
 }
 
 func probeServer(t *testing.T, mode responseMode) (*httptest.Server, *int32) {
@@ -128,6 +239,12 @@ func probeServer(t *testing.T, mode responseMode) (*httptest.Server, *int32) {
 	}
 	if mode.jevProvider == "" {
 		mode.jevProvider = JevCandidateProvider
+	}
+	if mode.cost == "" {
+		mode.cost = "0.000001"
+	}
+	if mode.inputTokens == 0 {
+		mode.inputTokens = 20
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&calls, 1)
@@ -149,11 +266,15 @@ func probeServer(t *testing.T, mode responseMode) (*httptest.Server, *int32) {
 				labels = append(labels, label)
 			}
 			sort.Strings(labels)
-			cost := `,"cost":0.000001`
+			cost := `,"cost":` + mode.cost
 			if mode.omitCost {
 				cost = ""
 			}
-			fmt.Fprintf(w, `{"id":"d","model":%q,"provider":%q,"answers":{"verdict":{"type":"choice","choice":%q}},"usage":{"input_tokens":20,"output_tokens":2%s}}`, mode.jevModel, mode.jevProvider, labels[0], cost)
+			diagnostic := ""
+			if mode.usageDiagnostic != "" {
+				diagnostic = fmt.Sprintf(`,"diagnostic":%q`, mode.usageDiagnostic)
+			}
+			fmt.Fprintf(w, `{"id":"d","model":%q,"provider":%q,"answers":{"verdict":{"type":"choice","choice":%q}},"usage":{"input_tokens":%d,"output_tokens":2%s%s}}`, mode.jevModel, mode.jevProvider, labels[0], mode.inputTokens, cost, diagnostic)
 		case "/api/v1/chat/completions":
 			var request adapter.ChatRequest
 			if err := json.Unmarshal(body, &request); err != nil {
@@ -164,7 +285,7 @@ func probeServer(t *testing.T, mode responseMode) (*httptest.Server, *int32) {
 				t.Errorf("labels: %v", err)
 			}
 			content, _ := json.Marshal(map[string]string{"label": labels[0]})
-			fmt.Fprintf(w, `{"id":"c","model":%q,"provider":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":2,"total_tokens":22,"cost":0.000002}}`, NanoCandidatePin, NanoProvider, string(content))
+			fmt.Fprintf(w, `{"id":"c","model":%q,"provider":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":2,"total_tokens":22,"cost":%s}}`, NanoCandidatePin, NanoProvider, string(content), mode.cost)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

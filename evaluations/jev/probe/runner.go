@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -96,7 +97,10 @@ type Attempt struct {
 	UsageFields       map[string]json.RawMessage `json:"usageFields,omitempty"`
 	IdentityFields    map[string]json.RawMessage `json:"identityFields,omitempty"`
 	FinishReasons     []string                   `json:"finishReasons,omitempty"`
-	RawResponseSHA256 string                     `json:"rawResponseSha256,omitempty"`
+	RawResponseSHA256 string                     `json:"originalRawResponseSha256,omitempty"`
+	EvidenceSHA256    string                     `json:"persistedEvidenceSha256,omitempty"`
+	EvidenceSanitized bool                       `json:"persistedEvidenceCredentialRedacted"`
+	EvidenceKind      string                     `json:"persistedEvidenceKind,omitempty"`
 	RawEvidencePath   string                     `json:"rawEvidencePath,omitempty"`
 	RawTruncated      bool                       `json:"rawTruncated"`
 	ReadError         string                     `json:"readError,omitempty"`
@@ -112,22 +116,30 @@ type Gate struct {
 }
 
 type Report struct {
-	Version         string           `json:"version"`
-	InventorySHA256 string           `json:"inventorySha256"`
-	AuthorizedCap   ledger.MicroUnit `json:"authorizedCapMicrodollars"`
-	ProbeSubcap     ledger.MicroUnit `json:"probeSubcapMicrodollars"`
-	ReservedTotal   ledger.MicroUnit `json:"reservedTotalMicrodollars"`
-	LedgerBalance   ledger.MicroUnit `json:"ledgerBalanceMicrodollars"`
-	StartedAt       time.Time        `json:"startedAt"`
-	EndedAt         time.Time        `json:"endedAt,omitempty"`
-	Halted          bool             `json:"halted"`
-	HaltReason      string           `json:"haltReason,omitempty"`
-	Attempts        []Attempt        `json:"attempts"`
-	Gates           []Gate           `json:"gates"`
+	Version            string           `json:"version"`
+	InventorySHA256    string           `json:"inventorySha256"`
+	AuthorizedCap      ledger.MicroUnit `json:"authorizedCapMicrodollars"`
+	ProbeSubcap        ledger.MicroUnit `json:"probeSubcapMicrodollars"`
+	AccountingBasis    string           `json:"accountingBasis"`
+	ExecutionReady     bool             `json:"executionReady"`
+	ExecutionReadiness string           `json:"executionReadiness"`
+	ReservedTotal      ledger.MicroUnit `json:"reservedTotalMicrodollars"`
+	LedgerBalance      ledger.MicroUnit `json:"ledgerBalanceMicrodollars"`
+	StartedAt          time.Time        `json:"startedAt"`
+	EndedAt            time.Time        `json:"endedAt,omitempty"`
+	Halted             bool             `json:"halted"`
+	HaltReason         string           `json:"haltReason,omitempty"`
+	Attempts           []Attempt        `json:"attempts"`
+	Gates              []Gate           `json:"gates"`
+	credential         string
 }
 
 func Run(ctx context.Context, cfg RunConfig) (*Report, error) {
-	return runWithLimits(ctx, cfg, runLimits{AuthorizedCap: AuthorizedCap, ProbeSubcap: ProbeSubcap})
+	report, err := runWithLimits(ctx, cfg, runLimits{AuthorizedCap: AuthorizedCap, ProbeSubcap: ProbeSubcap})
+	if err != nil {
+		return report, errors.New(sanitizeString(err.Error(), cfg.APIKey))
+	}
+	return report, nil
 }
 
 type runLimits struct {
@@ -148,12 +160,6 @@ func runWithLimits(ctx context.Context, cfg RunConfig, limits runLimits) (*Repor
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("probe: create state directory: %w", err)
 	}
-	reportPath := filepath.Join(cfg.StateDir, reportName)
-	if _, err := os.Stat(reportPath); err == nil {
-		return nil, errors.New("probe: report already exists; refusing any resend")
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("probe: inspect report: %w", err)
-	}
 	lockPath := filepath.Join(cfg.StateDir, lockName)
 	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -161,6 +167,10 @@ func runWithLimits(ctx context.Context, cfg RunConfig, limits runLimits) (*Repor
 	}
 	_ = lock.Close()
 	defer os.Remove(lockPath)
+	if err := requirePristineState(cfg.StateDir); err != nil {
+		return nil, err
+	}
+	reportPath := filepath.Join(cfg.StateDir, reportName)
 
 	plan, err := BuildPlan(cfg.InventoryPath, cfg.Endpoints)
 	if err != nil {
@@ -175,7 +185,9 @@ func runWithLimits(ctx context.Context, cfg RunConfig, limits runLimits) (*Repor
 	}
 	report := &Report{
 		Version: PlanVersion, InventorySHA256: plan.InventorySHA256, AuthorizedCap: limits.AuthorizedCap,
-		ProbeSubcap: limits.ProbeSubcap, StartedAt: time.Now().UTC(), Gates: initialGates(),
+		ProbeSubcap: limits.ProbeSubcap, AccountingBasis: AccountingBasis,
+		ExecutionReady: false, ExecutionReadiness: ReadinessReason,
+		StartedAt: time.Now().UTC(), Gates: initialGates(), credential: cfg.APIKey,
 	}
 	if err := persistReport(reportPath, report); err != nil {
 		return nil, err
@@ -231,8 +243,8 @@ func runWithLimits(ctx context.Context, cfg RunConfig, limits runLimits) (*Repor
 		report.LedgerBalance = l.Balance()
 		attempt := Attempt{
 			Ordinal: request.Ordinal, RequestID: request.ID, Arm: request.Arm, Kind: request.Kind,
-			FixtureID: request.FixtureID, RequestedAlias: request.RequestedAlias,
-			ExpectedPin: request.CandidatePin, ExpectedProvider: request.CandidateProvider,
+			FixtureID: request.FixtureID, RequestedAlias: sanitizeString(request.RequestedAlias, cfg.APIKey),
+			ExpectedPin: sanitizeString(request.CandidatePin, cfg.APIKey), ExpectedProvider: sanitizeString(request.CandidateProvider, cfg.APIKey),
 			RequestSHA256: request.RequestSHA256, ReservationRef: ref, Reservation: reserved, State: "reserved",
 		}
 		report.Attempts = append(report.Attempts, attempt)
@@ -246,41 +258,52 @@ func runWithLimits(ctx context.Context, cfg RunConfig, limits runLimits) (*Repor
 		} else {
 			obs, err = nanoClient.CompleteOnce(ctx, request.Body)
 		}
-		attempt = observationAttempt(attempt, obs, err)
-		rawPath, rawErr := persistRaw(cfg.StateDir, request, obs.RawResponse)
+		attempt = observationAttempt(attempt, obs, err, cfg.APIKey)
+		safeRaw := sanitizeBytes(obs.RawResponse, cfg.APIKey)
+		rawPath, evidenceHash, rawErr := persistRaw(cfg.StateDir, request, safeRaw)
 		if rawErr == nil && len(obs.RawResponse) > 0 {
 			attempt.RawEvidencePath = rawPath
+			attempt.EvidenceSHA256 = evidenceHash
+			attempt.EvidenceSanitized = !bytes.Equal(safeRaw, obs.RawResponse)
+			attempt.EvidenceKind = "credential-screened bounded response; original bytes are not persisted"
 		}
 		report.Attempts[len(report.Attempts)-1] = attempt
-		report.LedgerBalance = l.Balance()
-		if persistErr := persistReport(reportPath, report); persistErr != nil {
-			return report, persistErr
-		}
+
+		billing, billingErr := parseBilling(obs.Billing)
+		usageOverrun := billingErr == nil && (billing.inputTokens > accountingInBound || billing.outputTokens > accountingOutBound)
+		var anomalies []string
 		if rawErr != nil {
-			return halt(reportPath, report, "persist raw evidence: "+rawErr.Error(), l)
+			anomalies = append(anomalies, "persist sanitized evidence: "+sanitizeString(rawErr.Error(), cfg.APIKey))
 		}
 		if err != nil {
-			return halt(reportPath, report, request.ID+": "+err.Error(), l)
+			anomalies = append(anomalies, sanitizeString(err.Error(), cfg.APIKey))
 		}
-		if billingErr := requireCompleteBilling(obs.Billing); billingErr != nil {
-			return halt(reportPath, report, request.ID+": "+billingErr.Error(), l)
+		if billingErr != nil {
+			anomalies = append(anomalies, billingErr.Error())
 		}
-		cost, parseErr := ledger.MicroUnitFromBaseString(obs.Billing.Cost.Number.String())
-		if parseErr != nil {
-			return halt(reportPath, report, request.ID+": convert cost: "+parseErr.Error(), l)
+		if usageOverrun {
+			anomalies = append(anomalies, "usage exceeds conservative accounting envelope")
 		}
-		inputTokens, _ := strconv.ParseInt(obs.Billing.InputTokens.Number.String(), 10, 64)
-		outputTokens, _ := strconv.ParseInt(obs.Billing.OutputTokens.Number.String(), 10, 64)
-		if inputTokens > accountingInBound || outputTokens > accountingOutBound {
-			return halt(reportPath, report, request.ID+": usage exceeds conservative accounting envelope", l)
+
+		if len(anomalies) > 0 {
+			if billingErr == nil {
+				reconcileAnomalousBilling(ctx, l, ref, reserved, billing, usageOverrun, &report.Attempts[len(report.Attempts)-1], cfg.APIKey)
+			}
+			report.LedgerBalance = l.Balance()
+			reason := request.ID + ": " + strings.Join(anomalies, "; ")
+			return halt(reportPath, report, sanitizeString(reason, cfg.APIKey), l)
 		}
-		if cost == 0 {
+
+		if billing.cost == 0 {
 			report.Attempts[len(report.Attempts)-1].State = "observed-zero-reservation-retained"
 			report.Attempts[len(report.Attempts)-1].Reconciliation = "explicit valid zero recorded; full reservation retained under accepted ledger semantics"
 		} else {
-			release, settleErr := l.Settle(ctx, ref, cost, inputTokens, outputTokens, 0, 0)
+			release, settleErr := l.Settle(ctx, ref, billing.cost, billing.inputTokens, billing.outputTokens, 0, 0)
 			if settleErr != nil {
-				return halt(reportPath, report, request.ID+": settle: "+settleErr.Error(), l)
+				report.Attempts[len(report.Attempts)-1].State = "accounted-halt"
+				report.Attempts[len(report.Attempts)-1].Reconciliation = "positive billing submitted to accepted ledger before halt: " + sanitizeString(settleErr.Error(), cfg.APIKey)
+				report.LedgerBalance = l.Balance()
+				return halt(reportPath, report, request.ID+": settle: "+sanitizeString(settleErr.Error(), cfg.APIKey), l)
 			}
 			report.Attempts[len(report.Attempts)-1].State = "settled"
 			report.Attempts[len(report.Attempts)-1].Reconciliation = fmt.Sprintf("actual billing settled; released %d microdollars", release)
@@ -298,26 +321,44 @@ func runWithLimits(ctx context.Context, cfg RunConfig, limits runLimits) (*Repor
 	return report, nil
 }
 
-func observationAttempt(attempt Attempt, obs adapter.AttemptObservation, callErr error) Attempt {
+func requirePristineState(stateDir string) error {
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		return fmt.Errorf("probe: inspect state directory under run lock: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.Name() == lockName {
+			continue
+		}
+		return fmt.Errorf("probe: pre-existing run state %q; refusing any resend", entry.Name())
+	}
+	return nil
+}
+
+func observationAttempt(attempt Attempt, obs adapter.AttemptObservation, callErr error, credential string) Attempt {
 	attempt.State = "observed"
 	attempt.RequestSent, attempt.ResponseReceived, attempt.Status = obs.RequestSent, obs.ResponseReceived, obs.Status
-	attempt.ProviderRequestID, attempt.ResolvedModel, attempt.ResponseProvider = obs.RequestID, obs.ResponseModel, obs.ResponseProvider
-	attempt.ResponseHeaders = obs.ResponseHeaders
+	attempt.ProviderRequestID = sanitizeString(obs.RequestID, credential)
+	attempt.ResolvedModel = sanitizeString(obs.ResponseModel, credential)
+	attempt.ResponseProvider = sanitizeString(obs.ResponseProvider, credential)
+	attempt.ResponseHeaders = sanitizeHeaders(obs.ResponseHeaders, credential)
 	attempt.StartedAt, attempt.EndedAt, attempt.LatencyNanos = obs.StartedAt, obs.EndedAt, int64(obs.Duration)
-	attempt.Billing = billingEvidence(obs.Billing)
-	attempt.RawResponseSHA256, attempt.RawTruncated, attempt.ReadError = obs.RawSHA256, obs.RawTruncated, obs.ReadError
-	attempt.UsageFields, attempt.IdentityFields, attempt.FinishReasons = responseEvidence(obs.RawResponse)
+	attempt.Billing = billingEvidence(obs.Billing, credential)
+	attempt.RawResponseSHA256, attempt.RawTruncated = obs.RawSHA256, obs.RawTruncated
+	attempt.ReadError = sanitizeString(obs.ReadError, credential)
+	safeRaw := sanitizeBytes(obs.RawResponse, credential)
+	attempt.UsageFields, attempt.IdentityFields, attempt.FinishReasons = responseEvidence(safeRaw)
 	if callErr != nil {
-		attempt.AdapterError = callErr.Error()
+		attempt.AdapterError = sanitizeString(callErr.Error(), credential)
 	}
 	return attempt
 }
 
-func billingEvidence(b adapter.BillingObservation) BillingEvidence {
+func billingEvidence(b adapter.BillingObservation, credential string) BillingEvidence {
 	convert := func(f adapter.DecimalField) DecimalEvidence {
-		return DecimalEvidence{Present: f.Present, Null: f.Null, Valid: f.Valid, Raw: f.Raw, Error: f.Error}
+		return DecimalEvidence{Present: f.Present, Null: f.Null, Valid: f.Valid, Raw: sanitizeString(f.Raw, credential), Error: sanitizeString(f.Error, credential)}
 	}
-	return BillingEvidence{Cost: convert(b.Cost), InputTokens: convert(b.InputTokens), OutputTokens: convert(b.OutputTokens), TotalTokens: convert(b.TotalTokens), Error: b.Error}
+	return BillingEvidence{Cost: convert(b.Cost), InputTokens: convert(b.InputTokens), OutputTokens: convert(b.OutputTokens), TotalTokens: convert(b.TotalTokens), Error: sanitizeString(b.Error, credential)}
 }
 
 func responseEvidence(raw []byte) (map[string]json.RawMessage, map[string]json.RawMessage, []string) {
@@ -362,19 +403,95 @@ func requireCompleteBilling(b adapter.BillingObservation) error {
 	return nil
 }
 
-func persistRaw(stateDir string, request Request, raw []byte) (string, error) {
+type parsedBilling struct {
+	cost         ledger.MicroUnit
+	inputTokens  int64
+	outputTokens int64
+}
+
+func parseBilling(b adapter.BillingObservation) (parsedBilling, error) {
+	if err := requireCompleteBilling(b); err != nil {
+		return parsedBilling{}, err
+	}
+	cost, err := ledger.MicroUnitFromBaseString(b.Cost.Number.String())
+	if err != nil {
+		return parsedBilling{}, fmt.Errorf("convert cost: %w", err)
+	}
+	inputTokens, err := strconv.ParseInt(b.InputTokens.Number.String(), 10, 64)
+	if err != nil {
+		return parsedBilling{}, fmt.Errorf("convert input tokens: %w", err)
+	}
+	outputTokens, err := strconv.ParseInt(b.OutputTokens.Number.String(), 10, 64)
+	if err != nil {
+		return parsedBilling{}, fmt.Errorf("convert output tokens: %w", err)
+	}
+	return parsedBilling{cost: cost, inputTokens: inputTokens, outputTokens: outputTokens}, nil
+}
+
+func reconcileAnomalousBilling(ctx context.Context, l *ledger.Ledger, ref string, reserved ledger.MicroUnit, billing parsedBilling, usageOverrun bool, attempt *Attempt, credential string) {
+	if billing.cost == 0 {
+		attempt.State = "anomalous-zero-reservation-retained"
+		attempt.Reconciliation = "explicit valid zero recorded on rejected/anomalous response; full reservation retained"
+		return
+	}
+	if billing.cost <= reserved && !usageOverrun {
+		attempt.State = "anomalous-positive-reservation-retained"
+		attempt.Reconciliation = "positive billing is within the reservation; full reservation retained because rejected/anomalous evidence is not a normal settlement"
+		return
+	}
+	release, err := l.Settle(ctx, ref, billing.cost, billing.inputTokens, billing.outputTokens, 0, 0)
+	attempt.State = "accounted-halt"
+	if err != nil {
+		attempt.Reconciliation = "positive billing submitted to accepted ledger before halt: " + sanitizeString(err.Error(), credential)
+		return
+	}
+	attempt.Reconciliation = fmt.Sprintf("anomalous positive billing settled before halt; released %d microdollars", release)
+}
+
+func sanitizeString(value, credential string) string {
+	if credential == "" || value == "" {
+		return value
+	}
+	return strings.ReplaceAll(value, credential, "[REDACTED_CREDENTIAL]")
+}
+
+func sanitizeBytes(value []byte, credential string) []byte {
+	copyValue := append([]byte(nil), value...)
+	if credential == "" || len(copyValue) == 0 {
+		return copyValue
+	}
+	redacted := bytes.ReplaceAll(copyValue, []byte(credential), []byte("[REDACTED_CREDENTIAL]"))
+	if encoded, err := json.Marshal(credential); err == nil && len(encoded) >= 2 {
+		escaped := encoded[1 : len(encoded)-1]
+		redacted = bytes.ReplaceAll(redacted, escaped, []byte("[REDACTED_CREDENTIAL]"))
+	}
+	return redacted
+}
+
+func sanitizeHeaders(headers map[string]string, credential string) map[string]string {
+	if headers == nil {
+		return nil
+	}
+	out := make(map[string]string, len(headers))
+	for key, value := range headers {
+		out[sanitizeString(key, credential)] = sanitizeString(value, credential)
+	}
+	return out
+}
+
+func persistRaw(stateDir string, request Request, raw []byte) (string, string, error) {
 	if len(raw) == 0 {
-		return "", nil
+		return "", "", nil
 	}
 	dir := filepath.Join(stateDir, "evidence")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+		return "", "", err
 	}
 	name := fmt.Sprintf("%02d-%s.json", request.Ordinal, request.ID)
 	path := filepath.Join(dir, name)
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if _, err = file.Write(raw); err == nil {
 		err = file.Sync()
@@ -383,7 +500,7 @@ func persistRaw(stateDir string, request Request, raw []byte) (string, error) {
 	if err == nil {
 		err = closeErr
 	}
-	return filepath.ToSlash(filepath.Join("evidence", name)), err
+	return filepath.ToSlash(filepath.Join("evidence", name)), hash(raw), err
 }
 
 func persistReport(path string, report *Report) error {
@@ -391,7 +508,7 @@ func persistReport(path string, report *Report) error {
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
+	data = append(sanitizeBytes(data, report.credential), '\n')
 	tmp := path + ".tmp"
 	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -411,6 +528,7 @@ func persistReport(path string, report *Report) error {
 }
 
 func halt(path string, report *Report, reason string, l *ledger.Ledger) (*Report, error) {
+	reason = sanitizeString(reason, report.credential)
 	report.Halted, report.HaltReason, report.EndedAt = true, reason, time.Now().UTC()
 	if l != nil {
 		report.LedgerBalance = l.Balance()
@@ -424,12 +542,12 @@ func halt(path string, report *Report, reason string, l *ledger.Ledger) (*Report
 
 func initialGates() []Gate {
 	return []Gate{
-		{ID: 1, Name: "alias-to-response-pin mappings", Status: "open", Reason: "no live response evidence"},
-		{ID: 2, Name: "response-linked provider identity", Status: "open", Reason: "no live response evidence"},
-		{ID: 3, Name: "Nano output-limit semantics and billing categories", Status: "open", Reason: "no live response evidence"},
-		{ID: 4, Name: "finite Jev billed-output bound", Status: "open", Reason: "an observed output count is not an authoritative maximum"},
-		{ID: 5, Name: "current rates, currency, and fee semantics", Status: "open", Reason: "requires real response billing fields"},
-		{ID: 6, Name: "tokenizer-backed frozen-payload input bounds", Status: "open", Reason: "requires largest-payload provider usage"},
+		{ID: 1, Name: "alias-to-response-pin mappings", Status: "UNRESOLVED", Reason: "no live response evidence"},
+		{ID: 2, Name: "response-linked provider identity", Status: "UNRESOLVED", Reason: "no live response evidence"},
+		{ID: 3, Name: "Nano output-limit semantics and billing categories", Status: "UNRESOLVED", Reason: "a short accepted response cannot establish full output-limit or billable-category semantics"},
+		{ID: 4, Name: "finite Jev billed-output bound", Status: "OPEN", Reason: "an observed output count is not an authoritative maximum"},
+		{ID: 5, Name: "current rates, currency, and fee semantics", Status: "UNRESOLVED", Reason: "a returned cost does not establish tariff, currency, or fee semantics"},
+		{ID: 6, Name: "tokenizer-backed frozen-payload input bounds", Status: "UNRESOLVED", Reason: "largest serialized bytes is not proof of largest tokenizer count across all frozen payloads"},
 	}
 }
 
@@ -444,11 +562,11 @@ func assessGates(report *Report) []Gate {
 	if len(report.Attempts) != MaxRequests {
 		return gates
 	}
-	gates[0] = Gate{ID: 1, Name: gates[0].Name, Status: "evidence-collected", Reason: "requested aliases and exact returned model strings are recorded for all four responses"}
-	gates[1] = Gate{ID: 2, Name: gates[1].Name, Status: "evidence-collected", Reason: "response-linked provider fields matched the configured candidates on all responses"}
-	gates[2] = Gate{ID: 3, Name: gates[2].Name, Status: "evidence-collected", Reason: "Nano accepted max_tokens=256; finish reasons and every returned usage field are preserved for review"}
-	gates[3] = Gate{ID: 4, Name: gates[3].Name, Status: "open", Reason: "the probe records observed Jev output usage but cannot infer an authoritative finite maximum unless the raw response explicitly supplies one"}
-	gates[4] = Gate{ID: 5, Name: gates[4].Name, Status: "evidence-collected", Reason: "raw usage/billing categories and exact cost tokens are preserved; currency and fee meaning require review of returned fields"}
-	gates[5] = Gate{ID: 6, Name: gates[5].Name, Status: "evidence-collected", Reason: "provider-reported input tokens are recorded for each arm's exact largest frozen request hash"}
+	gates[0] = Gate{ID: 1, Name: gates[0].Name, Status: "EVIDENCE_COLLECTED", Reason: "requested aliases and exact returned model strings are recorded; immutable alias semantics still require review"}
+	gates[1] = Gate{ID: 2, Name: gates[1].Name, Status: "EVIDENCE_COLLECTED", Reason: "response-linked provider fields matched candidates; Decisions request-side routing enforcement remains unproved"}
+	gates[2] = Gate{ID: 3, Name: gates[2].Name, Status: "UNRESOLVED", Reason: "Nano accepted max_tokens=256 and returned usage, but short responses do not establish full output-limit semantics or all billable categories"}
+	gates[3] = Gate{ID: 4, Name: gates[3].Name, Status: "OPEN", Reason: "observed Jev output usage is not an authoritative finite maximum unless the response explicitly supplies one"}
+	gates[4] = Gate{ID: 5, Name: gates[4].Name, Status: "UNRESOLVED", Reason: "returned costs and usage are preserved, but do not establish current tariff, currency, or fee semantics"}
+	gates[5] = Gate{ID: 6, Name: gates[5].Name, Status: "UNRESOLVED", Reason: "provider counts cover largest-by-byte samples only; largest bytes is not largest tokens and the other frozen payloads remain unmeasured"}
 	return gates
 }

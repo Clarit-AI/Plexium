@@ -20,6 +20,12 @@ func main() {
 }
 
 func runCLI(args []string, out io.Writer) error {
+	return runCLIWithConfig(args, out, probe.DefaultRunConfig)
+}
+
+type configFactory func(inventoryPath, stateDir, apiKey string) probe.RunConfig
+
+func runCLIWithConfig(args []string, out io.Writer, makeConfig configFactory) error {
 	fs := flag.NewFlagSet("jev-pin-probe", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	dryRun := fs.Bool("dry-run", false, "validate and print the four-request plan without reading credentials or dialing")
@@ -46,7 +52,7 @@ func runCLI(args []string, out io.Writer) error {
 	if key == "" {
 		return fmt.Errorf("%s is required for --execute", probe.CredentialEnv)
 	}
-	report, err := probe.Run(context.Background(), probe.DefaultRunConfig(*inventory, *stateDir, key))
+	report, err := probe.Run(context.Background(), makeConfig(*inventory, *stateDir, key))
 	if report != nil {
 		if writeErr := writeJSON(out, report); writeErr != nil && err == nil {
 			return writeErr
