@@ -18,8 +18,10 @@ set of positive integer ordinals from the approved plan, for example:
 The grammar admits digits and commas only. Empty values, empty elements,
 duplicates, ranges, wildcards, words, zero, negative values, and ordinals not
 present in the approved plan are rejected before credential lookup or any
-dial. Input order is normalized to immutable plan order. Omitting the flag
-retains the full four-request behavior.
+dial. Every CLI flag is single-occurrence, and the command accepts no
+positional arguments or arguments after `--`; these forms are also rejected
+before credential lookup. Input order is normalized to immutable plan order.
+Omitting the flag retains the full four-request behavior.
 
 Both the plan and the durable report record `selectedOrdinals` and
 `selectedRequests`. Each selected request binding includes its ordinal, plan

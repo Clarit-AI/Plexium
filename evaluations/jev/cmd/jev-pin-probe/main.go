@@ -28,6 +28,45 @@ func runCLI(args []string, out io.Writer) error {
 type configFactory func(inventoryPath, stateDir, apiKey string) probe.RunConfig
 type credentialLookup func(string) (string, bool)
 
+type singleStringFlag struct {
+	name  string
+	value string
+	set   bool
+}
+
+func (f *singleStringFlag) String() string { return f.value }
+
+func (f *singleStringFlag) Set(value string) error {
+	if f.set {
+		return fmt.Errorf("--%s may be provided only once", f.name)
+	}
+	f.set = true
+	f.value = value
+	return nil
+}
+
+type singleBoolFlag struct {
+	name  string
+	value bool
+	set   bool
+}
+
+func (f *singleBoolFlag) String() string   { return strconv.FormatBool(f.value) }
+func (f *singleBoolFlag) IsBoolFlag() bool { return true }
+
+func (f *singleBoolFlag) Set(value string) error {
+	if f.set {
+		return fmt.Errorf("--%s may be provided only once", f.name)
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fmt.Errorf("--%s requires a boolean value: %w", f.name, err)
+	}
+	f.set = true
+	f.value = parsed
+	return nil
+}
+
 func runCLIWithConfig(args []string, out io.Writer, makeConfig configFactory) error {
 	return runCLIWithConfigAndCredential(args, out, makeConfig, os.LookupEnv)
 }
@@ -35,50 +74,52 @@ func runCLIWithConfig(args []string, out io.Writer, makeConfig configFactory) er
 func runCLIWithConfigAndCredential(args []string, out io.Writer, makeConfig configFactory, lookup credentialLookup) error {
 	fs := flag.NewFlagSet("jev-pin-probe", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	dryRun := fs.Bool("dry-run", false, "validate and print the four-request plan without reading credentials or dialing")
-	execute := fs.Bool("execute", false, "execute the bounded one-shot probe")
-	inventory := fs.String("inventory", "evaluations/jev/pilot/request-inventory.json", "accepted frozen request inventory")
-	stateDir := fs.String("state-dir", "", "new private state directory for ledger, report, and raw evidence")
-	requestOrdinalsRaw := fs.String("request-ordinals", "", "explicit approved request subset as comma-separated ordinals (for example 2,3,4)")
+	dryRun := singleBoolFlag{name: "dry-run"}
+	execute := singleBoolFlag{name: "execute"}
+	inventory := singleStringFlag{name: "inventory", value: "evaluations/jev/pilot/request-inventory.json"}
+	stateDir := singleStringFlag{name: "state-dir"}
+	requestOrdinals := singleStringFlag{name: "request-ordinals"}
+	fs.Var(&dryRun, "dry-run", "validate and print the four-request plan without reading credentials or dialing")
+	fs.Var(&execute, "execute", "execute the bounded one-shot probe")
+	fs.Var(&inventory, "inventory", "accepted frozen request inventory")
+	fs.Var(&stateDir, "state-dir", "new private state directory for ledger, report, and raw evidence")
+	fs.Var(&requestOrdinals, "request-ordinals", "explicit approved request subset as comma-separated ordinals (for example 2,3,4)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *dryRun == *execute {
+	if len(fs.Args()) != 0 {
+		return fmt.Errorf("unexpected positional arguments: %q", fs.Args())
+	}
+	if dryRun.value == execute.value {
 		return errors.New("exactly one of --dry-run or --execute is required")
 	}
-	selectionProvided := false
-	fs.Visit(func(current *flag.Flag) {
-		if current.Name == "request-ordinals" {
-			selectionProvided = true
-		}
-	})
-	var requestOrdinals []int
-	if selectionProvided {
+	var selectedOrdinals []int
+	if requestOrdinals.set {
 		var err error
-		requestOrdinals, err = parseRequestOrdinals(*requestOrdinalsRaw)
+		selectedOrdinals, err = parseRequestOrdinals(requestOrdinals.value)
 		if err != nil {
 			return err
 		}
 	}
-	plan, err := probe.BuildPlan(*inventory, probe.Endpoints{Jev: probe.JevEndpoint, Nano: probe.NanoEndpoint})
+	plan, err := probe.BuildPlan(inventory.value, probe.Endpoints{Jev: probe.JevEndpoint, Nano: probe.NanoEndpoint})
 	if err != nil {
 		return err
 	}
-	if _, err := probe.SelectPlanRequests(plan, requestOrdinals); err != nil {
+	if _, err := probe.SelectPlanRequests(plan, selectedOrdinals); err != nil {
 		return err
 	}
-	if *dryRun {
+	if dryRun.value {
 		return writeJSON(out, plan)
 	}
-	if *stateDir == "" {
+	if stateDir.value == "" {
 		return errors.New("--state-dir is required for --execute")
 	}
 	key, present := lookup(probe.CredentialEnv)
 	if !present || key == "" {
 		return fmt.Errorf("%s is required for --execute", probe.CredentialEnv)
 	}
-	cfg := makeConfig(*inventory, *stateDir, key)
-	cfg.RequestOrdinals = append([]int(nil), requestOrdinals...)
+	cfg := makeConfig(inventory.value, stateDir.value, key)
+	cfg.RequestOrdinals = append([]int(nil), selectedOrdinals...)
 	report, err := probe.Run(context.Background(), cfg)
 	if report != nil {
 		if writeErr := writeJSON(out, report); writeErr != nil && err == nil {

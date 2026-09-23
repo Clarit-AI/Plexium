@@ -181,6 +181,65 @@ func TestInvalidRequestSelectionsRefuseBeforeCredentialReadOrDial(t *testing.T) 
 	}
 }
 
+func TestUnexpectedArgumentsAndRepeatedFlagsRefuseBeforeCredentialReadOrDial(t *testing.T) {
+	inventory := filepath.Join("..", "..", "pilot", "request-inventory.json")
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "stray-before-selector",
+			args: []string{"--execute", "--state-dir", "unused", "--inventory", inventory, "stray", "--request-ordinals=2,3,4"},
+		},
+		{
+			name: "double-dash-before-selector",
+			args: []string{"--execute", "--state-dir", "unused", "--inventory", inventory, "--", "--request-ordinals=2,3,4"},
+		},
+		{
+			name: "leftover-after-valid-selector",
+			args: []string{"--execute", "--state-dir", "unused", "--inventory", inventory, "--request-ordinals=2,3,4", "stray"},
+		},
+		{
+			name: "repeated-selector-invalid-then-valid",
+			args: []string{"--execute", "--state-dir", "unused", "--inventory", inventory, "--request-ordinals=3,3", "--request-ordinals=2,3,4"},
+		},
+		{
+			name: "repeated-selector-conflicting-valid",
+			args: []string{"--execute", "--state-dir", "unused", "--inventory", inventory, "--request-ordinals", "2,3", "--request-ordinals=2,3,4"},
+		},
+		{
+			name: "repeated-state-dir",
+			args: []string{"--execute", "--state-dir", "first", "--state-dir", "second", "--inventory", inventory},
+		},
+		{
+			name: "repeated-execute",
+			args: []string{"--execute", "--execute", "--state-dir", "unused", "--inventory", inventory},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var credentialReads, factoryCalls, dialCalls int32
+			lookup := func(string) (string, bool) {
+				atomic.AddInt32(&credentialReads, 1)
+				return "must-not-be-read", true
+			}
+			factory := func(inventoryPath, state, key string) probe.RunConfig {
+				atomic.AddInt32(&factoryCalls, 1)
+				cfg := probe.DefaultRunConfig(inventoryPath, state, key)
+				cfg.HTTPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					atomic.AddInt32(&dialCalls, 1)
+					return nil, fmt.Errorf("unexpected dial")
+				})}
+				return cfg
+			}
+			var out bytes.Buffer
+			err := runCLIWithConfigAndCredential(test.args, &out, factory, lookup)
+			if err == nil || credentialReads != 0 || factoryCalls != 0 || dialCalls != 0 || out.Len() != 0 {
+				t.Fatalf("err=%v credentialReads=%d factoryCalls=%d dialCalls=%d output=%s", err, credentialReads, factoryCalls, dialCalls, out.String())
+			}
+		})
+	}
+}
+
 func TestExecuteRedactsReflectedCredentialFromCLIAndFiles(t *testing.T) {
 	secret := "fake-cli-key-reflected-579"
 	t.Setenv(probe.CredentialEnv, secret)
