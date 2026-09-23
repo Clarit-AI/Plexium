@@ -33,6 +33,9 @@ type ExecutionConfig struct {
 	RunLockPath           string
 	EvidenceDir           string
 	ContractSHA           string
+	AllocationID          string
+	AllocationSHA         string
+	ScreeningSecrets      []string
 	Jev, Nano             ArmBudget
 }
 
@@ -79,8 +82,8 @@ func (r *Runner) Validate() error {
 	if r.Config.RunLockPath == "" || r.Config.EvidenceDir == "" {
 		return errors.New("pilot: run lock path and private evidence directory required")
 	}
-	if r.Config.ContractSHA == "" {
-		return errors.New("pilot: execution contract hash required")
+	if r.Config.ContractSHA == "" || r.Config.AllocationID == "" || r.Config.AllocationSHA == "" {
+		return errors.New("pilot: execution contract and allocation binding required")
 	}
 	return nil
 }
@@ -95,7 +98,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 	}
 	r.lock = lock
 	defer func() { _ = lock.Close(); _ = os.Remove(r.Config.RunLockPath) }()
-	if err := r.Journal.BindRun(RunBinding{InventoryHash: r.Config.InventoryHash, AuthorizationRef: r.Config.AuthorizationRef, CombinedCap: int64(r.Config.CombinedCap), ContractSHA: r.Config.ContractSHA}); err != nil {
+	if err := r.Journal.BindRun(RunBinding{InventoryHash: r.Config.InventoryHash, AuthorizationRef: r.Config.AuthorizationRef, CombinedCap: int64(r.Config.CombinedCap), ContractSHA: r.Config.ContractSHA, AllocationID: r.Config.AllocationID, AllocationSHA: r.Config.AllocationSHA}); err != nil {
 		return nil, err
 	}
 	state := r.Journal.State()
@@ -178,7 +181,8 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 			return outcomes, r.halt("missing arm attempt function")
 		}
 		obs, attemptErr := fn(ctx, payload.Body)
-		responsePath, responseSHA, observationPath, observationSHA, persistErr := persistAttemptEvidence(r.Config.EvidenceDir, slot, obs)
+		obs, screenedRaw := screenObservation(obs, r.Config.ScreeningSecrets)
+		responsePath, responseSHA, observationPath, observationSHA, persistErr := persistAttemptEvidence(r.Config.EvidenceDir, slot, obs, screenedRaw)
 		if persistErr != nil {
 			return outcomes, r.halt("persist response evidence: " + persistErr.Error())
 		}
@@ -192,12 +196,12 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		oe.ObservationSHA = observationSHA
 		oe.BillingCostRaw = obs.Billing.Cost.Raw
 		if attemptErr != nil {
-			oe.Error = attemptErr.Error()
+			oe.Error = sanitizeText(attemptErr.Error(), r.Config.ScreeningSecrets)
 		}
 		if err := r.appendSlotEvent(slot, oe); err != nil {
 			return outcomes, err
 		}
-		evidence := evidenceFromObservation(obs)
+		evidence := evidenceFromObservation(obs, screenedRaw)
 		out := Outcome{Slot: slot, RequestSent: obs.RequestSent, Status: obs.Status, Observation: &evidence}
 		if obs.RequestSent && !obs.ResponseReceived {
 			out.Error = "uncertain-delivery"
@@ -232,7 +236,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 			return outcomes, r.halt(out.Error)
 		}
 		if attemptErr != nil {
-			out.Error = attemptErr.Error()
+			out.Error = sanitizeText(attemptErr.Error(), r.Config.ScreeningSecrets)
 		} else if obs.Decision != nil {
 			out.Label = obs.Decision.Choice
 		} else if obs.Chat != nil {
@@ -269,6 +273,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 }
 
 func (r *Runner) halt(reason string) error {
+	reason = sanitizeText(reason, r.Config.ScreeningSecrets)
 	_ = r.Journal.Append(JournalEvent{Type: EventHalt, Error: reason})
 	return errors.New(reason)
 }
@@ -301,6 +306,9 @@ func (r *Runner) appendSlotEvent(slot Slot, event JournalEvent) error {
 	if event.SlotOrdinal != slot.Ordinal || event.FixtureID != slot.FixtureID || event.Arm != slot.Arm || event.PayloadSHA != slot.PayloadSHA {
 		return fmt.Errorf("pilot: journal event does not match inventory slot %d", slot.Ordinal)
 	}
+	event.BillingCostRaw = sanitizeText(event.BillingCostRaw, r.Config.ScreeningSecrets)
+	event.Label = sanitizeText(event.Label, r.Config.ScreeningSecrets)
+	event.Error = sanitizeText(event.Error, r.Config.ScreeningSecrets)
 	if err := r.Journal.Append(event); err != nil {
 		return err
 	}

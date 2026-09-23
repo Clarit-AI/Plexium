@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Clarit-AI/Plexium/evaluations/jev/adapter"
+	jevcompare "github.com/Clarit-AI/Plexium/evaluations/jev/compare"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/ledger"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/loader"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/pilot"
@@ -45,6 +46,11 @@ type executionManifest struct {
 	InventoryPath          string           `json:"inventoryPath"`
 	InventoryHash          string           `json:"inventoryHash"`
 	AuthorizationReference string           `json:"authorizationReference"`
+	AuthorizationCap       ledger.MicroUnit `json:"authorizationCapMicrodollars"`
+	FrozenPriorExposure    ledger.MicroUnit `json:"frozenPriorExposureMicrodollars"`
+	AllocationID           string           `json:"allocationId"`
+	AllocationRecordPath   string           `json:"allocationRecordPath"`
+	ProbeReconciliation    string           `json:"probeReconciliationPrecondition"`
 	RunID                  string           `json:"runId"`
 	JournalPath            string           `json:"journalPath"`
 	EvidenceDir            string           `json:"evidenceDir"`
@@ -64,7 +70,7 @@ func main() {
 
 func runCLI(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: jev-pilot prepare|run|report")
+		return errors.New("usage: jev-pilot prepare|run|report|compare-sidecar")
 	}
 	switch args[0] {
 	case "prepare":
@@ -73,9 +79,39 @@ func runCLI(args []string) error {
 		return execute(args[1:])
 	case "report":
 		return report(args[1:])
+	case "compare-sidecar":
+		return comparisonSidecar(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func comparisonSidecar(args []string) error {
+	fs := flag.NewFlagSet("compare-sidecar", flag.ContinueOnError)
+	fixtures := fs.String("fixtures", "", "frozen adjudicated fixture JSONL")
+	manifest := fs.String("manifest", "", "frozen fixture manifest")
+	inventory := fs.String("inventory", "", "frozen request inventory")
+	baselineReport := fs.String("baseline-report", "", "offline baseline JSON report")
+	pilotReport := fs.String("pilot-report", "", "live-arm pilot JSON report")
+	out := fs.String("out", "", "new comparison sidecar path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("compare-sidecar accepts flags only")
+	}
+	if *out == "" {
+		return errors.New("compare-sidecar requires out")
+	}
+	sidecar, err := jevcompare.Build(jevcompare.Config{FixturesPath: *fixtures, ManifestPath: *manifest, InventoryPath: *inventory, BaselineReport: *baselineReport, LivePilotReport: *pilotReport})
+	if err != nil {
+		return err
+	}
+	b, err := jevcompare.Marshal(sidecar)
+	if err != nil {
+		return err
+	}
+	return writeFrozen(*out, append(b, '\n'))
 }
 
 func prepare(args []string) error {
@@ -152,9 +188,22 @@ func execute(args []string) error {
 	if (journalExists || jevExists || nanoExists) && !(journalExists && jevExists && nanoExists) {
 		return errors.New("run state is partial: journal and both ledgers must all exist or all be new")
 	}
+	isResume := journalExists && jevExists && nanoExists
+	allocation, allocationSHA, err := preflightAllocation(m, contractSHA, isResume)
+	if err != nil {
+		return err
+	}
+	credentials := make([]string, 0, 2)
 	for name, a := range map[string]armManifest{"jev": m.Jev, "nano": m.Nano} {
 		if value, ok := os.LookupEnv(a.APIKeyEnv); !ok || value == "" {
 			return fmt.Errorf("%s credential environment variable is absent or empty", name)
+		} else {
+			credentials = append(credentials, value)
+		}
+	}
+	if !isResume {
+		if err := claimAllocation(m.AllocationRecordPath, allocation); err != nil {
+			return err
 		}
 	}
 	jl, jb, err := openBudget(m.RunID, "jev", m.InventoryHash, m.Jev)
@@ -181,7 +230,7 @@ func execute(args []string) error {
 	if err != nil {
 		return err
 	}
-	r := pilot.Runner{Inventory: &inv, Journal: j, Config: pilot.ExecutionConfig{InventoryHash: m.InventoryHash, AuthorizationRef: m.AuthorizationReference, CombinedCap: m.CombinedCap, LiveContractsVerified: m.LiveContractsVerified, RunLockPath: m.RunLockPath, EvidenceDir: m.EvidenceDir, ContractSHA: contractSHA, Jev: jb, Nano: nb}, Attempts: map[pilot.Arm]pilot.AttemptFunc{pilot.ArmJev: jc.SubmitDecisionsOnce, pilot.ArmNano: nc.CompleteOnce}}
+	r := pilot.Runner{Inventory: &inv, Journal: j, Config: pilot.ExecutionConfig{InventoryHash: m.InventoryHash, AuthorizationRef: m.AuthorizationReference, CombinedCap: m.CombinedCap, LiveContractsVerified: m.LiveContractsVerified, RunLockPath: m.RunLockPath, EvidenceDir: m.EvidenceDir, ContractSHA: contractSHA, AllocationID: m.AllocationID, AllocationSHA: allocationSHA, ScreeningSecrets: credentials, Jev: jb, Nano: nb}, Attempts: map[pilot.Arm]pilot.AttemptFunc{pilot.ArmJev: jc.SubmitDecisionsOnce, pilot.ArmNano: nc.CompleteOnce}}
 	_, err = r.Run(context.Background())
 	return err
 }

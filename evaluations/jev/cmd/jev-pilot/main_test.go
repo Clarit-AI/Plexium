@@ -10,11 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"testing"
 
+	jevcompare "github.com/Clarit-AI/Plexium/evaluations/jev/compare"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/ledger"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/pilot"
+	"github.com/Clarit-AI/Plexium/evaluations/jev/scoring"
 )
 
 func TestPrepareWritesFrozenInventoryAndCorpusReference(t *testing.T) {
@@ -111,7 +114,7 @@ func TestPrepareReloadRunResumeAndReportWithMockHTTP(t *testing.T) {
 	arm := func(name, endpoint, alias, pin string) armManifest {
 		return armManifest{Endpoint: endpoint, RequestModel: alias, ResponseModel: pin, ResponseProvider: "P", APIKeyEnv: "JEV_PILOT_TEST_KEY", LedgerPath: filepath.Join(dir, name+".ledger.jsonl"), RatesVersion: "test", RateEvidence: "mock", TokenBoundEvidence: "mock", PinMappingEvidence: "mock", ProviderEvidence: "mock", OutputLimitEvidence: "mock", Subcap: 24, Reservation: 1, RateIn: 1_000_000, RateOut: &rateOut, InputBound: 1, OutputBound: 1}
 	}
-	m := executionManifest{InventoryPath: inventoryPath, InventoryHash: inv.InventoryHash, AuthorizationReference: "mock-only", RunID: "mock-run", JournalPath: filepath.Join(dir, "journal.jsonl"), EvidenceDir: filepath.Join(dir, "evidence"), RunLockPath: filepath.Join(dir, "run.lock"), CombinedCap: 48, LiveContractsVerified: true, Jev: arm("jev", server.URL+"/api/alpha/decisions", "jev-alias", "jev-pin"), Nano: arm("nano", server.URL+"/api/v1/chat/completions", "nano-alias", "nano-pin")}
+	m := executionManifest{InventoryPath: inventoryPath, InventoryHash: inv.InventoryHash, AuthorizationReference: "mock-only", AuthorizationCap: 100, FrozenPriorExposure: 52, AllocationID: "mock-allocation", AllocationRecordPath: filepath.Join(dir, "allocation.json"), ProbeReconciliation: probeReconciliationPrecondition, RunID: "mock-run", JournalPath: filepath.Join(dir, "journal.jsonl"), EvidenceDir: filepath.Join(dir, "evidence"), RunLockPath: filepath.Join(dir, "run.lock"), CombinedCap: 48, LiveContractsVerified: true, Jev: arm("jev", server.URL+"/api/alpha/decisions", "jev-alias", "jev-pin"), Nano: arm("nano", server.URL+"/api/v1/chat/completions", "nano-alias", "nano-pin")}
 	manifestBytes, _ := json.Marshal(m)
 	executionPath := filepath.Join(dir, "execution.json")
 	if err := os.WriteFile(executionPath, manifestBytes, 0600); err != nil {
@@ -130,6 +133,21 @@ func TestPrepareReloadRunResumeAndReportWithMockHTTP(t *testing.T) {
 	if calls.Load() != 48 {
 		t.Fatalf("resume resent calls: %d", calls.Load())
 	}
+	mismatch := m
+	mismatch.RunID = "different-run-identity"
+	mismatchBytes, _ := json.Marshal(mismatch)
+	mismatchPath := filepath.Join(dir, "execution-mismatch.json")
+	if err := os.WriteFile(mismatchPath, mismatchBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JEV_PILOT_TEST_KEY", "")
+	if err := runCLI([]string{"run", "-execution-manifest", mismatchPath}); err == nil || !strings.Contains(err.Error(), "allocation record does not match") {
+		t.Fatalf("mismatched allocation error=%v", err)
+	}
+	if calls.Load() != 48 {
+		t.Fatalf("mismatched allocation dialed: calls=%d", calls.Load())
+	}
+	t.Setenv("JEV_PILOT_TEST_KEY", "mock-key")
 	reportFile, err := os.Create(filepath.Join(dir, "report.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -161,6 +179,18 @@ func TestPrepareReloadRunResumeAndReportWithMockHTTP(t *testing.T) {
 	}
 	if calls.Load() != 48 {
 		t.Fatalf("replacement journal caused resend: calls=%d", calls.Load())
+	}
+	for _, path := range []string{m.JournalPath, m.Jev.LedgerPath, m.Nano.LedgerPath} {
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("JEV_PILOT_TEST_KEY", "")
+	if err := runCLI([]string{"run", "-execution-manifest", executionPath}); err == nil || !strings.Contains(err.Error(), "allocation already claimed") {
+		t.Fatalf("reused allocation error=%v", err)
+	}
+	if calls.Load() != 48 {
+		t.Fatalf("reused allocation dialed: calls=%d", calls.Load())
 	}
 }
 
@@ -194,6 +224,39 @@ func TestOutputRatePresenceAtManifestBoundary(t *testing.T) {
 				t.Fatal("missing/null output rate opened ledger")
 			}
 		})
+	}
+}
+
+func TestCompareSidecarCLIWritesVerifiableThreeArmBinding(t *testing.T) {
+	dir := t.TempDir()
+	baselinePath := filepath.Join(dir, "baseline.json")
+	pilotPath := filepath.Join(dir, "pilot.json")
+	outPath := filepath.Join(dir, "comparison.json")
+	baseline := scoring.Report{Source: scoring.SourceBaseline, ProtocolVersion: "0.4.0", FixtureCount: 24}
+	jev := scoring.Report{Source: scoring.Source("jev"), ProtocolVersion: "0.4.0", FixtureCount: 24}
+	nano := scoring.Report{Source: scoring.Source("nano"), ProtocolVersion: "0.4.0", FixtureCount: 24}
+	for path, value := range map[string]any{
+		baselinePath: map[string]any{"baseline": baseline},
+		pilotPath:    map[string]any{"tuningOnlyScores": map[string]any{"jev": jev, "nano": nano}},
+	} {
+		b, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, b, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := jevcompare.Config{FixturesPath: "../../review-pilot/fixtures.jsonl", ManifestPath: "../../review-pilot/fixtures.manifest.json", InventoryPath: "../../pilot/request-inventory.json", BaselineReport: baselinePath, LivePilotReport: pilotPath}
+	if err := runCLI([]string{"compare-sidecar", "-fixtures", cfg.FixturesPath, "-manifest", cfg.ManifestPath, "-inventory", cfg.InventoryPath, "-baseline-report", baselinePath, "-pilot-report", pilotPath, "-out", outPath}); err != nil {
+		t.Fatal(err)
+	}
+	var sidecar jevcompare.Sidecar
+	if err := readJSON(outPath, &sidecar); err != nil {
+		t.Fatal(err)
+	}
+	if err := jevcompare.Verify(&sidecar, cfg); err != nil {
+		t.Fatalf("written sidecar does not verify: %v", err)
 	}
 }
 

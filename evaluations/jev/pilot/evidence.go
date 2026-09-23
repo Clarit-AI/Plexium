@@ -13,35 +13,41 @@ import (
 // ObservationEvidence is the private, replayable subset of an adapter
 // observation. Raw response bytes are kept in their own bounded file.
 type ObservationEvidence struct {
-	Status           int                        `json:"status"`
-	RequestID        string                     `json:"requestId,omitempty"`
-	ResponseModel    string                     `json:"responseModel,omitempty"`
-	ResponseProvider string                     `json:"responseProvider,omitempty"`
-	ResponseHeaders  map[string]string          `json:"responseHeaders,omitempty"`
-	RequestSHA256    string                     `json:"requestSha256"`
-	RequestSent      bool                       `json:"requestSent"`
-	ResponseReceived bool                       `json:"responseReceived"`
-	RetryAfter       string                     `json:"retryAfter,omitempty"`
-	RawSHA256        string                     `json:"rawSha256"`
-	RawTruncated     bool                       `json:"rawTruncated"`
-	ReadError        string                     `json:"readError,omitempty"`
-	StartedAt        time.Time                  `json:"startedAt"`
-	EndedAt          time.Time                  `json:"endedAt"`
-	DurationNanos    int64                      `json:"durationNanos"`
-	Billing          adapter.BillingObservation `json:"billing"`
-	Label            string                     `json:"label,omitempty"`
-	Confidence       *float64                   `json:"confidence,omitempty"`
-	Probabilities    map[string]float64         `json:"probabilities,omitempty"`
+	Status            int                        `json:"status"`
+	RequestID         string                     `json:"requestId,omitempty"`
+	ResponseModel     string                     `json:"responseModel,omitempty"`
+	ResponseProvider  string                     `json:"responseProvider,omitempty"`
+	ResponseHeaders   map[string]string          `json:"responseHeaders,omitempty"`
+	RequestSHA256     string                     `json:"requestSha256"`
+	RequestSent       bool                       `json:"requestSent"`
+	ResponseReceived  bool                       `json:"responseReceived"`
+	RetryAfter        string                     `json:"retryAfter,omitempty"`
+	RawSHA256         string                     `json:"rawSha256"`
+	OriginalRawSHA256 string                     `json:"originalRawSha256"`
+	EvidenceSanitized bool                       `json:"evidenceSanitized"`
+	RawWithheld       bool                       `json:"rawWithheld"`
+	EvidenceReason    string                     `json:"evidenceReason,omitempty"`
+	RawTruncated      bool                       `json:"rawTruncated"`
+	ReadError         string                     `json:"readError,omitempty"`
+	StartedAt         time.Time                  `json:"startedAt"`
+	EndedAt           time.Time                  `json:"endedAt"`
+	DurationNanos     int64                      `json:"durationNanos"`
+	Billing           adapter.BillingObservation `json:"billing"`
+	Label             string                     `json:"label,omitempty"`
+	Confidence        *float64                   `json:"confidence,omitempty"`
+	Probabilities     map[string]float64         `json:"probabilities,omitempty"`
 }
 
-func evidenceFromObservation(obs adapter.AttemptObservation) ObservationEvidence {
+func evidenceFromObservation(obs adapter.AttemptObservation, raw screenedRaw) ObservationEvidence {
 	e := ObservationEvidence{
 		Status: obs.Status, RequestID: obs.RequestID, ResponseModel: obs.ResponseModel,
 		ResponseProvider: obs.ResponseProvider, ResponseHeaders: obs.ResponseHeaders,
 		RequestSHA256: obs.RequestSHA256, RequestSent: obs.RequestSent,
 		ResponseReceived: obs.ResponseReceived, RetryAfter: obs.RetryAfter,
-		RawSHA256: hashBytes(obs.RawResponse), RawTruncated: obs.RawTruncated,
-		ReadError: obs.ReadError, StartedAt: obs.StartedAt, EndedAt: obs.EndedAt,
+		RawSHA256: hashBytes(obs.RawResponse), OriginalRawSHA256: raw.OriginalSHA256,
+		EvidenceSanitized: raw.Sanitized, RawWithheld: raw.Withheld, EvidenceReason: raw.Reason,
+		RawTruncated: obs.RawTruncated,
+		ReadError:    obs.ReadError, StartedAt: obs.StartedAt, EndedAt: obs.EndedAt,
 		DurationNanos: int64(obs.Duration), Billing: obs.Billing,
 	}
 	if obs.Decision != nil {
@@ -85,13 +91,13 @@ func persistPrivateFile(dir, name string, data []byte) (string, string, error) {
 	return name, hashBytes(data), nil
 }
 
-func persistAttemptEvidence(dir string, slot Slot, obs adapter.AttemptObservation) (rawPath, rawHash, observationPath, observationHash string, err error) {
+func persistAttemptEvidence(dir string, slot Slot, obs adapter.AttemptObservation, raw screenedRaw) (rawPath, rawHash, observationPath, observationHash string, err error) {
 	prefix := fmt.Sprintf("%04d-%s-%s", slot.Ordinal, slot.FixtureID, slot.Arm)
 	rawPath, rawHash, err = persistPrivateFile(dir, prefix+".response", obs.RawResponse)
 	if err != nil {
 		return "", "", "", "", err
 	}
-	evidence := evidenceFromObservation(obs)
+	evidence := evidenceFromObservation(obs, raw)
 	evidence.RawSHA256 = rawHash
 	b, err := json.Marshal(evidence)
 	if err != nil {

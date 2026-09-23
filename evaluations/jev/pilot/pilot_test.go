@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -121,7 +122,7 @@ func TestJournalReplayReconstructsStateAndRejectsTornTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := j.BindRun(RunBinding{InventoryHash: "ih", AuthorizationRef: "auth", CombinedCap: 20, ContractSHA: "contract"}); err != nil {
+	if err := j.BindRun(RunBinding{InventoryHash: "ih", AuthorizationRef: "auth", CombinedCap: 20, ContractSHA: "contract", AllocationID: "allocation", AllocationSHA: "allocation-sha"}); err != nil {
 		t.Fatal(err)
 	}
 	base := JournalEvent{SlotOrdinal: 1, FixtureID: "x", Arm: ArmJev, PayloadSHA: "abc"}
@@ -161,7 +162,7 @@ func TestJournalRejectsSlotIdentityMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer j.Close()
-	if err := j.BindRun(RunBinding{InventoryHash: "ih", AuthorizationRef: "auth", CombinedCap: 20, ContractSHA: "contract"}); err != nil {
+	if err := j.BindRun(RunBinding{InventoryHash: "ih", AuthorizationRef: "auth", CombinedCap: 20, ContractSHA: "contract", AllocationID: "allocation", AllocationSHA: "allocation-sha"}); err != nil {
 		t.Fatal(err)
 	}
 	base := JournalEvent{Type: EventIntent, SlotOrdinal: 1, FixtureID: "x", Arm: ArmJev, PayloadSHA: "p"}
@@ -178,7 +179,7 @@ func TestRestartAfterSendRefusesResendAndPreservesReservation(t *testing.T) {
 	r, closeAll := newTestRunner(t, []Slot{{Ordinal: 1, FixtureID: "x", Arm: ArmJev, Repetition: 1, PayloadSHA: "p"}}, 20, 10, 10)
 	defer closeAll()
 	b := r.Config.Jev
-	if err := r.Journal.BindRun(RunBinding{InventoryHash: r.Config.InventoryHash, AuthorizationRef: r.Config.AuthorizationRef, CombinedCap: int64(r.Config.CombinedCap), ContractSHA: r.Config.ContractSHA}); err != nil {
+	if err := r.Journal.BindRun(RunBinding{InventoryHash: r.Config.InventoryHash, AuthorizationRef: r.Config.AuthorizationRef, CombinedCap: int64(r.Config.CombinedCap), ContractSHA: r.Config.ContractSHA, AllocationID: r.Config.AllocationID, AllocationSHA: r.Config.AllocationSHA}); err != nil {
 		t.Fatal(err)
 	}
 	base := JournalEvent{SlotOrdinal: 1, FixtureID: "x", Arm: ArmJev, PayloadSHA: r.Inventory.Schedule[0].PayloadSHA}
@@ -506,7 +507,7 @@ func TestSharedCapStopsBothBeforeSend(t *testing.T) {
 	}
 	r, closeAll := newTestRunner(t, slots, 4, 2, 2)
 	defer closeAll()
-	if err := r.Journal.BindRun(RunBinding{InventoryHash: r.Config.InventoryHash, AuthorizationRef: r.Config.AuthorizationRef, CombinedCap: int64(r.Config.CombinedCap), ContractSHA: r.Config.ContractSHA}); err != nil {
+	if err := r.Journal.BindRun(RunBinding{InventoryHash: r.Config.InventoryHash, AuthorizationRef: r.Config.AuthorizationRef, CombinedCap: int64(r.Config.CombinedCap), ContractSHA: r.Config.ContractSHA, AllocationID: r.Config.AllocationID, AllocationSHA: r.Config.AllocationSHA}); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
@@ -530,7 +531,8 @@ func TestSharedCapStopsBothBeforeSend(t *testing.T) {
 			t.Fatal(err)
 		}
 		obs := zeroObservation("nano")
-		rp, rh, op, oh, err := persistAttemptEvidence(r.Config.EvidenceDir, slot, obs)
+		safeObs, raw := screenObservation(obs, r.Config.ScreeningSecrets)
+		rp, rh, op, oh, err := persistAttemptEvidence(r.Config.EvidenceDir, slot, safeObs, raw)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -621,7 +623,7 @@ func TestMutatedJournalOrdinalRefusesBeforeResend(t *testing.T) {
 func TestJournalReservationMustMatchLedgerAttemptIdentity(t *testing.T) {
 	r, done := newTestRunner(t, []Slot{{Ordinal: 1, FixtureID: "x", Arm: ArmJev}}, 20, 10, 10)
 	defer done()
-	if err := r.Journal.BindRun(RunBinding{InventoryHash: r.Config.InventoryHash, AuthorizationRef: r.Config.AuthorizationRef, CombinedCap: int64(r.Config.CombinedCap), ContractSHA: r.Config.ContractSHA}); err != nil {
+	if err := r.Journal.BindRun(RunBinding{InventoryHash: r.Config.InventoryHash, AuthorizationRef: r.Config.AuthorizationRef, CombinedCap: int64(r.Config.CombinedCap), ContractSHA: r.Config.ContractSHA, AllocationID: r.Config.AllocationID, AllocationSHA: r.Config.AllocationSHA}); err != nil {
 		t.Fatal(err)
 	}
 	slot := r.Inventory.Schedule[0]
@@ -861,7 +863,7 @@ func newTestRunner(t *testing.T, slots []Slot, combined, jevSub, nanoSub ledger.
 	inv := &Inventory{Entries: entries, Schedule: slots}
 	canonical, _ := inventoryHashBytes(inv)
 	inv.InventoryHash = hashBytes(canonical)
-	r := &Runner{Inventory: inv, Config: ExecutionConfig{InventoryHash: inv.InventoryHash, AuthorizationRef: "test-authorization", CombinedCap: combined, LiveContractsVerified: true, RunLockPath: filepath.Join(dir, "run.lock"), EvidenceDir: filepath.Join(dir, "evidence"), ContractSHA: "test-contract", Jev: jb, Nano: nb}, Journal: j, Attempts: map[Arm]AttemptFunc{}}
+	r := &Runner{Inventory: inv, Config: ExecutionConfig{InventoryHash: inv.InventoryHash, AuthorizationRef: "test-authorization", CombinedCap: combined, LiveContractsVerified: true, RunLockPath: filepath.Join(dir, "run.lock"), EvidenceDir: filepath.Join(dir, "evidence"), ContractSHA: "test-contract", AllocationID: "test-allocation", AllocationSHA: "test-allocation-sha", Jev: jb, Nano: nb}, Journal: j, Attempts: map[Arm]AttemptFunc{}}
 	return r, func() { _ = j.Close(); _ = jl.Close(); _ = nl.Close() }
 }
 
@@ -878,4 +880,133 @@ func zeroObservation(arm string) adapter.AttemptObservation {
 
 func decimal(raw string) adapter.DecimalField {
 	return adapter.DecimalField{Present: true, Valid: true, Raw: raw, Number: json.Number(raw)}
+}
+
+func TestPilotEvidenceScreensDecodedCredentialAndPreservesNumericLexemes(t *testing.T) {
+	const secret = "test-key-never-printed"
+	r, closeAll := newTestRunner(t, []Slot{{Ordinal: 1, FixtureID: "x", Arm: ArmNano, Repetition: 1}}, 20, 10, 10)
+	defer closeAll()
+	r.Config.ScreeningSecrets = []string{secret}
+	r.Attempts[ArmNano] = func(context.Context, []byte) (adapter.AttemptObservation, error) {
+		obs := zeroObservation("nano")
+		obs.RawResponse = []byte(`{"diagnostic":"\u0074est-key-never-printed","usage":{"input_tokens":20,"completion_tokens":120,"total_tokens":205,"cost":0}}`)
+		obs.RequestID = "request-" + secret
+		obs.ResponseHeaders = map[string]string{"X-Diagnostic": "reflected " + secret}
+		obs.ReadError = "read diagnostic " + secret
+		obs.Billing.CostDetails.Error = "nested " + secret
+		obs.Billing.CostDetails.UpstreamInferenceCost = adapter.DecimalField{Present: true, Valid: false, Raw: `"\u0074est-key-never-printed"`, Error: "invalid " + secret}
+		return obs, nil
+	}
+	outcomes, err := r.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := r.Journal.State()
+	replayed, err := ReplayOutcomes(r.Inventory, state, r.Config.EvidenceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]any{"returned outcomes": outcomes, "replayed report rows": replayed} {
+		b, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONContainsNoDecodedSecret(t, name, b, secret)
+	}
+	entries, err := os.ReadDir(r.Config.EvidenceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		b, err := os.ReadFile(filepath.Join(r.Config.EvidenceDir, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONContainsNoDecodedSecret(t, entry.Name(), b, secret)
+	}
+	journalBytes, err := os.ReadFile(r.Journal.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, line := range bytes.Split(bytes.TrimSpace(journalBytes), []byte("\n")) {
+		assertJSONContainsNoDecodedSecret(t, fmt.Sprintf("journal line %d", i+1), line, secret)
+	}
+	evidence := replayed[0].Observation
+	if evidence == nil {
+		t.Fatal("replay omitted observation evidence")
+	}
+	if evidence.Billing.CostDetails.UpstreamInferenceCost.Valid {
+		t.Fatal("invalid string billing evidence became valid")
+	}
+	if strings.Contains(evidence.Billing.CostDetails.UpstreamInferenceCost.Raw, secret) {
+		t.Fatal("credential remained in invalid billing raw evidence")
+	}
+}
+
+func TestPilotScreeningDoesNotRewriteNumericCredentialLexemes(t *testing.T) {
+	billing := adapter.BillingObservation{Cost: decimal("20"), InputTokens: decimal("120"), OutputTokens: decimal("205"), TotalTokens: decimal("0.000001")}
+	screened := screenBillingObservation(billing, []string{"20"})
+	if screened.Cost.Raw != "20" || screened.InputTokens.Raw != "120" || screened.OutputTokens.Raw != "205" || screened.TotalTokens.Raw != "0.000001" {
+		t.Fatalf("numeric lexemes changed: %+v", screened)
+	}
+	b, err := json.Marshal(screened)
+	if err != nil || !json.Valid(b) {
+		t.Fatalf("screened billing is not valid JSON: %v %s", err, b)
+	}
+}
+
+func TestPilotScreensCredentialFromReturnedAdapterErrorAndHalt(t *testing.T) {
+	const secret = "reflected-pilot-key"
+	r, closeAll := newTestRunner(t, []Slot{{Ordinal: 1, FixtureID: "x", Arm: ArmJev, Repetition: 1}}, 20, 10, 10)
+	defer closeAll()
+	r.Config.ScreeningSecrets = []string{secret}
+	r.Attempts[ArmJev] = func(context.Context, []byte) (adapter.AttemptObservation, error) {
+		obs := zeroObservation("jev")
+		obs.RawResponse = []byte(`{"error":"reflected-pilot-key"}`)
+		return obs, &adapter.TransportError{Code: "schema", Message: "provider reflected " + secret}
+	}
+	outcomes, err := r.Run(context.Background())
+	if err == nil {
+		t.Fatal("schema failure was not returned")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("returned error leaked credential: %v", err)
+	}
+	b, marshalErr := json.Marshal(outcomes)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	assertJSONContainsNoDecodedSecret(t, "failure outcomes", b, secret)
+	if strings.Contains(r.Journal.State().HaltReason, secret) {
+		t.Fatalf("halt reason leaked credential: %q", r.Journal.State().HaltReason)
+	}
+}
+
+func assertJSONContainsNoDecodedSecret(t *testing.T, name string, b []byte, secret string) {
+	t.Helper()
+	var value any
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	if err := dec.Decode(&value); err != nil {
+		t.Fatalf("%s is invalid JSON: %v: %s", name, err, b)
+	}
+	var visit func(any)
+	visit = func(v any) {
+		switch typed := v.(type) {
+		case string:
+			if strings.Contains(typed, secret) {
+				t.Fatalf("%s contains decoded credential in %q", name, typed)
+			}
+		case []any:
+			for _, child := range typed {
+				visit(child)
+			}
+		case map[string]any:
+			for key, child := range typed {
+				visit(key)
+				visit(child)
+			}
+		}
+	}
+	visit(value)
 }

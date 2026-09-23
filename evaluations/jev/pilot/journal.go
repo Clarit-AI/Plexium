@@ -44,6 +44,8 @@ type JournalEvent struct {
 	AuthorizationRef string    `json:"authorizationReference,omitempty"`
 	CombinedCap      int64     `json:"combinedCapMicrodollars,omitempty"`
 	ContractSHA      string    `json:"executionContractSha256,omitempty"`
+	AllocationID     string    `json:"allocationId,omitempty"`
+	AllocationSHA    string    `json:"allocationSha256,omitempty"`
 	BillingCostRaw   string    `json:"billingCostRaw,omitempty"`
 	Outcome          string    `json:"outcome,omitempty"`
 	Label            string    `json:"label,omitempty"`
@@ -59,6 +61,7 @@ type SlotState struct {
 }
 type RunBinding struct {
 	InventoryHash, AuthorizationRef, ContractSHA string
+	AllocationID, AllocationSHA                  string
 	CombinedCap                                  int64
 }
 type ReplayState struct {
@@ -144,10 +147,10 @@ func ReplayJournal(path string) (ReplayState, error) {
 
 func applyEvent(s *ReplayState, e JournalEvent) error {
 	if e.Type == EventInit {
-		if s.Sequence != 0 || s.Binding != nil || e.InventoryHash == "" || e.AuthorizationRef == "" || e.CombinedCap <= 0 || e.ContractSHA == "" {
+		if s.Sequence != 0 || s.Binding != nil || e.InventoryHash == "" || e.AuthorizationRef == "" || e.CombinedCap <= 0 || e.ContractSHA == "" || e.AllocationID == "" || e.AllocationSHA == "" {
 			return errors.New("pilot: invalid or duplicate run-init")
 		}
-		s.Binding = &RunBinding{InventoryHash: e.InventoryHash, AuthorizationRef: e.AuthorizationRef, CombinedCap: e.CombinedCap, ContractSHA: e.ContractSHA}
+		s.Binding = &RunBinding{InventoryHash: e.InventoryHash, AuthorizationRef: e.AuthorizationRef, CombinedCap: e.CombinedCap, ContractSHA: e.ContractSHA, AllocationID: e.AllocationID, AllocationSHA: e.AllocationSHA}
 		return nil
 	}
 	if e.Type == EventHalt {
@@ -213,7 +216,7 @@ func applyEvent(s *ReplayState, e JournalEvent) error {
 
 func (j *Journal) BindRun(binding RunBinding) error {
 	if j.state.Sequence == 0 {
-		return j.Append(JournalEvent{Type: EventInit, InventoryHash: binding.InventoryHash, AuthorizationRef: binding.AuthorizationRef, CombinedCap: binding.CombinedCap, ContractSHA: binding.ContractSHA})
+		return j.Append(JournalEvent{Type: EventInit, InventoryHash: binding.InventoryHash, AuthorizationRef: binding.AuthorizationRef, CombinedCap: binding.CombinedCap, ContractSHA: binding.ContractSHA, AllocationID: binding.AllocationID, AllocationSHA: binding.AllocationSHA})
 	}
 	if j.state.Binding == nil {
 		return errors.New("pilot: existing journal has no run-init binding")
