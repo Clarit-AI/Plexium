@@ -2,6 +2,7 @@ package loader
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -347,5 +348,53 @@ func TestBuildManifestCountsAllFourTasks(t *testing.T) {
 	//// Sum invariant: 1 + 1 + 1 + 1 == 4 == Total.
 	if got := m.TaskCounts.EntityType + m.TaskCounts.CandidateType + m.TaskCounts.Relationship + m.TaskCounts.ClaimSupport; got != m.TaskCounts.Total {
 		t.Errorf("sum of per-task counts %d != Total %d", got, m.TaskCounts.Total)
+	}
+}
+
+func TestBuildManifestDoesNotInferIndependenceFromSaltedFamilyIDs(t *testing.T) {
+	dir := t.TempDir()
+	fixtures := make([]protocol.Fixture, 0, 300)
+	for i := 0; i < 150; i++ {
+		group := fmt.Sprintf("held-group-%03d", i)
+		relID := fmt.Sprintf("rel-%03d", i)
+		fixtures = append(fixtures, protocol.Fixture{
+			ID: relID, Task: protocol.TaskRelationship, SourceGroup: group,
+			TemplateFamily: "salted-" + relID, Split: protocol.SplitHeldOut,
+			Author: "agent", ReviewStatus: protocol.ReviewApproved,
+			ExpectedLabel: "no-supported-relationship", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskRelationship),
+			Excerpts:     []protocol.Excerpt{{ID: "e1", Text: "The record explicitly denies the relationship."}},
+			Candidates:   []protocol.Candidate{{ID: "source", Title: fmt.Sprintf("Source %03d", i)}, {ID: "target", Title: fmt.Sprintf("Target %03d", i)}},
+			EdgeSourceID: "source", EdgeTargetID: "target",
+		})
+		claimID := fmt.Sprintf("claim-%03d", i)
+		fixtures = append(fixtures, protocol.Fixture{
+			ID: claimID, Task: protocol.TaskClaimSupport, SourceGroup: group,
+			TemplateFamily: "salted-" + claimID, Split: protocol.SplitHeldOut,
+			Author: "agent", ReviewStatus: protocol.ReviewApproved,
+			ExpectedLabel: "contradicted", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "The certified total contradicts the claim."}},
+			Candidates: []protocol.Candidate{{ID: "subject", Title: fmt.Sprintf("Subject %03d", i)}},
+		})
+	}
+	manifest, err := BuildManifest(writeFixtures(t, dir, fixtures), time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !manifest.ReviewReadiness.StudyGateEligible {
+		t.Fatalf("probe setup must isolate independence from review readiness: %+v", manifest.ReviewReadiness)
+	}
+	if len(manifest.NegativeTaskEvidence) != 2 {
+		t.Fatalf("negative task evidence=%d, want 2", len(manifest.NegativeTaskEvidence))
+	}
+	for _, evidence := range manifest.NegativeTaskEvidence {
+		if evidence.NegativeRowCount != 150 || evidence.ConstructionClusterCount != 150 {
+			t.Fatalf("family-ID flip setup failed for %s: %+v", evidence.Task, evidence)
+		}
+		if evidence.StatisticalIndependenceEstablished || evidence.IndependentNegativeGateEligible {
+			t.Errorf("%s promoted salted family IDs to statistical evidence: %+v", evidence.Task, evidence)
+		}
+		if !strings.Contains(evidence.StatisticalLimitationReason, "family identifiers do not establish") {
+			t.Errorf("%s lacks family-ID limitation: %+v", evidence.Task, evidence)
+		}
 	}
 }

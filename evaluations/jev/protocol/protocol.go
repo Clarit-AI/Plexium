@@ -335,7 +335,9 @@ type ReviewReadinessEvidence struct {
 }
 
 // NegativeTaskEvidence records the difference between case counts and the
-// effective construction clusters that constrain statistical interpretation.
+// author-supplied TemplateFamily IDs. ConstructionClusterCount is retained as
+// a compatibility name for that descriptive ID cardinality; it is not proof
+// that the bodies are distinct constructions or statistically independent.
 type NegativeTaskEvidence struct {
 	Task                               Task   `json:"task"`
 	Split                              Split  `json:"split"`

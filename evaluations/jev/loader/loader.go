@@ -545,15 +545,17 @@ func BuildManifest(fixturesPath string, generatedAt time.Time) (protocol.Manifes
 	for _, task := range []protocol.Task{protocol.TaskRelationship, protocol.TaskClaimSupport} {
 		rows := negativeRows[task]
 		clusters := len(negativeClusters[task])
-		established := rows > 0 && clusters >= rows
-		eligible := rows >= 150 && established && m.ReviewReadiness.StudyGateEligible
+		// TemplateFamily is author-supplied descriptive metadata. Even one
+		// distinct ID per row cannot establish statistical independence; that
+		// requires separately justified study-design evidence this manifest
+		// does not collect.
+		established := false
+		eligible := false
 		reason := ""
-		if !established {
+		if clusters < rows {
 			reason = fmt.Sprintf("%d construction clusters for %d negative rows; structural disjointness does not establish statistical independence", clusters, rows)
-		} else if !m.ReviewReadiness.StudyGateEligible {
-			reason = m.ReviewReadiness.GateIneligibleReason
-		} else if rows < 150 {
-			reason = fmt.Sprintf("%d negative rows; protocol target is at least 150", rows)
+		} else {
+			reason = fmt.Sprintf("%d template-family IDs observed for %d negative rows; family identifiers do not establish statistical independence", clusters, rows)
 		}
 		m.NegativeTaskEvidence = append(m.NegativeTaskEvidence, protocol.NegativeTaskEvidence{
 			Task: task, Split: protocol.SplitHeldOut, NegativeRowCount: rows,
