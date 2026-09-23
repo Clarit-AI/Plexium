@@ -56,26 +56,64 @@ type JSONSchema struct {
 
 // ChatChoice is one of the choices returned in a successful chat response.
 type ChatChoice struct {
-	Index        int         `json:"index"`
-	Message      ChatMessage `json:"message"`
-	FinishReason string      `json:"finish_reason"`
+	Index              int                 `json:"index"`
+	Message            ChatResponseMessage `json:"message"`
+	FinishReason       string              `json:"finish_reason"`
+	NativeFinishReason *string             `json:"native_finish_reason,omitempty"`
+	Logprobs           json.RawMessage     `json:"logprobs,omitempty"`
+}
+
+// ChatResponseMessage is kept separate from ChatMessage so response-only
+// routing evidence cannot become accepted request input.
+type ChatResponseMessage struct {
+	Role      string  `json:"role"`
+	Content   string  `json:"content"`
+	Refusal   *string `json:"refusal,omitempty"`
+	Reasoning *string `json:"reasoning,omitempty"`
+}
+
+type ChatPromptTokenDetails struct {
+	CachedTokens     int `json:"cached_tokens,omitempty"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+	AudioTokens      int `json:"audio_tokens,omitempty"`
+	VideoTokens      int `json:"video_tokens,omitempty"`
+}
+
+type ChatCompletionTokenDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
+	ImageTokens     int `json:"image_tokens,omitempty"`
+	AudioTokens     int `json:"audio_tokens,omitempty"`
+}
+
+type ChatCostDetails struct {
+	UpstreamInferenceCost            json.RawMessage `json:"upstream_inference_cost,omitempty"`
+	UpstreamInferencePromptCost      json.RawMessage `json:"upstream_inference_prompt_cost,omitempty"`
+	UpstreamInferenceCompletionsCost json.RawMessage `json:"upstream_inference_completions_cost,omitempty"`
 }
 
 // ChatUsage mirrors the documented usage block.
 type ChatUsage struct {
-	PromptTokens     int             `json:"prompt_tokens"`
-	CompletionTokens int             `json:"completion_tokens"`
-	TotalTokens      int             `json:"total_tokens"`
-	Cost             json.RawMessage `json:"cost,omitempty"`
+	PromptTokens            int                         `json:"prompt_tokens"`
+	PromptTokensDetails     *ChatPromptTokenDetails     `json:"prompt_tokens_details,omitempty"`
+	CompletionTokens        int                         `json:"completion_tokens"`
+	CompletionTokensDetails *ChatCompletionTokenDetails `json:"completion_tokens_details,omitempty"`
+	TotalTokens             int                         `json:"total_tokens"`
+	Cost                    json.RawMessage             `json:"cost,omitempty"`
+	CostDetails             *ChatCostDetails            `json:"cost_details,omitempty"`
+	IsBYOK                  *bool                       `json:"is_byok,omitempty"`
 }
 
 // ChatResponse is the parsed body of /api/v1/chat/completions.
 type ChatResponse struct {
-	ID       string       `json:"id"`
-	Model    string       `json:"model"`
-	Provider string       `json:"provider,omitempty"`
-	Choices  []ChatChoice `json:"choices"`
-	Usage    ChatUsage    `json:"usage"`
+	ID                string       `json:"id"`
+	Object            string       `json:"object,omitempty"`
+	Created           int64        `json:"created,omitempty"`
+	Model             string       `json:"model"`
+	Provider          string       `json:"provider,omitempty"`
+	Choices           []ChatChoice `json:"choices"`
+	Usage             ChatUsage    `json:"usage"`
+	SystemFingerprint *string      `json:"system_fingerprint,omitempty"`
+	ServiceTier       *string      `json:"service_tier,omitempty"`
 }
 
 // ChatObservation is the harness-visible artifact returned by the chat

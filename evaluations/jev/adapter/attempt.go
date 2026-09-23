@@ -30,14 +30,61 @@ type DecimalField struct {
 	Error   string
 }
 
+// BooleanField preserves the same omitted/null/valid distinctions for billing
+// taxonomy fields that are boolean rather than decimal.
+type BooleanField struct {
+	Present bool
+	Null    bool
+	Valid   bool
+	Raw     string
+	Value   bool
+	Error   string
+}
+
+type PromptTokenDetailsObservation struct {
+	Present          bool
+	Null             bool
+	Valid            bool
+	CachedTokens     DecimalField
+	CacheWriteTokens DecimalField
+	AudioTokens      DecimalField
+	VideoTokens      DecimalField
+	Error            string
+}
+
+type CompletionTokenDetailsObservation struct {
+	Present         bool
+	Null            bool
+	Valid           bool
+	ReasoningTokens DecimalField
+	ImageTokens     DecimalField
+	AudioTokens     DecimalField
+	Error           string
+}
+
+type CostDetailsObservation struct {
+	Present                          bool
+	Null                             bool
+	Valid                            bool
+	UpstreamInferenceCost            DecimalField
+	UpstreamInferencePromptCost      DecimalField
+	UpstreamInferenceCompletionsCost DecimalField
+	Error                            string
+}
+
 // BillingObservation is extracted before semantic response validation. The
 // adapter does not infer missing values from configured rates.
 type BillingObservation struct {
-	Cost         DecimalField
-	InputTokens  DecimalField
-	OutputTokens DecimalField
-	TotalTokens  DecimalField
-	Error        string
+	Cost                     DecimalField
+	InputTokens              DecimalField
+	OutputTokens             DecimalField
+	TotalTokens              DecimalField
+	PromptTokenDetails       PromptTokenDetailsObservation
+	CompletionTokenDetails   CompletionTokenDetailsObservation
+	CostDetails              CostDetailsObservation
+	IsBYOK                   BooleanField
+	RateSemanticsDiscrepancy string
+	Error                    string
 }
 
 // AttemptObservation is the durable evidence returned by each one-shot call,
@@ -288,25 +335,82 @@ func validateEndpoint(rawURL, expectedPath string) error {
 }
 
 func invalidBilling(b BillingObservation) error {
-	for name, field := range map[string]DecimalField{
+	decimalFields := map[string]DecimalField{
 		"cost": b.Cost, "input tokens": b.InputTokens,
 		"output tokens": b.OutputTokens, "total tokens": b.TotalTokens,
-	} {
+		"prompt cached tokens":                b.PromptTokenDetails.CachedTokens,
+		"prompt cache-write tokens":           b.PromptTokenDetails.CacheWriteTokens,
+		"prompt audio tokens":                 b.PromptTokenDetails.AudioTokens,
+		"prompt video tokens":                 b.PromptTokenDetails.VideoTokens,
+		"completion reasoning tokens":         b.CompletionTokenDetails.ReasoningTokens,
+		"completion image tokens":             b.CompletionTokenDetails.ImageTokens,
+		"completion audio tokens":             b.CompletionTokenDetails.AudioTokens,
+		"upstream inference cost":             b.CostDetails.UpstreamInferenceCost,
+		"upstream inference prompt cost":      b.CostDetails.UpstreamInferencePromptCost,
+		"upstream inference completions cost": b.CostDetails.UpstreamInferenceCompletionsCost,
+	}
+	for name, field := range decimalFields {
 		if field.Present && !field.Null && !field.Valid {
 			return fmt.Errorf("invalid %s field: %s", name, field.Error)
 		}
+	}
+	for name, detail := range map[string]struct {
+		present bool
+		null    bool
+		valid   bool
+		err     string
+	}{
+		"prompt token details":     {b.PromptTokenDetails.Present, b.PromptTokenDetails.Null, b.PromptTokenDetails.Valid, b.PromptTokenDetails.Error},
+		"completion token details": {b.CompletionTokenDetails.Present, b.CompletionTokenDetails.Null, b.CompletionTokenDetails.Valid, b.CompletionTokenDetails.Error},
+		"cost details":             {b.CostDetails.Present, b.CostDetails.Null, b.CostDetails.Valid, b.CostDetails.Error},
+	} {
+		if detail.present && !detail.null && !detail.valid {
+			return fmt.Errorf("invalid %s: %s", name, detail.err)
+		}
+	}
+	if b.IsBYOK.Present && !b.IsBYOK.Null && !b.IsBYOK.Valid {
+		return fmt.Errorf("invalid is_byok field: %s", b.IsBYOK.Error)
 	}
 	return nil
 }
 
 func invalidateBillingForSchema(b *BillingObservation, reason string) {
 	b.Error = "response schema not admitted: " + reason
-	for _, field := range []*DecimalField{&b.Cost, &b.InputTokens, &b.OutputTokens, &b.TotalTokens} {
+	for _, field := range []*DecimalField{
+		&b.Cost, &b.InputTokens, &b.OutputTokens, &b.TotalTokens,
+		&b.PromptTokenDetails.CachedTokens, &b.PromptTokenDetails.CacheWriteTokens,
+		&b.PromptTokenDetails.AudioTokens, &b.PromptTokenDetails.VideoTokens,
+		&b.CompletionTokenDetails.ReasoningTokens, &b.CompletionTokenDetails.ImageTokens,
+		&b.CompletionTokenDetails.AudioTokens, &b.CostDetails.UpstreamInferenceCost,
+		&b.CostDetails.UpstreamInferencePromptCost, &b.CostDetails.UpstreamInferenceCompletionsCost,
+	} {
 		if field.Present {
 			field.Valid = false
 			if field.Error == "" {
 				field.Error = b.Error
 			}
+		}
+	}
+	for _, detail := range []struct {
+		present bool
+		valid   *bool
+		err     *string
+	}{
+		{b.PromptTokenDetails.Present, &b.PromptTokenDetails.Valid, &b.PromptTokenDetails.Error},
+		{b.CompletionTokenDetails.Present, &b.CompletionTokenDetails.Valid, &b.CompletionTokenDetails.Error},
+		{b.CostDetails.Present, &b.CostDetails.Valid, &b.CostDetails.Error},
+	} {
+		if detail.present {
+			*detail.valid = false
+			if *detail.err == "" {
+				*detail.err = b.Error
+			}
+		}
+	}
+	if b.IsBYOK.Present {
+		b.IsBYOK.Valid = false
+		if b.IsBYOK.Error == "" {
+			b.IsBYOK.Error = b.Error
 		}
 	}
 }
@@ -363,6 +467,128 @@ func extractResponseEvidence(body []byte, obs *AttemptObservation) {
 	obs.Billing.InputTokens = decimalFrom(firstRaw(usage, nil, "input_tokens", "prompt_tokens"), true)
 	obs.Billing.OutputTokens = decimalFrom(firstRaw(usage, nil, "output_tokens", "completion_tokens"), true)
 	obs.Billing.TotalTokens = decimalFrom(firstRaw(usage, nil, "total_tokens"), true)
+	obs.Billing.PromptTokenDetails = promptTokenDetailsFrom(usage["prompt_tokens_details"])
+	obs.Billing.CompletionTokenDetails = completionTokenDetailsFrom(usage["completion_tokens_details"])
+	obs.Billing.CostDetails = costDetailsFrom(usage["cost_details"])
+	obs.Billing.IsBYOK = booleanFrom(usage["is_byok"])
+	obs.Billing.RateSemanticsDiscrepancy = rateSemanticsDiscrepancy(obs.Billing)
+}
+
+func rawDetailObject(raw json.RawMessage, name string) (present, null bool, object map[string]json.RawMessage, err error) {
+	if len(raw) == 0 {
+		return false, false, nil, nil
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return true, true, nil, nil
+	}
+	if err := json.Unmarshal(raw, &object); err != nil || object == nil {
+		return true, false, nil, fmt.Errorf("%s must be a JSON object", name)
+	}
+	return true, false, object, nil
+}
+
+func promptTokenDetailsFrom(raw json.RawMessage) PromptTokenDetailsObservation {
+	present, null, object, err := rawDetailObject(raw, "prompt_tokens_details")
+	result := PromptTokenDetailsObservation{Present: present, Null: null}
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	if !present || null {
+		return result
+	}
+	result.CachedTokens = decimalFrom(object["cached_tokens"], true)
+	result.CacheWriteTokens = decimalFrom(object["cache_write_tokens"], true)
+	result.AudioTokens = decimalFrom(object["audio_tokens"], true)
+	result.VideoTokens = decimalFrom(object["video_tokens"], true)
+	result.Valid = decimalFieldsValid(result.CachedTokens, result.CacheWriteTokens, result.AudioTokens, result.VideoTokens)
+	return result
+}
+
+func completionTokenDetailsFrom(raw json.RawMessage) CompletionTokenDetailsObservation {
+	present, null, object, err := rawDetailObject(raw, "completion_tokens_details")
+	result := CompletionTokenDetailsObservation{Present: present, Null: null}
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	if !present || null {
+		return result
+	}
+	result.ReasoningTokens = decimalFrom(object["reasoning_tokens"], true)
+	result.ImageTokens = decimalFrom(object["image_tokens"], true)
+	result.AudioTokens = decimalFrom(object["audio_tokens"], true)
+	result.Valid = decimalFieldsValid(result.ReasoningTokens, result.ImageTokens, result.AudioTokens)
+	return result
+}
+
+func costDetailsFrom(raw json.RawMessage) CostDetailsObservation {
+	present, null, object, err := rawDetailObject(raw, "cost_details")
+	result := CostDetailsObservation{Present: present, Null: null}
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	if !present || null {
+		return result
+	}
+	result.UpstreamInferenceCost = decimalFrom(object["upstream_inference_cost"], false)
+	result.UpstreamInferencePromptCost = decimalFrom(object["upstream_inference_prompt_cost"], false)
+	result.UpstreamInferenceCompletionsCost = decimalFrom(object["upstream_inference_completions_cost"], false)
+	result.Valid = decimalFieldsValid(result.UpstreamInferenceCost, result.UpstreamInferencePromptCost, result.UpstreamInferenceCompletionsCost)
+	return result
+}
+
+func decimalFieldsValid(fields ...DecimalField) bool {
+	for _, field := range fields {
+		if field.Present && !field.Null && !field.Valid {
+			return false
+		}
+	}
+	return true
+}
+
+func booleanFrom(raw json.RawMessage) BooleanField {
+	if len(raw) == 0 {
+		return BooleanField{}
+	}
+	field := BooleanField{Present: true, Raw: string(raw)}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		field.Null = true
+		return field
+	}
+	if err := json.Unmarshal(raw, &field.Value); err != nil {
+		field.Error = "value must be a JSON boolean"
+		return field
+	}
+	field.Valid = true
+	return field
+}
+
+func rateSemanticsDiscrepancy(b BillingObservation) string {
+	if !b.Cost.Valid {
+		return ""
+	}
+	top, err := exactDecimal(b.Cost.Number.String())
+	if err != nil {
+		return ""
+	}
+	details := b.CostDetails
+	if details.UpstreamInferenceCost.Valid {
+		upstream, _ := exactDecimal(details.UpstreamInferenceCost.Number.String())
+		if top.Cmp(upstream) != 0 {
+			return fmt.Sprintf("reported cost %s differs from upstream_inference_cost %s; tariff/currency/fee semantics unresolved", b.Cost.Raw, details.UpstreamInferenceCost.Raw)
+		}
+	}
+	if details.UpstreamInferencePromptCost.Valid && details.UpstreamInferenceCompletionsCost.Valid {
+		prompt, _ := exactDecimal(details.UpstreamInferencePromptCost.Number.String())
+		completion, _ := exactDecimal(details.UpstreamInferenceCompletionsCost.Number.String())
+		sum := new(big.Rat).Add(prompt, completion)
+		if top.Cmp(sum) != 0 {
+			return fmt.Sprintf("reported cost %s differs from prompt+completion upstream detail total; tariff/currency/fee semantics unresolved", b.Cost.Raw)
+		}
+	}
+	return ""
 }
 
 func decodeString(raw json.RawMessage, dst *string) {
@@ -681,6 +907,9 @@ func parseStrictChatResponse(body []byte, expectedModel, expectedProvider string
 	if resp.Provider == "" || resp.Provider != expectedProvider {
 		return nil, &TransportError{Code: "provider-pin", Message: fmt.Sprintf("chat response provider %q does not match accepted provider %q", resp.Provider, expectedProvider), Latency: latency, Attempts: 1}
 	}
+	if resp.Object != "" && resp.Object != "chat.completion" {
+		return nil, &TransportError{Code: "schema", Message: fmt.Sprintf("chat response object %q is not chat.completion", resp.Object), Latency: latency, Attempts: 1}
+	}
 	if len(resp.Choices) != 1 {
 		return nil, &TransportError{Code: "schema", Message: "chat response must contain exactly one choice", Latency: latency, Attempts: 1}
 	}
@@ -713,7 +942,7 @@ func validateChatResponseShape(body []byte) error {
 		return fmt.Errorf("decode chat response: %w", err)
 	}
 	if err := exactObjectKeys(top,
-		[]string{"id", "model", "provider", "choices", "usage"},
+		[]string{"id", "object", "created", "model", "provider", "choices", "usage", "system_fingerprint", "service_tier"},
 		[]string{"id", "model", "provider", "choices", "usage"}); err != nil {
 		return fmt.Errorf("chat response: %w", err)
 	}
@@ -727,7 +956,7 @@ func validateChatResponseShape(body []byte) error {
 			return err
 		}
 		if err := exactObjectKeys(choice,
-			[]string{"index", "message", "finish_reason"},
+			[]string{"index", "message", "finish_reason", "native_finish_reason", "logprobs"},
 			[]string{"index", "message", "finish_reason"}); err != nil {
 			return fmt.Errorf("choice %d: %w", index, err)
 		}
@@ -736,7 +965,7 @@ func validateChatResponseShape(body []byte) error {
 			return err
 		}
 		if err := exactObjectKeys(message,
-			[]string{"role", "content", "refusal"},
+			[]string{"role", "content", "refusal", "reasoning"},
 			[]string{"role", "content"}); err != nil {
 			return fmt.Errorf("choice %d message: %w", index, err)
 		}
@@ -746,8 +975,25 @@ func validateChatResponseShape(body []byte) error {
 		return err
 	}
 	if err := exactObjectKeys(usage,
-		[]string{"prompt_tokens", "completion_tokens", "total_tokens", "cost"}, nil); err != nil {
+		[]string{"prompt_tokens", "prompt_tokens_details", "completion_tokens", "completion_tokens_details", "total_tokens", "cost", "cost_details", "is_byok"}, nil); err != nil {
 		return fmt.Errorf("usage: %w", err)
+	}
+	for name, allowed := range map[string][]string{
+		"prompt_tokens_details":     {"cached_tokens", "cache_write_tokens", "audio_tokens", "video_tokens"},
+		"completion_tokens_details": {"reasoning_tokens", "image_tokens", "audio_tokens"},
+		"cost_details":              {"upstream_inference_cost", "upstream_inference_prompt_cost", "upstream_inference_completions_cost"},
+	} {
+		raw, ok := usage[name]
+		if !ok {
+			continue
+		}
+		details, err := rawObject(raw, name)
+		if err != nil {
+			return err
+		}
+		if err := exactObjectKeys(details, allowed, nil); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
 	}
 	return nil
 }

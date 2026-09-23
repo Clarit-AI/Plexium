@@ -102,6 +102,17 @@ func TestSubmitDecisionsOncePreservesEvidenceAndAliasPinSplit(t *testing.T) {
 	}
 }
 
+func TestDecisionResponseKeySetStillMatchesCapturedEnvelopeExactly(t *testing.T) {
+	captured := []byte(`{"id":"gen-dec-observed","model":"typesafe/jev-1.13-20260917","provider":"TypeSafe","answers":{"verdict":{"type":"choice","choice":"supported","confidence":0.8,"probabilities":{"supported":0.8,"insufficient-evidence":0.2}}},"usage":{"input_tokens":364,"output_tokens":44,"cost":0.000015288}}`)
+	if err := validateDecisionResponseShape(captured); err != nil {
+		t.Fatalf("captured Decisions envelope rejected: %v", err)
+	}
+	withUnexpected := bytes.Replace(captured, []byte(`{"id":`), []byte(`{"unexpected":true,"id":`), 1)
+	if err := validateDecisionResponseShape(withUnexpected); err == nil || !strings.Contains(err.Error(), `unexpected property "unexpected"`) {
+		t.Fatalf("Decisions exact-key discipline weakened: %v", err)
+	}
+}
+
 func TestSubmitDecisionsOnceFailureStillReturnsBillingEvidence(t *testing.T) {
 	var calls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -297,20 +308,72 @@ func TestCompleteOnceStrictSuccess(t *testing.T) {
 	}
 }
 
+func TestCompleteOnceAdmitsCapturedOpenRouterNanoEnvelopeAndBillingTaxonomy(t *testing.T) {
+	const capturedShape = `{"id":"gen-observed","model":"openai/gpt-4.1-nano","object":"chat.completion","created":1790139785,"choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}","refusal":null,"reasoning":null},"finish_reason":"stop","native_finish_reason":"completed","logprobs":null}],"provider":"OpenAI","system_fingerprint":null,"service_tier":"default","usage":{"prompt_tokens":63,"completion_tokens":6,"total_tokens":69,"cost":0.000008613,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.0000087,"upstream_inference_prompt_cost":0.0000063,"upstream_inference_completions_cost":0.0000024},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0,"audio_tokens":0}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, capturedShape)
+	}))
+	defer srv.Close()
+	c, _ := NewChatClient(ChatConfig{
+		Endpoint: srv.URL + "/api/v1/chat/completions", Model: "openai/gpt-4.1-nano", ResponseModel: "openai/gpt-4.1-nano",
+		ResponseProvider: "OpenAI", Timeout: time.Second,
+	})
+	obs, err := c.CompleteOnce(context.Background(), frozenChatBody(t, "openai/gpt-4.1-nano", "OpenAI"))
+	if err != nil {
+		t.Fatalf("captured response shape rejected: %v billing=%+v", err, obs.Billing)
+	}
+	if obs.Chat == nil || obs.Chat.Content["label"] != "supported" {
+		t.Fatalf("validated label missing: %+v", obs.Chat)
+	}
+	for name, field := range map[string]DecimalField{
+		"cost":                obs.Billing.Cost,
+		"input":               obs.Billing.InputTokens,
+		"output":              obs.Billing.OutputTokens,
+		"total":               obs.Billing.TotalTokens,
+		"cached":              obs.Billing.PromptTokenDetails.CachedTokens,
+		"cache-write":         obs.Billing.PromptTokenDetails.CacheWriteTokens,
+		"prompt-audio":        obs.Billing.PromptTokenDetails.AudioTokens,
+		"prompt-video":        obs.Billing.PromptTokenDetails.VideoTokens,
+		"reasoning":           obs.Billing.CompletionTokenDetails.ReasoningTokens,
+		"image":               obs.Billing.CompletionTokenDetails.ImageTokens,
+		"completion-audio":    obs.Billing.CompletionTokenDetails.AudioTokens,
+		"upstream":            obs.Billing.CostDetails.UpstreamInferenceCost,
+		"upstream-prompt":     obs.Billing.CostDetails.UpstreamInferencePromptCost,
+		"upstream-completion": obs.Billing.CostDetails.UpstreamInferenceCompletionsCost,
+	} {
+		if !field.Present || !field.Valid {
+			t.Errorf("%s was not mapped as valid presence-aware evidence: %+v", name, field)
+		}
+	}
+	if obs.Billing.Cost.Raw != "0.000008613" || obs.Billing.InputTokens.Raw != "63" || obs.Billing.OutputTokens.Raw != "6" || obs.Billing.TotalTokens.Raw != "69" {
+		t.Fatalf("primary billing lexemes changed: %+v", obs.Billing)
+	}
+	if !obs.Billing.IsBYOK.Present || !obs.Billing.IsBYOK.Valid || obs.Billing.IsBYOK.Value {
+		t.Fatalf("is_byok taxonomy missing: %+v", obs.Billing.IsBYOK)
+	}
+	if !strings.Contains(obs.Billing.RateSemanticsDiscrepancy, "0.000008613") || !strings.Contains(obs.Billing.RateSemanticsDiscrepancy, "0.0000087") {
+		t.Fatalf("rate-semantics discrepancy not reported: %q", obs.Billing.RateSemanticsDiscrepancy)
+	}
+}
+
 func TestCompleteOnceRejectsStrictFailureMatrix(t *testing.T) {
 	tests := map[string]string{
-		"duplicate-label":  `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\",\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
-		"extra-key":        `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\",\"why\":\"x\"}"},"finish_reason":"stop"}],"usage":{}}`,
-		"wrong-enum":       `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"other\"}"},"finish_reason":"stop"}],"usage":{}}`,
-		"refusal":          `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}","refusal":"no"},"finish_reason":"stop"}],"usage":{}}`,
-		"truncated":        `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"length"}],"usage":{}}`,
-		"multiple":         `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"},{"index":1,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
-		"wrong-model":      `{"id":"c","model":"other","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
-		"missing-provider": `{"id":"c","model":"pin","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
-		"wrong-provider":   `{"id":"c","model":"pin","provider":"Other","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
-		"trailing-json":    `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}{}"},"finish_reason":"stop"}],"usage":{}}`,
-		"uppercase-label":  `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"LABEL\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
-		"mixed-case-label": `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"insufficient-evidence\",\"LABEL\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
+		"duplicate-label":         `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\",\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
+		"extra-key":               `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\",\"why\":\"x\"}"},"finish_reason":"stop"}],"usage":{}}`,
+		"wrong-enum":              `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"other\"}"},"finish_reason":"stop"}],"usage":{}}`,
+		"refusal":                 `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}","refusal":"no"},"finish_reason":"stop"}],"usage":{}}`,
+		"truncated":               `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"length"}],"usage":{}}`,
+		"multiple":                `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"},{"index":1,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
+		"wrong-model":             `{"id":"c","model":"other","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
+		"missing-provider":        `{"id":"c","model":"pin","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
+		"wrong-provider":          `{"id":"c","model":"pin","provider":"Other","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
+		"trailing-json":           `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}{}"},"finish_reason":"stop"}],"usage":{}}`,
+		"uppercase-label":         `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"LABEL\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
+		"mixed-case-label":        `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"insufficient-evidence\",\"LABEL\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
+		"duplicate-envelope":      `{"id":"c","id":"other","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
+		"trailing-envelope":       `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}} {}`,
+		"unexpected-envelope":     `{"id":"c","model":"pin","provider":"OpenAI","unexpected":true,"choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{}}`,
+		"unexpected-usage-detail": `{"id":"c","model":"pin","provider":"OpenAI","choices":[{"index":0,"message":{"role":"assistant","content":"{\"label\":\"supported\"}"},"finish_reason":"stop"}],"usage":{"prompt_tokens_details":{"cached_tokens":0,"unexpected":0}}}`,
 	}
 	for name, response := range tests {
 		t.Run(name, func(t *testing.T) {

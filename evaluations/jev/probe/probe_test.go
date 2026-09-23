@@ -301,6 +301,37 @@ func TestBillingEvidenceScreensInvalidRawAndPreservesNumericLexemes(t *testing.T
 	}
 }
 
+func TestBillingEvidenceMapsObservedNanoTaxonomyAndRateDiscrepancy(t *testing.T) {
+	decimal := func(raw string) adapter.DecimalField {
+		return adapter.DecimalField{Present: true, Valid: true, Raw: raw, Number: json.Number(raw)}
+	}
+	observation := adapter.BillingObservation{
+		Cost: decimal("0.000008613"), InputTokens: decimal("63"), OutputTokens: decimal("6"), TotalTokens: decimal("69"),
+		PromptTokenDetails: adapter.PromptTokenDetailsObservation{
+			Present: true, Valid: true, CachedTokens: decimal("0"), CacheWriteTokens: decimal("0"), AudioTokens: decimal("0"), VideoTokens: decimal("0"),
+		},
+		CompletionTokenDetails: adapter.CompletionTokenDetailsObservation{
+			Present: true, Valid: true, ReasoningTokens: decimal("0"), ImageTokens: decimal("0"), AudioTokens: decimal("0"),
+		},
+		CostDetails: adapter.CostDetailsObservation{
+			Present: true, Valid: true, UpstreamInferenceCost: decimal("0.0000087"),
+			UpstreamInferencePromptCost: decimal("0.0000063"), UpstreamInferenceCompletionsCost: decimal("0.0000024"),
+		},
+		IsBYOK:                   adapter.BooleanField{Present: true, Valid: true, Raw: "false", Value: false},
+		RateSemanticsDiscrepancy: "reported cost 0.000008613 differs from upstream_inference_cost 0.0000087; tariff/currency/fee semantics unresolved",
+	}
+	got := billingEvidence(observation, "credential-not-present")
+	if !got.PromptTokenDetails.Valid || !got.CompletionTokenDetails.Valid || !got.CostDetails.Valid || !got.IsBYOK.Valid {
+		t.Fatalf("nested taxonomy validity lost: %+v", got)
+	}
+	if got.CostDetails.UpstreamInferenceCost.Raw != "0.0000087" || got.PromptTokenDetails.CachedTokens.Raw != "0" || got.IsBYOK.Raw != "false" {
+		t.Fatalf("nested taxonomy lexical evidence changed: %+v", got)
+	}
+	if !strings.Contains(got.RateSemanticsDiscrepancy, "tariff/currency/fee semantics unresolved") {
+		t.Fatalf("rate discrepancy missing: %+v", got)
+	}
+}
+
 func TestRunScreensInvalidRawForEveryRealAdapterBillingField(t *testing.T) {
 	secret := "test-key-never-printed"
 	tests := []struct {

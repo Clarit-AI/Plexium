@@ -66,12 +66,60 @@ type DecimalEvidence struct {
 	Error       string `json:"error,omitempty"`
 }
 
+type BooleanEvidence struct {
+	Present     bool   `json:"present"`
+	Null        bool   `json:"null"`
+	Valid       bool   `json:"valid"`
+	Value       bool   `json:"value"`
+	Raw         string `json:"raw,omitempty"`
+	RawWithheld bool   `json:"rawWithheld,omitempty"`
+	RawSHA256   string `json:"rawSha256,omitempty"`
+	RawEvidence string `json:"rawEvidence,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+type PromptTokenDetailsEvidence struct {
+	Present          bool            `json:"present"`
+	Null             bool            `json:"null"`
+	Valid            bool            `json:"valid"`
+	CachedTokens     DecimalEvidence `json:"cachedTokens"`
+	CacheWriteTokens DecimalEvidence `json:"cacheWriteTokens"`
+	AudioTokens      DecimalEvidence `json:"audioTokens"`
+	VideoTokens      DecimalEvidence `json:"videoTokens"`
+	Error            string          `json:"error,omitempty"`
+}
+
+type CompletionTokenDetailsEvidence struct {
+	Present         bool            `json:"present"`
+	Null            bool            `json:"null"`
+	Valid           bool            `json:"valid"`
+	ReasoningTokens DecimalEvidence `json:"reasoningTokens"`
+	ImageTokens     DecimalEvidence `json:"imageTokens"`
+	AudioTokens     DecimalEvidence `json:"audioTokens"`
+	Error           string          `json:"error,omitempty"`
+}
+
+type CostDetailsEvidence struct {
+	Present                          bool            `json:"present"`
+	Null                             bool            `json:"null"`
+	Valid                            bool            `json:"valid"`
+	UpstreamInferenceCost            DecimalEvidence `json:"upstreamInferenceCost"`
+	UpstreamInferencePromptCost      DecimalEvidence `json:"upstreamInferencePromptCost"`
+	UpstreamInferenceCompletionsCost DecimalEvidence `json:"upstreamInferenceCompletionsCost"`
+	Error                            string          `json:"error,omitempty"`
+}
+
 type BillingEvidence struct {
-	Cost         DecimalEvidence `json:"cost"`
-	InputTokens  DecimalEvidence `json:"inputTokens"`
-	OutputTokens DecimalEvidence `json:"outputTokens"`
-	TotalTokens  DecimalEvidence `json:"totalTokens"`
-	Error        string          `json:"error,omitempty"`
+	Cost                     DecimalEvidence                `json:"cost"`
+	InputTokens              DecimalEvidence                `json:"inputTokens"`
+	OutputTokens             DecimalEvidence                `json:"outputTokens"`
+	TotalTokens              DecimalEvidence                `json:"totalTokens"`
+	PromptTokenDetails       PromptTokenDetailsEvidence     `json:"promptTokenDetails"`
+	CompletionTokenDetails   CompletionTokenDetailsEvidence `json:"completionTokenDetails"`
+	CostDetails              CostDetailsEvidence            `json:"costDetails"`
+	IsBYOK                   BooleanEvidence                `json:"isByok"`
+	RateSemanticsDiscrepancy string                         `json:"rateSemanticsDiscrepancy,omitempty"`
+	Error                    string                         `json:"error,omitempty"`
 }
 
 type Attempt struct {
@@ -379,7 +427,45 @@ func billingEvidence(b adapter.BillingObservation, credential string) BillingEvi
 			Error: sanitizeString(f.Error, credential),
 		}
 	}
-	return BillingEvidence{Cost: convert(b.Cost), InputTokens: convert(b.InputTokens), OutputTokens: convert(b.OutputTokens), TotalTokens: convert(b.TotalTokens), Error: sanitizeString(b.Error, credential)}
+	convertBool := func(f adapter.BooleanField) BooleanEvidence {
+		raw, withheld, rawSHA256, rawEvidence := screenBooleanRaw(f.Raw, credential)
+		return BooleanEvidence{
+			Present: f.Present, Null: f.Null, Valid: f.Valid, Value: f.Value,
+			Raw: raw, RawWithheld: withheld, RawSHA256: rawSHA256, RawEvidence: rawEvidence,
+			Error: sanitizeString(f.Error, credential),
+		}
+	}
+	return BillingEvidence{
+		Cost: convert(b.Cost), InputTokens: convert(b.InputTokens), OutputTokens: convert(b.OutputTokens), TotalTokens: convert(b.TotalTokens),
+		PromptTokenDetails: PromptTokenDetailsEvidence{
+			Present: b.PromptTokenDetails.Present, Null: b.PromptTokenDetails.Null, Valid: b.PromptTokenDetails.Valid,
+			CachedTokens: convert(b.PromptTokenDetails.CachedTokens), CacheWriteTokens: convert(b.PromptTokenDetails.CacheWriteTokens),
+			AudioTokens: convert(b.PromptTokenDetails.AudioTokens), VideoTokens: convert(b.PromptTokenDetails.VideoTokens),
+			Error: sanitizeString(b.PromptTokenDetails.Error, credential),
+		},
+		CompletionTokenDetails: CompletionTokenDetailsEvidence{
+			Present: b.CompletionTokenDetails.Present, Null: b.CompletionTokenDetails.Null, Valid: b.CompletionTokenDetails.Valid,
+			ReasoningTokens: convert(b.CompletionTokenDetails.ReasoningTokens), ImageTokens: convert(b.CompletionTokenDetails.ImageTokens),
+			AudioTokens: convert(b.CompletionTokenDetails.AudioTokens), Error: sanitizeString(b.CompletionTokenDetails.Error, credential),
+		},
+		CostDetails: CostDetailsEvidence{
+			Present: b.CostDetails.Present, Null: b.CostDetails.Null, Valid: b.CostDetails.Valid,
+			UpstreamInferenceCost:            convert(b.CostDetails.UpstreamInferenceCost),
+			UpstreamInferencePromptCost:      convert(b.CostDetails.UpstreamInferencePromptCost),
+			UpstreamInferenceCompletionsCost: convert(b.CostDetails.UpstreamInferenceCompletionsCost),
+			Error:                            sanitizeString(b.CostDetails.Error, credential),
+		},
+		IsBYOK: convertBool(b.IsBYOK), RateSemanticsDiscrepancy: sanitizeString(b.RateSemanticsDiscrepancy, credential),
+		Error: sanitizeString(b.Error, credential),
+	}
+}
+
+func screenBooleanRaw(raw, credential string) (safe string, withheld bool, rawSHA256, evidence string) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "true" || trimmed == "false" {
+		return raw, false, "", ""
+	}
+	return screenDecimalRaw(raw, credential)
 }
 
 func screenDecimalRaw(raw, credential string) (safe string, withheld bool, rawSHA256, evidence string) {
