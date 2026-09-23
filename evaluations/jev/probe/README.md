@@ -56,3 +56,12 @@ based on selected request bindings plus identity-matched accepted attempts,
 not attempt cardinality. The derived accounting keeps provider-reported raw
 cost, admitted cost, untrusted reported cost, and conservative ledger exposure
 separate; provider-reported raw cost is not described as verified spend.
+
+Derivation validates each source independently before merging it. Selection
+ordinals and bindings must be unique and consistent, and every attempt must
+belong to that source's declared selection. Reports predating selection fields
+retain the legacy full-plan fallback only when both fields are absent. Within
+one source, any repeated attempt ordinal is rejected before coverage or cost
+aggregation, regardless of outcome. Across sources, the same ordinal is a
+legitimate retry only when its concrete reservation/response identity differs;
+repeated source content or repeated concrete evidence is rejected.

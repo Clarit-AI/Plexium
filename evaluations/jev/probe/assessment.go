@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,12 +117,19 @@ func deriveAssessment(inventoryPath string, sourcePaths []string) (*DerivedAsses
 	admitted := new(big.Rat)
 	untrusted := new(big.Rat)
 	var exposure ledger.MicroUnit
+	seenSourceDigests := make(map[string]string, len(sourcePaths))
+	seenConcreteEvidence := make(map[string]string)
 
 	for _, path := range sourcePaths {
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
 			return nil, fmt.Errorf("probe: read source report %s: %w", path, readErr)
 		}
+		sourceDigest := digest(data)
+		if earlierPath, duplicate := seenSourceDigests[sourceDigest]; duplicate {
+			return nil, fmt.Errorf("probe: source report %s duplicates source content from %s", path, earlierPath)
+		}
+		seenSourceDigests[sourceDigest] = path
 		var report Report
 		if err := decodeOneJSON(data, &report); err != nil {
 			return nil, fmt.Errorf("probe: decode source report %s: %w", path, err)
@@ -133,20 +141,43 @@ func deriveAssessment(inventoryPath string, sourcePaths []string) (*DerivedAsses
 		if err != nil {
 			return nil, fmt.Errorf("probe: source report %s: %w", path, err)
 		}
+		selectedInSource := make(map[int]RequestBinding, len(bindings))
 		for _, binding := range bindings {
 			selected[binding.Ordinal] = binding
+			selectedInSource[binding.Ordinal] = binding
 		}
+
+		// A probe run can attempt each selected ordinal at most once. Reject every
+		// within-source ordinal duplicate before coverage or cost aggregation,
+		// whether the rows are accepted, rejected, or failed. Across distinct
+		// sources, a retry remains separate evidence only when its concrete
+		// reservation/response identity is distinct.
+		seenOrdinals := make(map[int]bool, len(report.Attempts))
 		for _, attempt := range report.Attempts {
-			binding, ok := planBindings[attempt.Ordinal]
-			if !ok || !attemptIdentityMatches(attempt, binding) {
+			if seenOrdinals[attempt.Ordinal] {
+				return nil, fmt.Errorf("probe: source report %s duplicates attempt ordinal %d", path, attempt.Ordinal)
+			}
+			seenOrdinals[attempt.Ordinal] = true
+			binding, selectedBySource := selectedInSource[attempt.Ordinal]
+			if !selectedBySource {
+				return nil, fmt.Errorf("probe: source report %s attempt ordinal %d is outside its selected bindings", path, attempt.Ordinal)
+			}
+			if !attemptIdentityMatches(attempt, binding) {
 				return nil, fmt.Errorf("probe: source report %s attempt identity mismatch for ordinal %d", path, attempt.Ordinal)
 			}
+			concreteKey := concreteAttemptIdentity(attempt)
+			if earlierPath, duplicate := seenConcreteEvidence[concreteKey]; duplicate {
+				return nil, fmt.Errorf("probe: source report %s repeats concrete attempt evidence from %s for ordinal %d", path, earlierPath, attempt.Ordinal)
+			}
+			seenConcreteEvidence[concreteKey] = path
+		}
+		for _, attempt := range report.Attempts {
+			binding := selectedInSource[attempt.Ordinal]
 			allAttempts = append(allAttempts, attempt)
 			if attemptAccepted(attempt, binding) {
-				if _, exists := accepted[attempt.Ordinal]; exists {
-					return nil, fmt.Errorf("probe: duplicate accepted evidence for ordinal %d", attempt.Ordinal)
+				if _, exists := accepted[attempt.Ordinal]; !exists {
+					accepted[attempt.Ordinal] = attempt
 				}
-				accepted[attempt.Ordinal] = attempt
 			}
 			if raw, ok := numericEvidenceRat(attempt.Billing.Cost); ok {
 				providerReported.Add(providerReported, raw)
@@ -162,7 +193,7 @@ func deriveAssessment(inventoryPath string, sourcePaths []string) (*DerivedAsses
 		}
 		exposure += report.LedgerBalance
 		sources = append(sources, AssessmentSource{
-			Path: path, SHA256: digest(data), Halted: report.Halted,
+			Path: path, SHA256: sourceDigest, Halted: report.Halted,
 			SelectedOrdinals: bindingOrdinals(bindings), AttemptCount: len(report.Attempts),
 			LedgerBalance: report.LedgerBalance, ProviderReportedRaw: formatBaseUnits(sumAttemptRawCosts(report.Attempts)),
 		})
@@ -206,12 +237,26 @@ func deriveAssessment(inventoryPath string, sourcePaths []string) (*DerivedAsses
 func reportBindings(report *Report, plan map[int]RequestBinding) ([]RequestBinding, error) {
 	if len(report.SelectedRequests) > 0 {
 		bindings := make([]RequestBinding, len(report.SelectedRequests))
+		seen := make(map[int]bool, len(report.SelectedRequests))
 		for i, binding := range report.SelectedRequests {
 			expected, ok := plan[binding.Ordinal]
-			if !ok || binding != expected {
+			if !ok || binding != expected || seen[binding.Ordinal] {
 				return nil, fmt.Errorf("selected request identity mismatch for ordinal %d", binding.Ordinal)
 			}
+			seen[binding.Ordinal] = true
 			bindings[i] = binding
+		}
+		if len(report.SelectedOrdinals) > 0 {
+			if len(report.SelectedOrdinals) != len(bindings) {
+				return nil, errors.New("selected ordinals and request bindings differ in length")
+			}
+			seenOrdinals := make(map[int]bool, len(report.SelectedOrdinals))
+			for i, ordinal := range report.SelectedOrdinals {
+				if seenOrdinals[ordinal] || ordinal != bindings[i].Ordinal {
+					return nil, fmt.Errorf("selected ordinal %d is inconsistent with request bindings", ordinal)
+				}
+				seenOrdinals[ordinal] = true
+			}
 		}
 		return bindings, nil
 	}
@@ -239,6 +284,16 @@ func reportBindings(report *Report, plan map[int]RequestBinding) ([]RequestBindi
 		bindings = append(bindings, plan[ordinal])
 	}
 	return bindings, nil
+}
+
+func concreteAttemptIdentity(attempt Attempt) string {
+	// Provider request ID and reservation reference distinguish legitimate
+	// re-attempts of the same approved ordinal across separate run reports.
+	return strings.Join([]string{
+		strconv.Itoa(attempt.Ordinal), attempt.RequestID, attempt.RequestSHA256,
+		attempt.ReservationRef, attempt.ProviderRequestID, attempt.RawResponseSHA256,
+		attempt.EvidenceSHA256, attempt.StartedAt.UTC().Format(time.RFC3339Nano),
+	}, "\x00")
 }
 
 func decodeOneJSON(data []byte, value any) error {

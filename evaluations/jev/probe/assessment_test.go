@@ -76,6 +76,8 @@ func TestDerivedAssessmentCombinesImmutableRunsAndSeparatesAccounting(t *testing
 			failedAssessmentAttemptWithCost(bindings[2], "0.000008613"),
 		},
 	}
+	setAssessmentAttemptIdentity(&run1.Attempts[0], "run1-ordinal1")
+	setAssessmentAttemptIdentity(&run1.Attempts[1], "run1-ordinal2")
 	run2 := Report{
 		Version: PlanVersion, InventorySHA256: plan.InventorySHA256,
 		SelectedOrdinals: []int{2, 3, 4}, SelectedRequests: []RequestBinding{bindings[2], bindings[3], bindings[4]},
@@ -86,6 +88,9 @@ func TestDerivedAssessmentCombinesImmutableRunsAndSeparatesAccounting(t *testing
 			acceptedAssessmentAttemptWithCost(bindings[4], "0.000056529"),
 		},
 	}
+	setAssessmentAttemptIdentity(&run2.Attempts[0], "run2-ordinal2")
+	setAssessmentAttemptIdentity(&run2.Attempts[1], "run2-ordinal3")
+	setAssessmentAttemptIdentity(&run2.Attempts[2], "run2-ordinal4")
 
 	dir := t.TempDir()
 	run1Path := filepath.Join(dir, "run-1.json")
@@ -128,6 +133,166 @@ func TestDerivedAssessmentCombinesImmutableRunsAndSeparatesAccounting(t *testing
 	}
 }
 
+func TestDerivedAssessmentRejectsWithinSourceDuplicatesBeforeAccounting(t *testing.T) {
+	plan := assessmentTestPlan(t)
+	binding := plan.SelectedRequests[1]
+
+	tests := []struct {
+		name     string
+		attempts []Attempt
+	}{
+		{
+			name: "duplicated-rejected-row",
+			attempts: []Attempt{
+				failedAssessmentAttemptWithCost(binding, "0.000008613"),
+				failedAssessmentAttemptWithCost(binding, "0.000008613"),
+			},
+		},
+		{
+			name: "accepted-plus-failed-duplicate",
+			attempts: []Attempt{
+				acceptedAssessmentAttemptWithCost(binding, "0.000008613"),
+				failedAssessmentAttemptWithCost(binding, "0.000008613"),
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for i := range test.attempts {
+				setAssessmentAttemptIdentity(&test.attempts[i], "same-run-ordinal2")
+			}
+			report := Report{
+				Version: PlanVersion, InventorySHA256: plan.InventorySHA256,
+				SelectedOrdinals: []int{2}, SelectedRequests: []RequestBinding{binding}, Attempts: test.attempts,
+			}
+			dir := t.TempDir()
+			source := filepath.Join(dir, "source.json")
+			writeAssessmentTestReport(t, source, &report)
+			output := filepath.Join(dir, "derived.json")
+			_, err := DeriveAssessmentToFile(assessmentInventoryPath(), []string{source}, output)
+			if err == nil || !strings.Contains(err.Error(), "duplicates attempt ordinal 2") {
+				t.Fatalf("duplicate evidence was not rejected before aggregation: %v", err)
+			}
+			if _, statErr := os.Stat(output); !os.IsNotExist(statErr) {
+				t.Fatalf("duplicate evidence emitted derived totals: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestDerivedAssessmentPreservesDistinctCrossRunRetryEvidence(t *testing.T) {
+	plan := assessmentTestPlan(t)
+	binding := plan.SelectedRequests[1]
+	first := acceptedAssessmentAttemptWithCost(binding, "0.000001")
+	second := acceptedAssessmentAttemptWithCost(binding, "0.000002")
+	setAssessmentAttemptIdentity(&first, "run-a-ordinal2")
+	setAssessmentAttemptIdentity(&second, "run-b-ordinal2")
+
+	dir := t.TempDir()
+	paths := []string{filepath.Join(dir, "run-a.json"), filepath.Join(dir, "run-b.json")}
+	for i, attempt := range []Attempt{first, second} {
+		report := Report{
+			Version: PlanVersion, InventorySHA256: plan.InventorySHA256,
+			SelectedOrdinals: []int{2}, SelectedRequests: []RequestBinding{binding}, Attempts: []Attempt{attempt},
+		}
+		writeAssessmentTestReport(t, paths[i], &report)
+	}
+	assessment, err := DeriveAssessmentToFile(assessmentInventoryPath(), paths, filepath.Join(dir, "derived.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.ProviderReportedRawCostBaseUnits != "0.000003" || assessment.AdmittedCostMicroUnits != "3" || len(assessment.SourceReports) != 2 {
+		t.Fatalf("distinct cross-run retry evidence was not preserved: %+v", assessment)
+	}
+	if assessment.Gates[0].Status == "EVIDENCE_COLLECTED" || assessment.Gates[1].Status == "EVIDENCE_COLLECTED" {
+		t.Fatalf("Nano-only retries promoted both-arm gates: %+v", assessment.Gates)
+	}
+}
+
+func TestDerivedAssessmentEnforcesSourceSelectionMembershipAndLegacyFallback(t *testing.T) {
+	plan := assessmentTestPlan(t)
+	binding1, binding2 := plan.SelectedRequests[0], plan.SelectedRequests[1]
+
+	t.Run("attempt-outside-selection", func(t *testing.T) {
+		attempt := acceptedAssessmentAttempt(binding1)
+		setAssessmentAttemptIdentity(&attempt, "outside-selection")
+		report := Report{
+			Version: PlanVersion, InventorySHA256: plan.InventorySHA256,
+			SelectedOrdinals: []int{2}, SelectedRequests: []RequestBinding{binding2}, Attempts: []Attempt{attempt},
+		}
+		dir := t.TempDir()
+		source := filepath.Join(dir, "source.json")
+		writeAssessmentTestReport(t, source, &report)
+		_, err := DeriveAssessmentToFile(assessmentInventoryPath(), []string{source}, filepath.Join(dir, "derived.json"))
+		if err == nil || !strings.Contains(err.Error(), "outside its selected bindings") {
+			t.Fatalf("out-of-selection attempt was not rejected: %v", err)
+		}
+	})
+
+	t.Run("duplicate-selection", func(t *testing.T) {
+		attempt := acceptedAssessmentAttempt(binding2)
+		setAssessmentAttemptIdentity(&attempt, "duplicate-selection")
+		report := Report{
+			Version: PlanVersion, InventorySHA256: plan.InventorySHA256,
+			SelectedOrdinals: []int{2, 2}, SelectedRequests: []RequestBinding{binding2, binding2}, Attempts: []Attempt{attempt},
+		}
+		dir := t.TempDir()
+		source := filepath.Join(dir, "source.json")
+		writeAssessmentTestReport(t, source, &report)
+		_, err := DeriveAssessmentToFile(assessmentInventoryPath(), []string{source}, filepath.Join(dir, "derived.json"))
+		if err == nil || !strings.Contains(err.Error(), "selected request identity mismatch") {
+			t.Fatalf("duplicate source selection was not rejected: %v", err)
+		}
+	})
+
+	t.Run("legacy-no-selection-fields", func(t *testing.T) {
+		attempt := acceptedAssessmentAttempt(binding1)
+		setAssessmentAttemptIdentity(&attempt, "legacy-full-plan")
+		report := Report{Version: PlanVersion, InventorySHA256: plan.InventorySHA256, Attempts: []Attempt{attempt}}
+		dir := t.TempDir()
+		source := filepath.Join(dir, "source.json")
+		writeAssessmentTestReport(t, source, &report)
+		assessment, err := DeriveAssessmentToFile(assessmentInventoryPath(), []string{source}, filepath.Join(dir, "derived.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := assessment.SourceReports[0].SelectedOrdinals; len(got) != 4 || got[0] != 1 || got[3] != 4 {
+			t.Fatalf("legacy full-plan fallback changed: %v", got)
+		}
+	})
+}
+
+func TestDerivedAssessmentRejectsRepeatedSourceOrConcreteEvidence(t *testing.T) {
+	plan := assessmentTestPlan(t)
+	attempt := acceptedAssessmentAttempt(plan.SelectedRequests[0])
+	setAssessmentAttemptIdentity(&attempt, "same-source")
+	report := Report{Version: PlanVersion, InventorySHA256: plan.InventorySHA256, Attempts: []Attempt{attempt}}
+	t.Run("identical-source-content", func(t *testing.T) {
+		dir := t.TempDir()
+		first := filepath.Join(dir, "first.json")
+		second := filepath.Join(dir, "second.json")
+		writeAssessmentTestReport(t, first, &report)
+		writeAssessmentTestReport(t, second, &report)
+		_, err := DeriveAssessmentToFile(assessmentInventoryPath(), []string{first, second}, filepath.Join(dir, "derived.json"))
+		if err == nil || !strings.Contains(err.Error(), "duplicates source content") {
+			t.Fatalf("repeated source content was not rejected: %v", err)
+		}
+	})
+	t.Run("same-concrete-attempt-in-distinct-source-content", func(t *testing.T) {
+		dir := t.TempDir()
+		first := filepath.Join(dir, "first.json")
+		second := filepath.Join(dir, "second.json")
+		writeAssessmentTestReport(t, first, &report)
+		changed := report
+		changed.LedgerBalance = 1
+		writeAssessmentTestReport(t, second, &changed)
+		_, err := DeriveAssessmentToFile(assessmentInventoryPath(), []string{first, second}, filepath.Join(dir, "derived.json"))
+		if err == nil || !strings.Contains(err.Error(), "repeats concrete attempt evidence") {
+			t.Fatalf("repeated concrete evidence was not rejected: %v", err)
+		}
+	})
+}
+
 func assessmentTestPlan(t *testing.T) *Plan {
 	t.Helper()
 	plan, err := BuildPlan(assessmentInventoryPath(), Endpoints{Jev: JevEndpoint, Nano: NanoEndpoint})
@@ -159,6 +324,13 @@ func failedAssessmentAttemptWithCost(binding RequestBinding, cost string) Attemp
 	attempt.Billing.Cost.Valid = false
 	attempt.Billing.Cost.Error = "response schema not admitted"
 	return attempt
+}
+
+func setAssessmentAttemptIdentity(attempt *Attempt, identity string) {
+	attempt.ReservationRef = "reservation-" + identity
+	attempt.ProviderRequestID = "provider-" + identity
+	sum := sha256.Sum256([]byte(identity))
+	attempt.RawResponseSHA256 = hex.EncodeToString(sum[:])
 }
 
 func writeAssessmentTestReport(t *testing.T, path string, report *Report) {
