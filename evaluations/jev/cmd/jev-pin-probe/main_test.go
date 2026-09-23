@@ -90,6 +90,58 @@ func TestExecuteRedactsReflectedCredentialFromCLIAndFiles(t *testing.T) {
 	}
 }
 
+func TestExecuteInvalidStringCostCannotLeakThroughCLIOrFiles(t *testing.T) {
+	secret := "test-key-never-printed"
+	t.Setenv(probe.CredentialEnv, secret)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `{"id":"d","model":%q,"provider":%q,"answers":{"verdict":{"type":"choice","choice":"supported"}},"usage":{"input_tokens":20,"output_tokens":2,"cost":"test-key-never-printed"}}`, probe.JevCandidatePin, probe.JevCandidateProvider)
+	}))
+	defer server.Close()
+	stateDir := t.TempDir()
+	factory := func(inventory, state, key string) probe.RunConfig {
+		cfg := probe.DefaultRunConfig(inventory, state, key)
+		cfg.Endpoints = probe.Endpoints{Jev: server.URL + "/api/alpha/decisions", Nano: server.URL + "/api/v1/chat/completions"}
+		cfg.HTTPClient = server.Client()
+		cfg.Timeout = time.Second
+		return cfg
+	}
+	var out bytes.Buffer
+	err := runCLIWithConfig([]string{
+		"--execute", "--state-dir", stateDir,
+		"--inventory", filepath.Join("..", "..", "pilot", "request-inventory.json"),
+	}, &out, factory)
+	if err == nil {
+		t.Fatal("expected invalid-billing halt")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("credential leaked in CLI error: %v", err)
+	}
+	assertDecodedNoCredential(t, out.Bytes(), secret)
+	var report probe.Report
+	if decodeErr := json.Unmarshal(out.Bytes(), &report); decodeErr != nil {
+		t.Fatalf("decode CLI report: %v", decodeErr)
+	}
+	if len(report.Attempts) != 1 || report.Attempts[0].Billing.Cost.Valid || report.Attempts[0].Billing.Cost.Raw != `"[REDACTED_CREDENTIAL]"` {
+		t.Fatalf("CLI report lost invalid/untrusted billing distinction: %+v", report.Attempts)
+	}
+	err = filepath.WalkDir(stateDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() || !strings.HasSuffix(path, ".json") {
+			return walkErr
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if checkErr := decodedHasCredential(data, secret); checkErr != nil {
+			return fmt.Errorf("credential leaked in %s: %w", path, checkErr)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func assertDecodedNoCredential(t *testing.T, data []byte, credential string) {
 	t.Helper()
 	if err := decodedHasCredential(data, credential); err != nil {

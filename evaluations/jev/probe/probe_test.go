@@ -225,6 +225,117 @@ func TestRunRedactsReflectedCredentialFromReportAndEvidence(t *testing.T) {
 	}
 }
 
+func TestRunInvalidStringCostCannotLeakOrBecomeSettleable(t *testing.T) {
+	secret := "test-key-never-printed"
+	server, calls := probeServer(t, responseMode{cost: `"test-key-never-printed"`})
+	defer server.Close()
+	cfg := testConfig(t, server)
+	cfg.APIKey = secret
+	report, err := Run(context.Background(), cfg)
+	if err == nil || *calls != 1 {
+		t.Fatalf("err=%v calls=%d report=%+v", err, *calls, report)
+	}
+	if len(report.Attempts) != 1 {
+		t.Fatalf("attempts=%d", len(report.Attempts))
+	}
+	attempt := report.Attempts[0]
+	if attempt.Billing.Cost.Valid || attempt.Billing.Cost.Raw != `"[REDACTED_CREDENTIAL]"` {
+		t.Fatalf("invalid string cost was not preserved as untrusted redacted evidence: %+v", attempt.Billing.Cost)
+	}
+	if attempt.State == "settled" || report.LedgerBalance != attempt.Reservation {
+		t.Fatalf("invalid string cost became settleable: state=%s balance=%d reservation=%d", attempt.State, report.LedgerBalance, attempt.Reservation)
+	}
+	encoded, marshalErr := json.Marshal(report)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	assertDecodedJSONHasNoCredential(t, encoded, secret)
+	err = filepath.WalkDir(cfg.StateDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() || !strings.HasSuffix(path, ".json") {
+			return walkErr
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if checkErr := decodedJSONHasCredential(data, secret); checkErr != nil {
+			return fmt.Errorf("credential screening failed in %s: %w", path, checkErr)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBillingEvidenceScreensInvalidRawAndPreservesNumericLexemes(t *testing.T) {
+	for _, lexeme := range []string{"20", "120", "205", "0.09", "0.000001"} {
+		got := billingEvidence(adapter.BillingObservation{Cost: adapter.DecimalField{Present: true, Valid: true, Raw: lexeme}}, "20").Cost
+		if got.Raw != lexeme || got.RawWithheld || got.RawSHA256 != "" {
+			t.Fatalf("numeric lexeme %q changed: %+v", lexeme, got)
+		}
+	}
+
+	secret := "test-key-never-printed"
+	observation := adapter.BillingObservation{
+		Cost:         adapter.DecimalField{Present: true, Valid: false, Raw: `"test-key-never-printed"`},
+		InputTokens:  adapter.DecimalField{Present: true, Valid: false, Raw: `"\u0074est-key-never-printed"`},
+		OutputTokens: adapter.DecimalField{Present: true, Valid: false, Raw: `{"diagnostic":"test-key-never-printed"}`},
+		TotalTokens:  adapter.DecimalField{Present: true, Valid: false, Raw: `test-key-never-printed`},
+	}
+	encoded, err := json.Marshal(billingEvidence(observation, secret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDecodedJSONHasNoCredential(t, encoded, secret)
+	got := billingEvidence(observation, secret)
+	for name, field := range map[string]DecimalEvidence{
+		"cost": got.Cost, "input": got.InputTokens, "output": got.OutputTokens, "total": got.TotalTokens,
+	} {
+		if field.Valid {
+			t.Fatalf("%s invalid evidence became valid: %+v", name, field)
+		}
+	}
+	if !got.TotalTokens.RawWithheld || got.TotalTokens.RawSHA256 == "" || got.TotalTokens.Raw != "" {
+		t.Fatalf("malformed raw evidence was not withheld with a hash: %+v", got.TotalTokens)
+	}
+}
+
+func TestRunScreensInvalidRawForEveryRealAdapterBillingField(t *testing.T) {
+	secret := "test-key-never-printed"
+	tests := []struct {
+		name  string
+		mode  responseMode
+		field func(BillingEvidence) DecimalEvidence
+	}{
+		{name: "cost-literal", mode: responseMode{cost: `"test-key-never-printed"`}, field: func(b BillingEvidence) DecimalEvidence { return b.Cost }},
+		{name: "input-unicode", mode: responseMode{inputTokensRaw: `"\u0074est-key-never-printed"`}, field: func(b BillingEvidence) DecimalEvidence { return b.InputTokens }},
+		{name: "output-literal", mode: responseMode{outputTokensRaw: `"test-key-never-printed"`}, field: func(b BillingEvidence) DecimalEvidence { return b.OutputTokens }},
+		{name: "total-unicode", mode: responseMode{totalTokensRaw: `"\u0074est-key-never-printed"`}, field: func(b BillingEvidence) DecimalEvidence { return b.TotalTokens }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server, calls := probeServer(t, test.mode)
+			defer server.Close()
+			cfg := testConfig(t, server)
+			cfg.APIKey = secret
+			report, err := Run(context.Background(), cfg)
+			if err == nil || *calls != 1 || len(report.Attempts) != 1 {
+				t.Fatalf("err=%v calls=%d report=%+v", err, *calls, report)
+			}
+			field := test.field(report.Attempts[0].Billing)
+			if field.Valid || field.Raw != `"[REDACTED_CREDENTIAL]"` {
+				t.Fatalf("invalid billing evidence was not screened: %+v", field)
+			}
+			encoded, marshalErr := json.Marshal(report)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			assertDecodedJSONHasNoCredential(t, encoded, secret)
+		})
+	}
+}
+
 func TestRunNumericCredentialPreservesJSONAndNumericEvidence(t *testing.T) {
 	server, calls := probeServer(t, responseMode{})
 	defer server.Close()
@@ -346,6 +457,9 @@ type responseMode struct {
 	omitCost           bool
 	cost               string
 	inputTokens        int64
+	inputTokensRaw     string
+	outputTokensRaw    string
+	totalTokensRaw     string
 	usageDiagnostic    string
 	usageDiagnosticRaw string
 }
@@ -395,7 +509,19 @@ func probeServer(t *testing.T, mode responseMode) (*httptest.Server, *int32) {
 			} else if mode.usageDiagnosticRaw != "" {
 				diagnostic = `,"diagnostic":` + mode.usageDiagnosticRaw
 			}
-			fmt.Fprintf(w, `{"id":"d","model":%q,"provider":%q,"answers":{"verdict":{"type":"choice","choice":%q}},"usage":{"input_tokens":%d,"output_tokens":2%s%s}}`, mode.jevModel, mode.jevProvider, labels[0], mode.inputTokens, cost, diagnostic)
+			inputTokens := fmt.Sprint(mode.inputTokens)
+			if mode.inputTokensRaw != "" {
+				inputTokens = mode.inputTokensRaw
+			}
+			outputTokens := "2"
+			if mode.outputTokensRaw != "" {
+				outputTokens = mode.outputTokensRaw
+			}
+			totalTokens := ""
+			if mode.totalTokensRaw != "" {
+				totalTokens = `,"total_tokens":` + mode.totalTokensRaw
+			}
+			fmt.Fprintf(w, `{"id":"d","model":%q,"provider":%q,"answers":{"verdict":{"type":"choice","choice":%q}},"usage":{"input_tokens":%s,"output_tokens":%s%s%s%s}}`, mode.jevModel, mode.jevProvider, labels[0], inputTokens, outputTokens, totalTokens, cost, diagnostic)
 		case "/api/v1/chat/completions":
 			var request adapter.ChatRequest
 			if err := json.Unmarshal(body, &request); err != nil {

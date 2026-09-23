@@ -56,11 +56,14 @@ func DefaultRunConfig(inventoryPath, stateDir, apiKey string) RunConfig {
 }
 
 type DecimalEvidence struct {
-	Present bool   `json:"present"`
-	Null    bool   `json:"null"`
-	Valid   bool   `json:"valid"`
-	Raw     string `json:"raw,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Present     bool   `json:"present"`
+	Null        bool   `json:"null"`
+	Valid       bool   `json:"valid"`
+	Raw         string `json:"raw,omitempty"`
+	RawWithheld bool   `json:"rawWithheld,omitempty"`
+	RawSHA256   string `json:"rawSha256,omitempty"`
+	RawEvidence string `json:"rawEvidence,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 type BillingEvidence struct {
@@ -369,9 +372,48 @@ func observationAttempt(attempt Attempt, obs adapter.AttemptObservation, callErr
 
 func billingEvidence(b adapter.BillingObservation, credential string) BillingEvidence {
 	convert := func(f adapter.DecimalField) DecimalEvidence {
-		return DecimalEvidence{Present: f.Present, Null: f.Null, Valid: f.Valid, Raw: f.Raw, Error: sanitizeString(f.Error, credential)}
+		raw, withheld, rawSHA256, rawEvidence := screenDecimalRaw(f.Raw, credential)
+		return DecimalEvidence{
+			Present: f.Present, Null: f.Null, Valid: f.Valid,
+			Raw: raw, RawWithheld: withheld, RawSHA256: rawSHA256, RawEvidence: rawEvidence,
+			Error: sanitizeString(f.Error, credential),
+		}
 	}
 	return BillingEvidence{Cost: convert(b.Cost), InputTokens: convert(b.InputTokens), OutputTokens: convert(b.OutputTokens), TotalTokens: convert(b.TotalTokens), Error: sanitizeString(b.Error, credential)}
+}
+
+func screenDecimalRaw(raw, credential string) (safe string, withheld bool, rawSHA256, evidence string) {
+	if raw == "" {
+		return "", false, "", ""
+	}
+	if isJSONNumberToken(raw) {
+		return raw, false, "", ""
+	}
+	if credential != "" {
+		screened, redacted, err := screenResponse([]byte(raw), credential)
+		if err == nil {
+			reason := "invalid nonnumeric billing evidence semantically screened"
+			if redacted {
+				reason = "invalid nonnumeric billing evidence credential-redacted"
+			}
+			return string(screened), false, "", reason
+		}
+	}
+	return "", true, hash([]byte(raw)), "invalid nonnumeric billing evidence withheld; hash retained"
+}
+
+func isJSONNumberToken(raw string) bool {
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return false
+	}
+	if _, ok := value.(json.Number); !ok {
+		return false
+	}
+	var trailing any
+	return dec.Decode(&trailing) == io.EOF
 }
 
 func responseEvidence(raw []byte) (map[string]json.RawMessage, map[string]json.RawMessage, []string) {
