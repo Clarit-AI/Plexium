@@ -1,6 +1,7 @@
 package heldout_test
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -245,6 +246,9 @@ func TestHeldOutGenuineReverseEdgesAndRawEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	reversed, unmarked := 0, 0
+	formatDirection := map[string]int{}
+	reverseFamiliesByFormat := map[string]map[string]struct{}{"marked": {}, "unmarked": {}}
+	unmarkedForwardLabels := map[string]struct{}{}
 	for _, fixture := range loaded.Fixtures {
 		if fixture.Split != protocol.SplitHeldOut {
 			continue
@@ -256,11 +260,32 @@ func TestHeldOutGenuineReverseEdgesAndRawEvidence(t *testing.T) {
 		if !marked {
 			unmarked++
 		}
-		if fixture.TemplateFamily != "held-reverse-association" {
+		for _, excerpt := range fixture.Excerpts {
+			lower := strings.ToLower(excerpt.Text)
+			for _, leaked := range []string{"inverse narrow predicate", "endpoints remain associated", "asked direction"} {
+				if strings.Contains(lower, leaked) {
+					t.Errorf("%s leaks answer rationale %q in model-visible evidence", fixture.ID, leaked)
+				}
+			}
+		}
+		if fixture.Task != protocol.TaskRelationship || !strings.HasSuffix(fixture.ID, "-rel-positive") {
+			continue
+		}
+		format := "marked"
+		if !marked {
+			format = "unmarked"
+		}
+		isReverse := hasChallenge(fixture, protocol.ChallengeReversedDir)
+		formatDirection[fmt.Sprintf("%t/%s", isReverse, format)]++
+		if !isReverse {
+			if !marked {
+				unmarkedForwardLabels[fixture.ExpectedLabel] = struct{}{}
+			}
 			continue
 		}
 		reversed++
-		if fixture.ExpectedLabel != "related-to" || !strings.Contains(fixture.Excerpts[0].Text, "depends on") || !strings.Contains(fixture.Excerpts[0].Text, "inverse narrow predicate") {
+		reverseFamiliesByFormat[format][fixture.TemplateFamily] = struct{}{}
+		if fixture.ExpectedLabel != "related-to" || !(strings.Contains(fixture.Excerpts[0].Text, "depends on") || strings.Contains(fixture.Excerpts[0].Text, "implements")) {
 			t.Errorf("%s is not a genuine reverse-edge association case: %+v", fixture.ID, fixture)
 		}
 	}
@@ -269,6 +294,55 @@ func TestHeldOutGenuineReverseEdgesAndRawEvidence(t *testing.T) {
 	}
 	if unmarked != 120 {
 		t.Errorf("fully unmarked held-out cases=%d, want 120", unmarked)
+	}
+	for _, cell := range []string{"true/marked", "true/unmarked", "false/marked", "false/unmarked"} {
+		if formatDirection[cell] == 0 {
+			t.Errorf("degenerate reversal/format cross-tab: cell %s is empty (%v)", cell, formatDirection)
+		}
+	}
+	for format, families := range reverseFamiliesByFormat {
+		if len(families) < 2 {
+			t.Errorf("reverse %s evidence has %d predicate families (%v), want at least 2", format, len(families), families)
+		}
+	}
+	for _, label := range []string{"created-by", "used-by"} {
+		if _, ok := unmarkedForwardLabels[label]; !ok {
+			t.Errorf("unmarked forward controls lack direct %s family: %v", label, unmarkedForwardLabels)
+		}
+	}
+}
+
+func hasChallenge(fixture protocol.Fixture, want protocol.ChallengeCategory) bool {
+	for _, challenge := range fixture.ChallengeCategories {
+		if challenge == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestHeldOutManifestCarriesReviewAndStatisticalLimitations(t *testing.T) {
+	loaded, err := loader.Load("fixtures.jsonl", "fixtures.manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	readiness := loaded.Manifest.ReviewReadiness
+	if readiness.StudyGateEligible || readiness.UnreviewedCount != 720 || readiness.ApprovedCount != 0 {
+		t.Fatalf("dishonest held-out review readiness: %+v", readiness)
+	}
+	if !strings.Contains(readiness.GateIneligibleReason, "human-approved") {
+		t.Errorf("review limitation missing reason: %+v", readiness)
+	}
+	if len(loaded.Manifest.NegativeTaskEvidence) != 2 {
+		t.Fatalf("negative task evidence=%d, want 2", len(loaded.Manifest.NegativeTaskEvidence))
+	}
+	for _, evidence := range loaded.Manifest.NegativeTaskEvidence {
+		if evidence.NegativeRowCount != 150 || evidence.SourceGroupCount != 150 || evidence.ConstructionClusterCount != 2 {
+			t.Errorf("unexpected %s negative evidence: %+v", evidence.Task, evidence)
+		}
+		if evidence.StatisticalIndependenceEstablished || evidence.IndependentNegativeGateEligible || !strings.Contains(evidence.StatisticalLimitationReason, "structural disjointness") {
+			t.Errorf("%s overclaims independent-negative readiness: %+v", evidence.Task, evidence)
+		}
 	}
 }
 

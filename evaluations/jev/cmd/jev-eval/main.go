@@ -63,6 +63,7 @@ func main() {
 	baselinePreds := runner.RunBaseline(loaded.Fixtures, baselineVersion)
 	baselineReport := scoring.Score(loaded.Manifest.ProtocolVersion, scoring.SourceBaseline, baselinePreds)
 	baselineReport.BaselineVersion = string(baselineVersion)
+	applyStudyReadiness(&baselineReport, loaded.Manifest)
 	if *rawPredsPath != "" {
 		if err := writeRawPredictions(*rawPredsPath, baselinePreds); err != nil {
 			die("raw baseline predictions: %v", err)
@@ -98,6 +99,7 @@ func main() {
 			die("run replay: %v", err)
 		}
 		rep := scoring.Score(loaded.Manifest.ProtocolVersion, scoring.SourceReplay, preds)
+		applyStudyReadiness(&rep, loaded.Manifest)
 		envelope.Replay = &rep
 		if *rawPredsPath != "" {
 			if err := writeRawPredictions(*rawPredsPath, preds); err != nil {
@@ -173,26 +175,74 @@ func runDiscoveryBaseline(fixtures []protocol.Fixture) *discovery.Report {
 // ManifestSummary is a compact view of the manifest. The full fixture list
 // lives in fixtures.jsonl; the report does not embed it.
 type ManifestSummary struct {
-	ProtocolVersion   string                            `json:"protocolVersion"`
-	GeneratedAt       time.Time                         `json:"generatedAt"`
-	FixtureFile       string                            `json:"fixtureFile"`
-	FixtureCount      int                               `json:"fixtureCount"`
-	SplitCounts       protocol.SplitCount               `json:"splitCounts"`
-	TaskCounts        protocol.TaskCount                `json:"taskCounts"`
-	SourceGroupCount  int                               `json:"sourceGroupCount"`
-	SplitIndependence []protocol.SplitGroupIndependence `json:"splitIndependence"`
+	ProtocolVersion      string                            `json:"protocolVersion"`
+	GeneratedAt          time.Time                         `json:"generatedAt"`
+	FixtureFile          string                            `json:"fixtureFile"`
+	FixtureCount         int                               `json:"fixtureCount"`
+	SplitCounts          protocol.SplitCount               `json:"splitCounts"`
+	TaskCounts           protocol.TaskCount                `json:"taskCounts"`
+	SourceGroupCount     int                               `json:"sourceGroupCount"`
+	ReviewStatusCount    map[protocol.ReviewStatus]int     `json:"reviewStatusCount"`
+	ReviewReadiness      protocol.ReviewReadinessEvidence  `json:"reviewReadiness"`
+	NegativeTaskEvidence []protocol.NegativeTaskEvidence   `json:"negativeTaskEvidence,omitempty"`
+	SplitIndependence    []protocol.SplitGroupIndependence `json:"splitIndependence"`
 }
 
 func summarizeManifest(m protocol.Manifest) ManifestSummary {
 	return ManifestSummary{
-		ProtocolVersion:   m.ProtocolVersion,
-		GeneratedAt:       m.GeneratedAt,
-		FixtureFile:       m.FixtureFile,
-		FixtureCount:      m.FixtureCount,
-		SplitCounts:       m.SplitCounts,
-		TaskCounts:        m.TaskCounts,
-		SourceGroupCount:  m.SourceGroupCount,
-		SplitIndependence: m.SplitIndependences,
+		ProtocolVersion:      m.ProtocolVersion,
+		GeneratedAt:          m.GeneratedAt,
+		FixtureFile:          m.FixtureFile,
+		FixtureCount:         m.FixtureCount,
+		SplitCounts:          m.SplitCounts,
+		TaskCounts:           m.TaskCounts,
+		SourceGroupCount:     m.SourceGroupCount,
+		ReviewStatusCount:    m.ReviewStatusCount,
+		ReviewReadiness:      effectiveReviewReadiness(m),
+		NegativeTaskEvidence: m.NegativeTaskEvidence,
+		SplitIndependence:    m.SplitIndependences,
+	}
+}
+
+func effectiveReviewReadiness(m protocol.Manifest) protocol.ReviewReadinessEvidence {
+	if m.ReviewReadiness.FixtureCount != 0 {
+		return m.ReviewReadiness
+	}
+	approved := m.ReviewStatusCount[protocol.ReviewApproved]
+	unreviewed := m.ReviewStatusCount[protocol.ReviewUnreviewed]
+	ready := m.FixtureCount > 0 && approved == m.FixtureCount && unreviewed == 0
+	reason := ""
+	if !ready {
+		reason = fmt.Sprintf("%d of %d labels are unreviewed; study gates require human-approved gold", unreviewed, m.FixtureCount)
+	}
+	return protocol.ReviewReadinessEvidence{
+		FixtureCount: m.FixtureCount, ApprovedCount: approved, UnreviewedCount: unreviewed,
+		StudyGateEligible: ready, GateIneligibleReason: reason,
+	}
+}
+
+func applyStudyReadiness(report *scoring.Report, manifest protocol.Manifest) {
+	readiness := effectiveReviewReadiness(manifest)
+	if readiness.StudyGateEligible {
+		return
+	}
+	mark := func(taskReport scoring.TaskReport) scoring.TaskReport {
+		taskReport.GateEligible = false
+		if taskReport.GateIneligibleReason == "" {
+			taskReport.GateIneligibleReason = readiness.GateIneligibleReason
+		} else {
+			taskReport.GateIneligibleReason += "; " + readiness.GateIneligibleReason
+		}
+		return taskReport
+	}
+	for task, taskReport := range report.ByTask {
+		report.ByTask[task] = mark(taskReport)
+	}
+	for task, bySplit := range report.ByTaskSplit {
+		for split, taskReport := range bySplit {
+			bySplit[split] = mark(taskReport)
+		}
+		report.ByTaskSplit[task] = bySplit
 	}
 }
 

@@ -167,6 +167,68 @@ func TestJevEvalLegacyBaselineOnTuningPacket(t *testing.T) {
 	}
 }
 
+func TestJevEvalHeldOutReportCarriesReadinessLimitations(t *testing.T) {
+	wd, _ := os.Getwd()
+	repoRoot := filepath.Clean(filepath.Join(wd, "..", ".."))
+	fx := filepath.Join(repoRoot, "heldout", "fixtures.jsonl")
+	mf := filepath.Join(repoRoot, "heldout", "fixtures.manifest.json")
+
+	binDir := t.TempDir()
+	bin := filepath.Join(binDir, "jev-eval")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = wd
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build failed: %v\n%s", err, out)
+	}
+	outPath := filepath.Join(binDir, "heldout-report.json")
+	cmd := exec.Command(bin, "-fixtures", fx, "-manifest", mf, "-out", outPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("jev-eval held-out failed: %v\n%s", err, out)
+	}
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report map[string]any
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatalf("unmarshal held-out report: %v", err)
+	}
+	manifest := report["manifestSummary"].(map[string]any)
+	readiness := manifest["reviewReadiness"].(map[string]any)
+	if readiness["studyGateEligible"] != false || readiness["unreviewedCount"] != float64(720) {
+		t.Fatalf("report overclaims unreviewed readiness: %v", readiness)
+	}
+	evidence := manifest["negativeTaskEvidence"].([]any)
+	if len(evidence) != 2 {
+		t.Fatalf("negativeTaskEvidence=%d, want 2", len(evidence))
+	}
+	for _, raw := range evidence {
+		item := raw.(map[string]any)
+		if item["constructionClusterCount"] != float64(2) || item["independentNegativeGateEligible"] != false || item["statisticalIndependenceEstablished"] != false {
+			t.Errorf("report overclaims negative-task independence: %v", item)
+		}
+		if !strings.Contains(item["statisticalLimitationReason"].(string), "structural disjointness") {
+			t.Errorf("report lacks statistical limitation reason: %v", item)
+		}
+	}
+	for _, raw := range manifest["splitIndependence"].([]any) {
+		item := raw.(map[string]any)
+		if item["independenceScope"] != "structural-only" || item["statisticalIndependenceEstablished"] != false {
+			t.Errorf("split independence scope is ambiguous: %v", item)
+		}
+	}
+	baselineSection := report["baseline"].(map[string]any)
+	byTask := baselineSection["byTask"].(map[string]any)
+	claim := byTask["claim-support"].(map[string]any)
+	if claim["gateEligible"] != false || !strings.Contains(claim["gateIneligibleReason"].(string), "human-approved") {
+		t.Fatalf("claim gate ignores unreviewed gold: %v", claim)
+	}
+	relationship := byTask["relationship"].(map[string]any)
+	if relationship["gateEligible"] != false || !strings.Contains(relationship["gateIneligibleReason"].(string), "human-approved") {
+		t.Fatalf("relationship gate does not preserve readiness limitation: %v", relationship)
+	}
+}
+
 // mustReadRawPredictions invokes jev-eval with -raw-predictions and
 // parses the resulting JSONL. Used by both default and legacy tests
 // to inspect per-fixture baseline predictions. The caller passes

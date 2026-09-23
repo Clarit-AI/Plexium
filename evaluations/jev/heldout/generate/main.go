@@ -253,9 +253,15 @@ func heldOutFixtures(i int, s scenario) []protocol.Fixture {
 	relPositiveChallenges := []protocol.ChallengeCategory{protocol.ChallengeStraightPositive}
 	if i%5 == 0 {
 		positiveLabel = "related-to"
-		relPositiveFamily = "held-reverse-association"
-		relPositiveText = fmt.Sprintf("the dependency docket states [[%s]] depends on [[%s]]. the asked direction is from [[%s]] to [[%s]]; the inverse narrow predicate does not apply, but the named endpoints remain associated.", s.organization, s.artifact, s.artifact, s.organization)
-		relPositiveEvidence = "The evidence supports target-to-source depends-on, not source-to-target depends-on; it nevertheless establishes an association between the requested endpoints."
+		if (i/5)%4 < 2 {
+			relPositiveFamily = "held-reverse-depends-on"
+			relPositiveText = fmt.Sprintf("the dependency docket states [[%s]] depends on [[%s]] during inspections.", s.organization, s.artifact)
+			relPositiveEvidence = "The evidence supports target-to-source depends-on, not source-to-target depends-on; the requested endpoints are nevertheless associated."
+		} else {
+			relPositiveFamily = "held-reverse-implements"
+			relPositiveText = fmt.Sprintf("the compliance docket states [[%s]] implements [[%s]] as its governing procedure.", s.organization, s.artifact)
+			relPositiveEvidence = "The evidence supports target-to-source implements, not source-to-target implements; the requested endpoints are nevertheless associated."
+		}
 		relPositiveChallenges = []protocol.ChallengeCategory{protocol.ChallengeReversedDir}
 	}
 	relPos := fixtureBase(s, fmt.Sprintf("%s-rel-positive", s.group), protocol.TaskRelationship, protocol.SplitHeldOut, relPositiveFamily)
@@ -281,7 +287,7 @@ func heldOutFixtures(i int, s scenario) []protocol.Fixture {
 	claimPos.ChallengeCategories = []protocol.ChallengeCategory{protocol.ChallengeStraightPositive}
 
 	fixtures := []protocol.Fixture{relNeg, claimNeg, relPos, claimPos}
-	if i%5 == 0 {
+	if i%10 == 0 || i%10 == 1 {
 		for j := range fixtures {
 			removeBodyEntityMarkup(&fixtures[j])
 		}

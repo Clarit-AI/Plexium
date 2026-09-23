@@ -82,7 +82,8 @@ IDs are split-specific.
 1. source-group IDs are disjoint;
 2. template-family IDs are disjoint;
 3. normalized candidate titles and aliases are disjoint; and
-4. body-text entity sets are disjoint.
+4. body-text entity sets are disjoint; and
+5. candidate identities in one split do not reappear in another split's body.
 
 Most study bodies mark named entities as `[[Title]]` or `[[Title|alias]]`.
 Thirty held-out source groups (120 fixtures) deliberately use ordinary,
@@ -93,13 +94,15 @@ classification from supplied candidates under both marked and unmarked
 evidence, not open-ended entity discovery from arbitrary prose.
 
 The loader checks explicit links, a conservative legacy title-case extractor,
-and case-insensitive occurrences of every known candidate title or alias in
-body text. It compares candidate-to-candidate, body-to-body, and cross-channel
+and case-insensitive word-token sequences for every known candidate title,
+alias, or discovered body name. Token boundaries keep `Mars` distinct from
+`marsh`, while registered short names such as `Ada` are still checked. It
+compares candidate-to-candidate, body-to-body, and cross-channel
 candidate-to-body identities across splits. Regressions cover the old v0.3
 “Vornholt Pass” leak, candidate-to-body reuse, and a bare lower-case “grey
 cloak workshop” case variant. This remains a bounded lexical check: it does
-not resolve unknown synonyms, morphological aliases, or unregistered
-single-word references.
+not resolve unknown synonyms, morphological aliases, or wholly lower-case
+names that never appear in a candidate, link, or title-cased occurrence.
 
 These checks establish **structural disjointness only**. They do not prove
 statistical independence, ecological validity, absence of broader stylistic
@@ -130,11 +133,16 @@ Counts below are fixture memberships; a fixture may carry several challenges.
 Across held-out source groups, negative fixtures exercise renaming, explicit
 absence or unresolved conflict, irrelevant numerical context, and embedded
 adversarial instructions. Thirty relationship controls are genuine reverse
-edges: evidence states target→source `depends-on`, while the question asks
-source→target; their proposed `related-to` label preserves the established
-association without inventing the reversed narrow predicate. The other
-controls provide straightforward positives. Challenge tags describe the
-actual evidence construction; they are not claims of model robustness.
+edges: evidence states target→source `depends-on` or `implements`, while the
+question asks source→target; their proposed `related-to` label preserves the
+established association without inventing the reversed narrow predicate. The
+excerpts contain only the source fact; the direction/label explanation stays
+in rationale metadata. Markup is selected independently: reverse and forward
+controls both occur in marked and unmarked formats, both reverse predicate
+families occur in each format, and unmarked forward controls include direct
+`created-by` and `used-by` cases. The other controls provide straightforward
+positives. Challenge tags describe the actual evidence construction; they are
+not claims of model robustness.
 
 The repeated constructions are intentionally visible limitations. The 50
 contradicted rows contain genuinely incompatible certified totals, but share
@@ -143,7 +151,29 @@ equal-authority-conflict construction, not a separate missing-fact family.
 Adversarial instructions are overt and repetitive, harmless-edit coverage is
 absent, and no held-out typing cases are included.
 
-## Protocol gates this corpus can support after review
+## Protocol gate table
+
+The manifest and `jev-eval` report carry the same limitations as
+machine-readable evidence. `independent: true` is explicitly scoped to
+`structural-only`; `statisticalIndependenceEstablished` remains false. The
+report records 720 unreviewed labels, two construction clusters for each
+150-row negative task, and forces task `gateEligible` false until all gold is
+human approved. Vocabulary coverage remains a separate constraint: the
+relationship report is also ineligible because `derived-from`, `implements`,
+`depends-on`, and `part-of` are absent after the endpoint corrections.
+
+| Gate or diagnostic | Current status | Evidence / limitation |
+| --- | --- | --- |
+| Tuning row target ≥30/task | Met as a row count | 30 proposed, unreviewed rows per task |
+| Held-out negative row target ≥150/task | Met as a row count | 150 relationship and 150 claim rows |
+| Structural split disjointness | Met | group, template, candidate, body, and cross-channel checks pass |
+| Human-reviewed gold readiness | **Not met** | 0 approved / 720 unreviewed |
+| Independent-negative statistical gate | **Not met** | 2 construction clusters per negative task |
+| Relationship vocabulary coverage | **Not met** | four narrow predicates absent |
+| Held-out typing quality | **Not supported** | no held-out typing fixtures |
+| Live/provider readiness | **Not met** | separate pins, rates, credentials, bounds, and authorization gates |
+
+## Diagnostics this corpus can support after review
 
 If, and only if, humans approve or adjust the labels, this corpus can support:
 

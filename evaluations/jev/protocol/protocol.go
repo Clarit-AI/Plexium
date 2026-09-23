@@ -306,19 +306,45 @@ type Fixture struct {
 // Manifest is the full corpus summary: fixtures, splits, source groups, and a
 // per-file hash chain so reviewers can detect drift.
 type Manifest struct {
-	ProtocolVersion    string                    `json:"protocolVersion"`
-	GeneratedAt        time.Time                 `json:"generatedAt"`
-	FixtureFile        string                    `json:"fixtureFile"`
-	FixtureCount       int                       `json:"fixtureCount"`
-	SplitCounts        SplitCount                `json:"splitCounts"`
-	TaskCounts         TaskCount                 `json:"taskCounts"`
-	SourceGroupCount   int                       `json:"sourceGroupCount"`
-	ReviewStatusCount  map[ReviewStatus]int      `json:"reviewStatusCount"`
-	ChallengeCount     map[ChallengeCategory]int `json:"challengeCount"`
-	SHA256FixtureFile  string                    `json:"sha256FixtureFile"`
-	SHA256Manifest     string                    `json:"sha256Manifest"`
-	FixtureHashes      []FixtureHash             `json:"fixtureHashes"`
-	SplitIndependences []SplitGroupIndependence  `json:"splitIndependences"`
+	ProtocolVersion      string                    `json:"protocolVersion"`
+	GeneratedAt          time.Time                 `json:"generatedAt"`
+	FixtureFile          string                    `json:"fixtureFile"`
+	FixtureCount         int                       `json:"fixtureCount"`
+	SplitCounts          SplitCount                `json:"splitCounts"`
+	TaskCounts           TaskCount                 `json:"taskCounts"`
+	SourceGroupCount     int                       `json:"sourceGroupCount"`
+	ReviewStatusCount    map[ReviewStatus]int      `json:"reviewStatusCount"`
+	ChallengeCount       map[ChallengeCategory]int `json:"challengeCount"`
+	SHA256FixtureFile    string                    `json:"sha256FixtureFile"`
+	SHA256Manifest       string                    `json:"sha256Manifest"`
+	FixtureHashes        []FixtureHash             `json:"fixtureHashes"`
+	SplitIndependences   []SplitGroupIndependence  `json:"splitIndependences"`
+	ReviewReadiness      ReviewReadinessEvidence   `json:"reviewReadiness"`
+	NegativeTaskEvidence []NegativeTaskEvidence    `json:"negativeTaskEvidence,omitempty"`
+}
+
+// ReviewReadinessEvidence makes label-review state machine-readable. Metric
+// computation may still be useful on unreviewed fixtures, but study gates are
+// not eligible until every proposed gold label has human approval.
+type ReviewReadinessEvidence struct {
+	FixtureCount         int    `json:"fixtureCount"`
+	ApprovedCount        int    `json:"approvedCount"`
+	UnreviewedCount      int    `json:"unreviewedCount"`
+	StudyGateEligible    bool   `json:"studyGateEligible"`
+	GateIneligibleReason string `json:"gateIneligibleReason,omitempty"`
+}
+
+// NegativeTaskEvidence records the difference between case counts and the
+// effective construction clusters that constrain statistical interpretation.
+type NegativeTaskEvidence struct {
+	Task                               Task   `json:"task"`
+	Split                              Split  `json:"split"`
+	NegativeRowCount                   int    `json:"negativeRowCount"`
+	SourceGroupCount                   int    `json:"sourceGroupCount"`
+	ConstructionClusterCount           int    `json:"constructionClusterCount"`
+	StatisticalIndependenceEstablished bool   `json:"statisticalIndependenceEstablished"`
+	IndependentNegativeGateEligible    bool   `json:"independentNegativeGateEligible"`
+	StatisticalLimitationReason        string `json:"statisticalLimitationReason,omitempty"`
 }
 
 // SplitCount is a per-split total.
@@ -355,18 +381,21 @@ type FixtureHash struct {
 //     samples. Sample-size sufficiency is reported separately from these
 //     structural checks.
 type SplitGroupIndependence struct {
-	Split                           Split  `json:"split"`
-	GroupCount                      int    `json:"sourceGroupCount"`
-	Independent                     bool   `json:"independent"`
-	ViolationNote                   string `json:"violationNote,omitempty"`
-	EntityDisjoint                  bool   `json:"entityDisjoint"`
-	EntityViolationNote             string `json:"entityViolationNote,omitempty"`
-	BodyEntityDisjoint              bool   `json:"bodyEntityDisjoint"`
-	BodyEntityViolationNote         string `json:"bodyEntityViolationNote,omitempty"`
-	CrossChannelEntityDisjoint      bool   `json:"crossChannelEntityDisjoint"`
-	CrossChannelEntityViolationNote string `json:"crossChannelEntityViolationNote,omitempty"`
-	TemplateFamilyDisjoint          bool   `json:"templateFamilyDisjoint"`
-	TemplateViolationNote           string `json:"templateViolationNote,omitempty"`
+	Split                              Split  `json:"split"`
+	GroupCount                         int    `json:"sourceGroupCount"`
+	Independent                        bool   `json:"independent"`
+	ViolationNote                      string `json:"violationNote,omitempty"`
+	EntityDisjoint                     bool   `json:"entityDisjoint"`
+	EntityViolationNote                string `json:"entityViolationNote,omitempty"`
+	BodyEntityDisjoint                 bool   `json:"bodyEntityDisjoint"`
+	BodyEntityViolationNote            string `json:"bodyEntityViolationNote,omitempty"`
+	CrossChannelEntityDisjoint         bool   `json:"crossChannelEntityDisjoint"`
+	CrossChannelEntityViolationNote    string `json:"crossChannelEntityViolationNote,omitempty"`
+	TemplateFamilyDisjoint             bool   `json:"templateFamilyDisjoint"`
+	TemplateViolationNote              string `json:"templateViolationNote,omitempty"`
+	IndependenceScope                  string `json:"independenceScope"`
+	StatisticalIndependenceEstablished bool   `json:"statisticalIndependenceEstablished"`
+	StatisticalLimitationReason        string `json:"statisticalLimitationReason"`
 }
 
 // Validate enforces structural rules on a fixture. It does not check label

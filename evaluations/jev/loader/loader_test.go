@@ -231,6 +231,39 @@ func TestVerifySplitIndependenceDetectsBareCaseVariantAcrossBodies(t *testing.T)
 	}
 }
 
+func TestVerifySplitIndependenceUsesWordBoundariesForKnownNames(t *testing.T) {
+	fs := []protocol.Fixture{
+		{ID: "f1", Task: protocol.TaskClaimSupport, SourceGroup: "tune-group", TemplateFamily: "tune-prose", Split: protocol.SplitTuning, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "tune-e1", Title: "Mars"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "A planetary survey is filed."}}},
+		{ID: "f2", Task: protocol.TaskClaimSupport, SourceGroup: "held-group", TemplateFamily: "held-docket", Split: protocol.SplitHeldOut, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "held-e1", Title: "Venus"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "The marsh supports reeds."}}},
+	}
+	if _, err := VerifySplitIndependence(fs); err != nil {
+		t.Fatalf("Mars must not match the substring in marsh: %v", err)
+	}
+}
+
+func TestVerifySplitIndependenceDetectsShortKnownName(t *testing.T) {
+	fs := []protocol.Fixture{
+		{ID: "f1", Task: protocol.TaskClaimSupport, SourceGroup: "tune-group", TemplateFamily: "tune-prose", Split: protocol.SplitTuning, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "tune-e1", Title: "Ada"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "A planetary survey is filed."}}},
+		{ID: "f2", Task: protocol.TaskClaimSupport, SourceGroup: "held-group", TemplateFamily: "held-docket", Split: protocol.SplitHeldOut, Author: "agent", ReviewStatus: protocol.ReviewUnreviewed,
+			ExpectedLabel: "supported", AllowedLabels: protocol.AllowedLabelsFor(protocol.TaskClaimSupport),
+			Candidates: []protocol.Candidate{{ID: "held-e1", Title: "Venus"}},
+			Excerpts:   []protocol.Excerpt{{ID: "e1", Text: "ada wrote the report."}}},
+	}
+	_, err := VerifySplitIndependence(fs)
+	if err == nil || !strings.Contains(err.Error(), "candidate") || !strings.Contains(err.Error(), "body text") {
+		t.Fatalf("known short name Ada was not rejected across channels: %v", err)
+	}
+}
+
 func TestVerifySplitIndependenceAcceptsNormalizedDistinctEntities(t *testing.T) {
 	// Same surface form but case differs; the loader must not flag a
 	// case-difference as an entity collision. The fixture-supplied

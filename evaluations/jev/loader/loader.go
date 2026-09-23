@@ -218,7 +218,16 @@ func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroup
 	templates := map[protocol.Split]map[string]struct{}{}
 	entities := map[protocol.Split]map[string]struct{}{}
 	bodyEntities := map[protocol.Split]map[string]struct{}{}
-	allKnownEntities := map[string]struct{}{}
+	allKnownEntities := map[string][]string{}
+	registerKnownEntity := func(surface string) string {
+		token := normalizeEntityToken(surface)
+		if token != "" {
+			if _, exists := allKnownEntities[token]; !exists {
+				allKnownEntities[token] = entityWords(surface)
+			}
+		}
+		return token
+	}
 	for _, s := range splits {
 		groups[s] = map[string]struct{}{}
 		templates[s] = map[string]struct{}{}
@@ -231,19 +240,18 @@ func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroup
 			templates[f.Split][f.TemplateFamily] = struct{}{}
 		}
 		for _, c := range f.Candidates {
-			if t := normalizeEntityToken(c.Title); t != "" {
+			if t := registerKnownEntity(c.Title); t != "" {
 				entities[f.Split][t] = struct{}{}
-				allKnownEntities[t] = struct{}{}
 			}
-			if t := normalizeEntityToken(c.Alias); t != "" {
+			if t := registerKnownEntity(c.Alias); t != "" {
 				entities[f.Split][t] = struct{}{}
-				allKnownEntities[t] = struct{}{}
 			}
 		}
 		for _, excerpt := range f.Excerpts {
-			for _, entity := range extractBodyEntities(excerpt.Text) {
-				bodyEntities[f.Split][entity] = struct{}{}
-				allKnownEntities[entity] = struct{}{}
+			for _, surface := range extractBodyEntitySurfaces(excerpt.Text) {
+				if entity := registerKnownEntity(surface); entity != "" {
+					bodyEntities[f.Split][entity] = struct{}{}
+				}
 			}
 		}
 	}
@@ -253,9 +261,9 @@ func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroup
 	// discoverable in another split or channel.
 	for _, f := range fixtures {
 		for _, excerpt := range f.Excerpts {
-			bodyToken := normalizeEntityToken(excerpt.Text)
-			for entity := range allKnownEntities {
-				if len(entity) >= 4 && strings.Contains(bodyToken, entity) {
+			textWords := entityWords(excerpt.Text)
+			for entity, words := range allKnownEntities {
+				if containsEntityWords(textWords, words) {
 					bodyEntities[f.Split][entity] = struct{}{}
 				}
 			}
@@ -333,18 +341,21 @@ func VerifySplitIndependence(fixtures []protocol.Fixture) ([]protocol.SplitGroup
 			seenBodyEntity[e] = string(s)
 		}
 		out = append(out, protocol.SplitGroupIndependence{
-			Split:                           s,
-			GroupCount:                      len(groups[s]),
-			Independent:                     ind,
-			ViolationNote:                   note,
-			EntityDisjoint:                  entityDisjoint,
-			EntityViolationNote:             entityNote,
-			BodyEntityDisjoint:              bodyEntityDisjoint,
-			BodyEntityViolationNote:         bodyEntityNote,
-			CrossChannelEntityDisjoint:      crossChannelEntityDisjoint,
-			CrossChannelEntityViolationNote: crossChannelEntityNote,
-			TemplateFamilyDisjoint:          templateDisjoint,
-			TemplateViolationNote:           templateNote,
+			Split:                              s,
+			GroupCount:                         len(groups[s]),
+			Independent:                        ind,
+			ViolationNote:                      note,
+			EntityDisjoint:                     entityDisjoint,
+			EntityViolationNote:                entityNote,
+			BodyEntityDisjoint:                 bodyEntityDisjoint,
+			BodyEntityViolationNote:            bodyEntityNote,
+			CrossChannelEntityDisjoint:         crossChannelEntityDisjoint,
+			CrossChannelEntityViolationNote:    crossChannelEntityNote,
+			TemplateFamilyDisjoint:             templateDisjoint,
+			TemplateViolationNote:              templateNote,
+			IndependenceScope:                  "structural-only",
+			StatisticalIndependenceEstablished: false,
+			StatisticalLimitationReason:        "structural disjointness does not establish statistical independence",
 		})
 	}
 	for _, item := range out {
@@ -379,12 +390,12 @@ var (
 	legacyNamePattern = regexp.MustCompile(`\b[A-Z][A-Za-z0-9'-]*(?:[ \t]+[A-Z][A-Za-z0-9'-]*)+\b`)
 )
 
-func extractBodyEntities(text string) []string {
+func extractBodyEntitySurfaces(text string) []string {
 	set := map[string]struct{}{}
 	for _, match := range bodyLinkPattern.FindAllStringSubmatch(text, -1) {
 		for _, surface := range strings.SplitN(match[1], "|", 2) {
-			if token := normalizeEntityToken(surface); token != "" {
-				set[token] = struct{}{}
+			if strings.TrimSpace(surface) != "" {
+				set[strings.TrimSpace(surface)] = struct{}{}
 			}
 		}
 	}
@@ -392,12 +403,35 @@ func extractBodyEntities(text string) []string {
 	for _, match := range legacyNamePattern.FindAllString(legacyText, -1) {
 		words := strings.Fields(match)
 		for start := 0; start+1 < len(words); start++ {
-			if token := normalizeEntityToken(strings.Join(words[start:], " ")); token != "" {
-				set[token] = struct{}{}
-			}
+			set[strings.Join(words[start:], " ")] = struct{}{}
 		}
 	}
 	return sortedKeys(set)
+}
+
+var entityWordPattern = regexp.MustCompile(`[A-Za-z0-9]+`)
+
+func entityWords(text string) []string {
+	return entityWordPattern.FindAllString(strings.ToLower(text), -1)
+}
+
+func containsEntityWords(textWords, entityWords []string) bool {
+	if len(entityWords) == 0 || len(entityWords) > len(textWords) {
+		return false
+	}
+	for start := 0; start+len(entityWords) <= len(textWords); start++ {
+		matched := true
+		for offset := range entityWords {
+			if textWords[start+offset] != entityWords[offset] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 func sortedKeys(set map[string]struct{}) []string {
@@ -458,6 +492,15 @@ func BuildManifest(fixturesPath string, generatedAt time.Time) (protocol.Manifes
 		SHA256FixtureFile:  fileHash,
 	}
 	groups := map[string]struct{}{}
+	negativeRows := map[protocol.Task]int{}
+	negativeGroups := map[protocol.Task]map[string]struct{}{
+		protocol.TaskRelationship: {},
+		protocol.TaskClaimSupport: {},
+	}
+	negativeClusters := map[protocol.Task]map[string]struct{}{
+		protocol.TaskRelationship: {},
+		protocol.TaskClaimSupport: {},
+	}
 	for _, f := range fixtures {
 		groups[f.SourceGroup] = struct{}{}
 		switch f.Split {
@@ -479,6 +522,11 @@ func BuildManifest(fixturesPath string, generatedAt time.Time) (protocol.Manifes
 		}
 		m.TaskCounts.Total++
 		m.ReviewStatusCount[f.ReviewStatus]++
+		if f.Split == protocol.SplitHeldOut && isNegativeTaskFixture(f) {
+			negativeRows[f.Task]++
+			negativeGroups[f.Task][f.SourceGroup] = struct{}{}
+			negativeClusters[f.Task][f.TemplateFamily] = struct{}{}
+		}
 		for _, c := range f.ChallengeCategories {
 			m.ChallengeCount[c]++
 		}
@@ -493,7 +541,53 @@ func BuildManifest(fixturesPath string, generatedAt time.Time) (protocol.Manifes
 	}
 	m.SourceGroupCount = len(groups)
 	m.FixtureCount = len(fixtures)
+	m.ReviewReadiness = reviewReadiness(m.FixtureCount, m.ReviewStatusCount)
+	for _, task := range []protocol.Task{protocol.TaskRelationship, protocol.TaskClaimSupport} {
+		rows := negativeRows[task]
+		clusters := len(negativeClusters[task])
+		established := rows > 0 && clusters >= rows
+		eligible := rows >= 150 && established && m.ReviewReadiness.StudyGateEligible
+		reason := ""
+		if !established {
+			reason = fmt.Sprintf("%d construction clusters for %d negative rows; structural disjointness does not establish statistical independence", clusters, rows)
+		} else if !m.ReviewReadiness.StudyGateEligible {
+			reason = m.ReviewReadiness.GateIneligibleReason
+		} else if rows < 150 {
+			reason = fmt.Sprintf("%d negative rows; protocol target is at least 150", rows)
+		}
+		m.NegativeTaskEvidence = append(m.NegativeTaskEvidence, protocol.NegativeTaskEvidence{
+			Task: task, Split: protocol.SplitHeldOut, NegativeRowCount: rows,
+			SourceGroupCount: len(negativeGroups[task]), ConstructionClusterCount: clusters,
+			StatisticalIndependenceEstablished: established, IndependentNegativeGateEligible: eligible,
+			StatisticalLimitationReason: reason,
+		})
+	}
 	return m, nil
+}
+
+func isNegativeTaskFixture(f protocol.Fixture) bool {
+	switch f.Task {
+	case protocol.TaskRelationship:
+		return f.ExpectedLabel == "no-supported-relationship" || f.ExpectedLabel == "insufficient-evidence"
+	case protocol.TaskClaimSupport:
+		return f.ExpectedLabel != "supported"
+	default:
+		return false
+	}
+}
+
+func reviewReadiness(fixtureCount int, counts map[protocol.ReviewStatus]int) protocol.ReviewReadinessEvidence {
+	approved := counts[protocol.ReviewApproved]
+	unreviewed := counts[protocol.ReviewUnreviewed]
+	ready := fixtureCount > 0 && approved == fixtureCount && unreviewed == 0
+	reason := ""
+	if !ready {
+		reason = fmt.Sprintf("%d of %d labels are unreviewed; study gates require human-approved gold", unreviewed, fixtureCount)
+	}
+	return protocol.ReviewReadinessEvidence{
+		FixtureCount: fixtureCount, ApprovedCount: approved, UnreviewedCount: unreviewed,
+		StudyGateEligible: ready, GateIneligibleReason: reason,
+	}
 }
 
 // WriteManifest writes the manifest to path. The SHA256Manifest field on
