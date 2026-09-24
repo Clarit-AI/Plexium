@@ -18,8 +18,10 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -28,10 +30,17 @@ import (
 // question. Every request payload MUST use this exact key.
 const DecisionVerdictID = "verdict"
 
-// ProbabilityTolerance is the absolute allowed deviation when validating
-// that a Choice distribution sums to 1.0. Models routinely produce
-// floating-point sums like 0.99999997.
+// ProbabilityTolerance is the absolute deviation beyond which a Choice
+// distribution is deficit-marked (Decision 6). Distributions may deviate
+// from 1.0 by up to ProbabilityMassAdmissionTolerance and are still
+// admitted; anything beyond ProbabilityTolerance is recorded as a
+// contract-violation signal. Scores are never renormalized.
 const ProbabilityTolerance = 1e-3
+
+// ProbabilityMassAdmissionTolerance is the Decision-6 admission bound: a
+// Choice distribution whose exact sum S satisfies |S - 1| <=
+// ProbabilityMassAdmissionTolerance is ADMITTED with the deficit recorded.
+const ProbabilityMassAdmissionTolerance = 0.02
 
 // MaxResponseBytes caps the response body size the adapter will accept.
 const MaxResponseBytes = 4 << 20 // 4 MiB
@@ -155,17 +164,22 @@ type DecisionResponse struct {
 // TotalLatency. The harness NEVER relabels these as provider cold/warm —
 // cold/warm attribution is not derivable from a single adapter run.
 type Decision struct {
-	QuestionID       string
-	Choice           string
-	Confidence       *float64
-	Probabilities    map[string]float64
-	ResolvedModel    string
-	Latency          time.Duration
-	AttemptLatencies []time.Duration
-	TotalLatency     time.Duration
-	Attempts         int
-	Usage            DecisionUsage
-	Raw              json.RawMessage // preserved verbatim for audit; non-secret
+	QuestionID    string
+	Choice        string
+	Confidence    *float64
+	Probabilities map[string]float64
+	// Decision-6 probability-mass recording (exact decimal strings; scores
+	// themselves are never renormalized).
+	ProbabilityMass          string
+	ProbabilityDeficit       string
+	ProbabilityDeficitMarked bool
+	ResolvedModel            string
+	Latency                  time.Duration
+	AttemptLatencies         []time.Duration
+	TotalLatency             time.Duration
+	Attempts                 int
+	Usage                    DecisionUsage
+	Raw                      json.RawMessage // preserved verbatim for audit; non-secret
 }
 
 // TransportError is the typed error returned by the adapter for non-success
@@ -413,14 +427,18 @@ func parseDecisionResponse(body []byte, expectedModel string, latency time.Durat
 	if answer.Choice == "" {
 		return nil, &TransportError{Code: "schema", Message: "answer.choice is empty", Latency: latency, Attempts: attempts}
 	}
-	// Probabilities are optional. When present, validate shape.
+	// Probabilities are optional. When present, validate shape and apply
+	// the Decision-6 probability-mass admission rule.
+	var massAdmission ProbabilityMassAdmission
 	if len(answer.Probabilities) > 0 {
 		if err := validateProbabilities(answer.Probabilities); err != nil {
 			return nil, &TransportError{Code: "schema", Message: err.Error(), Latency: latency, Attempts: attempts}
 		}
-		if err := validateProbabilityCoverage(answer.Probabilities); err != nil {
+		admission, err := AdmitProbabilityMass(answer.Probabilities)
+		if err != nil {
 			return nil, &TransportError{Code: "schema", Message: err.Error(), Latency: latency, Attempts: attempts}
 		}
+		massAdmission = admission
 	}
 	if answer.Confidence != nil {
 		if !isFinite(*answer.Confidence) || *answer.Confidence < 0 || *answer.Confidence > 1 {
@@ -428,15 +446,18 @@ func parseDecisionResponse(body []byte, expectedModel string, latency time.Durat
 		}
 	}
 	return &Decision{
-		QuestionID:    DecisionVerdictID,
-		Choice:        answer.Choice,
-		Confidence:    cloneConfidence(answer.Confidence),
-		Probabilities: cloneProbabilities(answer.Probabilities),
-		ResolvedModel: resp.Model,
-		Latency:       latency,
-		Attempts:      attempts,
-		Usage:         resp.Usage,
-		Raw:           append(json.RawMessage(nil), body...),
+		QuestionID:               DecisionVerdictID,
+		Choice:                   answer.Choice,
+		Confidence:               cloneConfidence(answer.Confidence),
+		Probabilities:            cloneProbabilities(answer.Probabilities),
+		ProbabilityMass:          massAdmission.Mass,
+		ProbabilityDeficit:       massAdmission.Deficit,
+		ProbabilityDeficitMarked: massAdmission.DeficitMarked,
+		ResolvedModel:            resp.Model,
+		Latency:                  latency,
+		Attempts:                 attempts,
+		Usage:                    resp.Usage,
+		Raw:                      append(json.RawMessage(nil), body...),
 	}, nil
 }
 
@@ -465,16 +486,64 @@ func validateProbabilities(p map[string]float64) error {
 	return nil
 }
 
-// validateProbabilityCoverage requires the distribution to sum to ~1.0.
-func validateProbabilityCoverage(p map[string]float64) error {
-	sum := 0.0
+// ProbabilityMassAdmission is the Decision-6 admission verdict for a Choice
+// distribution: the exact sum S and deficit (S - 1) as decimal strings, and
+// the deficit marker set when |S - 1| > ProbabilityTolerance. Scores are
+// preserved byte-verbatim and never renormalized.
+type ProbabilityMassAdmission struct {
+	Mass          string
+	Deficit       string
+	DeficitMarked bool
+}
+
+// AdmitProbabilityMass applies the Decision-6 probability-mass admission
+// rule: a distribution of scores already validated as finite and within
+// [0,1] is ADMITTED when its exact sum S satisfies |S - 1| <=
+// ProbabilityMassAdmissionTolerance, with the deficit recorded as a
+// calibration signal. Anything outside that class is refused and keeps the
+// existing not-admitted path unchanged. Scores are never modified.
+func AdmitProbabilityMass(p map[string]float64) (ProbabilityMassAdmission, error) {
+	if err := validateProbabilities(p); err != nil {
+		return ProbabilityMassAdmission{}, err
+	}
+	sum := new(big.Rat)
 	for _, v := range p {
-		sum += v
+		lexeme := strconv.FormatFloat(v, 'g', -1, 64)
+		term, ok := new(big.Rat).SetString(lexeme)
+		if !ok {
+			return ProbabilityMassAdmission{}, fmt.Errorf("probability %q is not an exact decimal score", lexeme)
+		}
+		sum.Add(sum, term)
 	}
-	if math.Abs(sum-1.0) > ProbabilityTolerance {
-		return fmt.Errorf("probabilities sum to %v, tolerance %v", sum, ProbabilityTolerance)
+	deficit := new(big.Rat).Sub(sum, big.NewRat(1, 1))
+	absDeficit := new(big.Rat).Abs(deficit)
+	admitBound, ok := new(big.Rat).SetString(strconv.FormatFloat(ProbabilityMassAdmissionTolerance, 'g', -1, 64))
+	if !ok {
+		return ProbabilityMassAdmission{}, errors.New("admission bound is not an exact decimal")
 	}
-	return nil
+	if absDeficit.Cmp(admitBound) > 0 {
+		return ProbabilityMassAdmission{}, fmt.Errorf("probabilities sum to %s, admission tolerance %v", sum.FloatString(12), ProbabilityMassAdmissionTolerance)
+	}
+	markerBound, ok := new(big.Rat).SetString(strconv.FormatFloat(ProbabilityTolerance, 'g', -1, 64))
+	if !ok {
+		return ProbabilityMassAdmission{}, errors.New("marker bound is not an exact decimal")
+	}
+	return ProbabilityMassAdmission{
+		Mass:          trimDecimalString(sum.FloatString(12)),
+		Deficit:       trimDecimalString(deficit.FloatString(12)),
+		DeficitMarked: absDeficit.Cmp(markerBound) > 0,
+	}, nil
+}
+
+func trimDecimalString(s string) string {
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(s, "0")
+		s = strings.TrimRight(s, ".")
+	}
+	if s == "-0" {
+		return "0"
+	}
+	return s
 }
 
 func cloneProbabilities(p map[string]float64) map[string]float64 {

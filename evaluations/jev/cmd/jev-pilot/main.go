@@ -152,6 +152,7 @@ func execute(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	path := fs.String("execution-manifest", "", "reviewed execution manifest")
 	resumeDecision5 := fs.Bool("resume-superseded-halt-under-decision5", false, "auditable Decision-5 resume: reconcile the tolerated halted attempt and supersede the durable halt (binding the verbatim Decision-5 text digest and the pinned tolerance rule) before continuing the remaining slots; settled attempts are never resent")
+	resumeDecision6 := fs.Bool("resume-superseded-halt-under-decision6", false, "auditable Decision-6 resume: re-classify the halted attempt's persisted response under the probability-mass admission rule, settle it as observed with the deficit recorded, and supersede the durable halt (binding the verbatim Decision-6 text digest and the admission rule) before continuing the remaining slots; settled attempts are never resent")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -231,7 +232,7 @@ func execute(args []string) error {
 	if err != nil {
 		return err
 	}
-	r := pilot.Runner{Inventory: &inv, Journal: j, Config: pilot.ExecutionConfig{InventoryHash: m.InventoryHash, AuthorizationRef: m.AuthorizationReference, CombinedCap: m.CombinedCap, LiveContractsVerified: m.LiveContractsVerified, RunLockPath: m.RunLockPath, EvidenceDir: m.EvidenceDir, ContractSHA: contractSHA, AllocationID: m.AllocationID, AllocationSHA: allocationSHA, ScreeningSecrets: credentials, SupersedeHaltUnderDecision5: *resumeDecision5, Jev: jb, Nano: nb}, Attempts: map[pilot.Arm]pilot.AttemptFunc{pilot.ArmJev: jc.SubmitDecisionsOnce, pilot.ArmNano: nc.CompleteOnce}}
+	r := pilot.Runner{Inventory: &inv, Journal: j, Config: pilot.ExecutionConfig{InventoryHash: m.InventoryHash, AuthorizationRef: m.AuthorizationReference, CombinedCap: m.CombinedCap, LiveContractsVerified: m.LiveContractsVerified, RunLockPath: m.RunLockPath, EvidenceDir: m.EvidenceDir, ContractSHA: contractSHA, AllocationID: m.AllocationID, AllocationSHA: allocationSHA, ScreeningSecrets: credentials, SupersedeHaltUnderDecision5: *resumeDecision5, SupersedeHaltUnderDecision6: *resumeDecision6, Jev: jb, Nano: nb}, Attempts: map[pilot.Arm]pilot.AttemptFunc{pilot.ArmJev: jc.SubmitDecisionsOnce, pilot.ArmNano: nc.CompleteOnce}}
 	_, err = r.Run(context.Background())
 	return err
 }
@@ -293,9 +294,10 @@ func report(args []string) error {
 		billingCounts[out.Billing]++
 	}
 	result := map[string]any{"events": s.Sequence, "scheduledSlots": len(inv.Schedule), "reconciledSlots": reconciled, "requestAttempts": sent, "operationalFailures": failures, "billingCounts": billingCounts, "actualKnownSpendMicrodollars": knownCost, "conservativeLedgerExposureMicrodollars": exposure, "halted": s.Halted, "haltReason": s.HaltReason, "outcomes": outcomes}
-	if s.Supersession != nil {
-		result["haltSupersession"] = s.Supersession
+	if supersessions := s.SupersessionList(); len(supersessions) > 0 {
+		result["haltSupersessions"] = supersessions
 	}
+	result["probabilityMassCounters"] = probabilityMassCounters(outcomes)
 	// Decision 1/2/5 policy statements, bound in every report: documented free
 	// Jev output is an explicit zero rate (not omitted), MaxOutputTokens is a
 	// non-cost resource bound, rate semantics are UNRECONCILED, and the
@@ -334,6 +336,27 @@ func report(args []string) error {
 	return json.NewEncoder(os.Stdout).Encode(result)
 }
 
+// probabilityMassCounters is the Decision-6 contract-violation counter:
+// deficit-marked responses over admitted responses per arm (the typed-
+// decision contract sloppiness stays visible as a counted violation).
+func probabilityMassCounters(outcomes []pilot.Outcome) map[string]map[string]int {
+	counters := map[string]map[string]int{}
+	for _, arm := range []string{string(pilot.ArmJev), string(pilot.ArmNano)} {
+		counters[arm] = map[string]int{"deficitMarkedResponses": 0, "admittedResponses": 0}
+	}
+	for _, out := range outcomes {
+		if out.Label == "" {
+			continue
+		}
+		counter := counters[string(out.Slot.Arm)]
+		counter["admittedResponses"]++
+		if out.ProbabilityDeficitMarked {
+			counter["deficitMarkedResponses"]++
+		}
+	}
+	return counters
+}
+
 // reportBillingBasis is the report basis: the accepted accounting basis
 // (decision 1/2) plus the Decision-5 known-discrepancy tolerance rule with
 // its pinned bounds, stated explicitly in every report.
@@ -350,6 +373,8 @@ func reportBillingBasis() (map[string]any, error) {
 	basis["rateToleranceRule"] = rule.Description
 	basis["rateToleranceDecisionSha256"] = rule.DecisionSHA256
 	basis["rateToleranceRatioBounds"] = []string{rule.RatioMin, rule.RatioMax}
+	basis["probabilityMassAdmissionRule"] = pilot.Decision6RuleDescription()
+	basis["probabilityMassAdmissionDecisionSha256"] = pilot.Decision6Digest()
 	return basis, nil
 }
 

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/Clarit-AI/Plexium/evaluations/jev/adapter"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/ledger"
@@ -43,6 +45,9 @@ type ExecutionConfig struct {
 	// supersession (Decision 5) so a halted run resumes its remaining
 	// slots without resending settled attempts.
 	SupersedeHaltUnderDecision5 bool
+	// SupersedeHaltUnderDecision6 authorizes ONE auditable halt
+	// supersession (Decision 6: probability-mass admission).
+	SupersedeHaltUnderDecision6 bool
 	Jev, Nano                   ArmBudget
 }
 
@@ -57,7 +62,11 @@ type Outcome struct {
 	RequestSent      bool
 	Status           int
 	RateTolerance    string
-	Observation      *ObservationEvidence
+	// Decision-6 probability-mass recording (exact decimal strings).
+	ProbabilityMass          string
+	ProbabilityDeficit       string
+	ProbabilityDeficitMarked bool
+	Observation              *ObservationEvidence
 }
 
 type Runner struct {
@@ -110,14 +119,23 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		return nil, err
 	}
 	state := r.Journal.State()
-	if state.Halted && state.Supersession == nil {
-		if !r.Config.SupersedeHaltUnderDecision5 {
+	if state.Halted && !state.Superseded() {
+		switch {
+		case r.Config.SupersedeHaltUnderDecision6:
+			// Decision 6: one auditable, append-only supersession settles the
+			// halted attempt as observed (its probability mass admitted with
+			// the deficit recorded) and resumes the remaining slots.
+			if err := r.supersedeHaltUnderDecision6(ctx, state); err != nil {
+				return nil, err
+			}
+		case r.Config.SupersedeHaltUnderDecision5:
+			// Decision 5: one auditable, append-only supersession reconciles
+			// the tolerated halted attempt and resumes the remaining slots.
+			if err := r.supersedeHaltUnderDecision5(state); err != nil {
+				return nil, err
+			}
+		default:
 			return nil, fmt.Errorf("pilot: journal halted: %s", state.HaltReason)
-		}
-		// Decision 5: one auditable, append-only supersession reconciles the
-		// tolerated halted attempt and resumes the remaining slots.
-		if err := r.supersedeHaltUnderDecision5(state); err != nil {
-			return nil, err
 		}
 		state = r.Journal.State()
 	}
@@ -287,11 +305,21 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		final.Label = out.Label
 		final.Error = out.Error
 		final.RateTolerance = out.RateTolerance
+		if obs.Decision != nil {
+			final.ProbabilityMass = obs.Decision.ProbabilityMass
+			final.ProbabilityDeficit = obs.Decision.ProbabilityDeficit
+			final.ProbabilityDeficitMarked = obs.Decision.ProbabilityDeficitMarked
+			out.ProbabilityMass = obs.Decision.ProbabilityMass
+			out.ProbabilityDeficit = obs.Decision.ProbabilityDeficit
+			out.ProbabilityDeficitMarked = obs.Decision.ProbabilityDeficitMarked
+		}
 		final.RequestSent = obs.RequestSent
 		final.ResponseSeen = obs.ResponseReceived
 		final.Status = obs.Status
 		if cost == 0 {
 			final.Outcome = "zero-known-reservation-retained"
+		} else if final.ProbabilityDeficitMarked {
+			final.Outcome = "settled-positive-with-deficit"
 		} else {
 			final.Outcome = "settled-positive"
 		}
@@ -319,16 +347,9 @@ func (r *Runner) rateTolerance() RateSemanticsTolerance {
 	return Decision5Tolerance()
 }
 
-// supersedeHaltUnderDecision5 performs the Decision-5 auditable resume:
-// reconcile the single tolerated halted attempt (never re-sending it), then
-// append the explicit superseding record binding the verbatim Decision-5
-// text digest, the pinned tolerance rule with its bounds, and the durable
-// halted event identity. The halt event itself is never deleted or rewritten.
-func (r *Runner) supersedeHaltUnderDecision5(state ReplayState) error {
-	rule := Decision5Tolerance()
-	if state.HaltSequence <= 0 || state.HaltSHA256 == "" {
-		return errors.New("pilot: no durable halt event to supersede")
-	}
+// pendingHaltedAttempt locates the single unreconciled observed attempt
+// left by a durable halt and loads its persisted evidence.
+func (r *Runner) pendingHaltedAttempt(state ReplayState) (Slot, SlotState, *ObservationEvidence, error) {
 	var pending []int
 	for ordinal, st := range state.Slots {
 		if st.Intent && !st.Reconciled {
@@ -336,11 +357,11 @@ func (r *Runner) supersedeHaltUnderDecision5(state ReplayState) error {
 		}
 	}
 	if len(pending) != 1 {
-		return fmt.Errorf("pilot: decision-5 supersession requires exactly one pending attempt, found %d", len(pending))
+		return Slot{}, SlotState{}, nil, fmt.Errorf("pilot: halt supersession requires exactly one pending attempt, found %d", len(pending))
 	}
 	st := state.Slots[pending[0]]
 	if st.Observation == nil {
-		return errors.New("pilot: pending attempt has no observation evidence")
+		return Slot{}, SlotState{}, nil, errors.New("pilot: pending attempt has no observation evidence")
 	}
 	var slot Slot
 	var found bool
@@ -351,11 +372,28 @@ func (r *Runner) supersedeHaltUnderDecision5(state ReplayState) error {
 		}
 	}
 	if !found {
-		return errors.New("pilot: pending attempt absent from frozen inventory")
+		return Slot{}, SlotState{}, nil, errors.New("pilot: pending attempt absent from frozen inventory")
 	}
 	evidence, err := loadAttemptEvidence(r.Config.EvidenceDir, *st.Observation)
 	if err != nil {
-		return fmt.Errorf("pilot: pending attempt evidence invalid: %w", err)
+		return Slot{}, SlotState{}, nil, fmt.Errorf("pilot: pending attempt evidence invalid: %w", err)
+	}
+	return slot, st, evidence, nil
+}
+
+// supersedeHaltUnderDecision5 performs the Decision-5 auditable resume:
+// reconcile the single tolerated halted attempt (never re-sending it), then
+// append the explicit superseding record binding the verbatim Decision-5
+// text digest, the pinned tolerance rule with its bounds, and the durable
+// halted event identity. The halt event itself is never deleted or rewritten.
+func (r *Runner) supersedeHaltUnderDecision5(state ReplayState) error {
+	rule := Decision5Tolerance()
+	if state.HaltSequence <= 0 || state.HaltSHA256 == "" {
+		return errors.New("pilot: no durable halt event to supersede")
+	}
+	slot, st, evidence, err := r.pendingHaltedAttempt(state)
+	if err != nil {
+		return err
 	}
 	verdict := rateToleranceVerdict(evidence.Billing, ledger.MicroUnit(st.ReservedAmount), rule)
 	if !verdict.Tolerated {
@@ -386,6 +424,214 @@ func (r *Runner) supersedeHaltUnderDecision5(state ReplayState) error {
 		TopUpNote:               sanitizeTextPreservingNumbers(topUp, r.Config.ScreeningSecrets),
 	}
 	return r.Journal.Append(sup)
+}
+
+// supersedeHaltUnderDecision6 performs the Decision-6 auditable resume: the
+// halted attempt's persisted RESPONSE is re-classified under the
+// probability-mass admission rule (same rule as the response-validation
+// layer), settled as observed exactly once, and reconciled with the deficit
+// recorded — then the explicit superseding record binds the verbatim
+// Decision-6 text digest, the admission rule with its bounds, and the
+// durable halted event identity.
+func (r *Runner) supersedeHaltUnderDecision6(ctx context.Context, state ReplayState) error {
+	if state.HaltSequence <= 0 || state.HaltSHA256 == "" {
+		return errors.New("pilot: no durable halt event to supersede")
+	}
+	slot, st, evidence, err := r.pendingHaltedAttempt(state)
+	if err != nil {
+		return err
+	}
+	if st.Observation.ResponsePath == "" {
+		return errors.New("pilot: pending attempt has no persisted response to re-classify")
+	}
+	response, err := os.ReadFile(filepath.Join(r.Config.EvidenceDir, st.Observation.ResponsePath))
+	if err != nil {
+		return fmt.Errorf("pilot: pending attempt response unreadable: %w", err)
+	}
+	verdict, err := decodePersistedVerdict(response)
+	if err != nil {
+		return fmt.Errorf("pilot: decision-6 supersession refused: %w", err)
+	}
+	admission, err := adapter.AdmitProbabilityMass(verdict.Probabilities)
+	if err != nil {
+		return fmt.Errorf("pilot: decision-6 supersession refused: the halted attempt is outside the admitted probability-mass class: %w", err)
+	}
+	// The schema refusal that invalidated this attempt's billing is exactly
+	// what Decision 6 overturns: once the persisted response is admitted
+	// under the probability-mass rule, the billing figures are re-admitted
+	// from their persisted Raw lexemes — re-parsed, never fabricated.
+	billing, err := readmitSchemaInvalidatedBilling(evidence.Billing)
+	if err != nil {
+		return fmt.Errorf("pilot: decision-6 supersession refused: %w", err)
+	}
+	cost, in, outTokens, err := observedBillingFigures(billing)
+	if err != nil {
+		return fmt.Errorf("pilot: decision-6 supersession refused: %w", err)
+	}
+	budget := r.budget(slot.Arm)
+	if budget == nil || budget.Ledger == nil {
+		return errors.New("pilot: missing arm ledger for supersession settlement")
+	}
+	// Settle as observed, exactly once (idempotent under crash re-entry).
+	settled := false
+	for _, e := range budget.Ledger.Entries() {
+		if e.RefID == st.ReservationID && (e.Type == ledger.EntrySettlement || e.Type == ledger.EntryAdjustment || e.Type == ledger.EntryMismatch) {
+			settled = true
+		}
+	}
+	if !settled {
+		if _, err := budget.Ledger.Settle(ctx, st.ReservationID, cost, in, outTokens, budget.RateIn, budget.RateOut); err != nil {
+			return fmt.Errorf("pilot: settle halted attempt as observed: %w", err)
+		}
+	}
+	base := JournalEvent{SlotOrdinal: slot.Ordinal, FixtureID: slot.FixtureID, Arm: slot.Arm, PayloadSHA: slot.PayloadSHA}
+	final := withType(base, EventReconciled)
+	final.ReservationID = st.ReservationID
+	final.BillingCostRaw = evidence.Billing.Cost.Raw
+	final.Label = verdict.Choice
+	final.RequestSent = evidence.RequestSent
+	final.ResponseSeen = evidence.ResponseReceived
+	final.Status = evidence.Status
+	final.ProbabilityMass = admission.Mass
+	final.ProbabilityDeficit = admission.Deficit
+	final.ProbabilityDeficitMarked = admission.DeficitMarked
+	final.Outcome = "settled-positive"
+	if admission.DeficitMarked {
+		final.Outcome = "settled-positive-with-deficit"
+	}
+	if err := r.appendSlotEvent(slot, final); err != nil {
+		return fmt.Errorf("pilot: reconcile mass-admitted halted attempt: %w", err)
+	}
+	note := fmt.Sprintf("settled as observed at %s (%d microdollars) on reservation %s; exactly one terminal settlement on this reference", evidence.Billing.Cost.Raw, cost, st.ReservationID)
+	sup := JournalEvent{
+		Type:                    EventSupersession,
+		Error:                   sanitizeTextPreservingNumbers("halt superseded under decision 6; probability mass admitted with deficit recorded; resume continues the remaining slots", r.Config.ScreeningSecrets),
+		DecisionSHA256:          Decision6Digest(),
+		DecisionReference:       "artifacts/jev-policy-decisions Decision 6 (2026-09-23)",
+		ToleranceRule:           sanitizeTextPreservingNumbers(Decision6RuleDescription(), r.Config.ScreeningSecrets),
+		SupersededEventSequence: state.HaltSequence,
+		SupersededEventSHA256:   state.HaltSHA256,
+		SettlementNote:          sanitizeTextPreservingNumbers(note, r.Config.ScreeningSecrets),
+	}
+	return r.Journal.Append(sup)
+}
+
+// readmitSchemaInvalidatedBilling re-admits billing decimal fields that were
+// invalidated solely by the response-schema refusal that Decision 6 has just
+// overturned. Every present field is re-validated by re-parsing its persisted
+// Raw lexeme — figures are never fabricated, normalized, or re-derived. A
+// present field whose Raw is absent or unparseable keeps the refusal and
+// fails the supersession closed. Billing that was not schema-refused is
+// returned unchanged.
+func readmitSchemaInvalidatedBilling(b adapter.BillingObservation) (adapter.BillingObservation, error) {
+	const schemaRefusalPrefix = "response schema not admitted: "
+	if !strings.HasPrefix(b.Error, schemaRefusalPrefix) {
+		return b, nil
+	}
+	fields := []*adapter.DecimalField{
+		&b.Cost, &b.InputTokens, &b.OutputTokens, &b.TotalTokens,
+		&b.PromptTokenDetails.CachedTokens, &b.PromptTokenDetails.CacheWriteTokens,
+		&b.PromptTokenDetails.AudioTokens, &b.PromptTokenDetails.VideoTokens,
+		&b.CompletionTokenDetails.ReasoningTokens, &b.CompletionTokenDetails.ImageTokens,
+		&b.CompletionTokenDetails.AudioTokens, &b.CompletionTokenDetails.AcceptedPredictionTokens,
+		&b.CompletionTokenDetails.RejectedPredictionTokens,
+		&b.CostDetails.UpstreamInferenceCost, &b.CostDetails.UpstreamInferencePromptCost,
+		&b.CostDetails.UpstreamInferenceCompletionsCost,
+	}
+	for _, f := range fields {
+		if err := readmitDecimalField(f); err != nil {
+			return b, err
+		}
+	}
+	for _, detail := range []struct {
+		present bool
+		null    bool
+		valid   *bool
+		err     *string
+	}{
+		{b.PromptTokenDetails.Present, b.PromptTokenDetails.Null, &b.PromptTokenDetails.Valid, &b.PromptTokenDetails.Error},
+		{b.CompletionTokenDetails.Present, b.CompletionTokenDetails.Null, &b.CompletionTokenDetails.Valid, &b.CompletionTokenDetails.Error},
+		{b.CostDetails.Present, b.CostDetails.Null, &b.CostDetails.Valid, &b.CostDetails.Error},
+	} {
+		if detail.present && !detail.null {
+			*detail.valid = true
+			*detail.err = ""
+		}
+	}
+	if b.IsBYOK.Present && !b.IsBYOK.Null {
+		b.IsBYOK.Valid = true
+		b.IsBYOK.Error = ""
+	}
+	b.Error = ""
+	return b, nil
+}
+
+// readmitDecimalField re-validates one persisted decimal field by re-parsing
+// its Raw lexeme. Absent and null fields are left untouched; a present field
+// with an absent or unparseable Raw fails closed.
+func readmitDecimalField(f *adapter.DecimalField) error {
+	if !f.Present || f.Null {
+		return nil
+	}
+	if f.Raw == "" {
+		return errors.New("schema-refused billing field has no persisted raw value to re-admit")
+	}
+	if _, err := strconv.ParseFloat(f.Raw, 64); err != nil {
+		return fmt.Errorf("schema-refused billing field raw value %q is not a number", f.Raw)
+	}
+	f.Valid = true
+	f.Error = ""
+	return nil
+}
+
+// persistedVerdict is the minimal verdict view re-decoded from a persisted
+// response for Decision-6 re-classification.
+type persistedVerdict struct {
+	Choice        string
+	Probabilities map[string]float64
+}
+
+func decodePersistedVerdict(response []byte) (persistedVerdict, error) {
+	var body struct {
+		Answers map[string]struct {
+			Choice        string             `json:"choice"`
+			Probabilities map[string]float64 `json:"probabilities"`
+		} `json:"answers"`
+	}
+	if err := json.Unmarshal(response, &body); err != nil {
+		return persistedVerdict{}, fmt.Errorf("persisted response is not admitted JSON: %w", err)
+	}
+	answer, ok := body.Answers[adapter.DecisionVerdictID]
+	if !ok || answer.Choice == "" {
+		return persistedVerdict{}, errors.New("persisted response has no verdict answer with a choice")
+	}
+	return persistedVerdict{Choice: answer.Choice, Probabilities: answer.Probabilities}, nil
+}
+
+// observedBillingFigures extracts the observed billing for a settlement as
+// observed. The schema-refusal error recorded on the billing is exactly what
+// Decision 6 supersedes; the numeric figures themselves must be present and
+// valid or the supersession fails closed.
+func observedBillingFigures(b adapter.BillingObservation) (ledger.MicroUnit, int64, int64, error) {
+	if !b.Cost.Present || b.Cost.Null || !b.Cost.Valid || b.Cost.Raw == "" {
+		return 0, 0, 0, errors.New("halted attempt has no valid observed billing cost")
+	}
+	if !b.InputTokens.Present || b.InputTokens.Null || !b.InputTokens.Valid || !b.OutputTokens.Present || b.OutputTokens.Null || !b.OutputTokens.Valid {
+		return 0, 0, 0, errors.New("halted attempt has no valid observed token counts")
+	}
+	cost, err := decimalMicrodollars(b.Cost.Raw)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	in, err := decimalInteger(b.InputTokens.Raw)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	outTokens, err := decimalInteger(b.OutputTokens.Raw)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return cost, in, outTokens, nil
 }
 
 // decision5TopUpNote documents the conservative top-up treatment of the
@@ -436,6 +682,8 @@ func (r *Runner) appendSlotEvent(slot Slot, event JournalEvent) error {
 	event.Label = sanitizeText(event.Label, r.Config.ScreeningSecrets)
 	event.Error = sanitizeTextPreservingNumbers(event.Error, r.Config.ScreeningSecrets)
 	event.RateTolerance = sanitizeTextPreservingNumbers(event.RateTolerance, r.Config.ScreeningSecrets)
+	event.ProbabilityMass = sanitizeTextPreservingNumbers(event.ProbabilityMass, r.Config.ScreeningSecrets)
+	event.ProbabilityDeficit = sanitizeTextPreservingNumbers(event.ProbabilityDeficit, r.Config.ScreeningSecrets)
 	if err := r.Journal.Append(event); err != nil {
 		return err
 	}
@@ -493,7 +741,7 @@ func (r *Runner) validateReplayState(state ReplayState, allowPendingOrdinal int)
 		if !st.Reconciled && ordinal != allowPendingOrdinal {
 			return fmt.Errorf("pilot: slot %d has an uncertain outcome; never resend", ordinal)
 		}
-		if st.Reconciled && st.Event.Outcome == "settled-positive" && !terminalRefs[st.Event.Arm][st.ReservationID] {
+		if st.Reconciled && (st.Event.Outcome == "settled-positive" || st.Event.Outcome == "settled-positive-with-deficit") && !terminalRefs[st.Event.Arm][st.ReservationID] {
 			return fmt.Errorf("pilot: slot %d journal settlement missing from ledger", ordinal)
 		}
 		if st.Reconciled && st.Event.Outcome == "zero-known-reservation-retained" && terminalRefs[st.Event.Arm][st.ReservationID] {
@@ -617,7 +865,7 @@ func ReplayOutcomes(inv *Inventory, state ReplayState, evidenceDir string) ([]Ou
 		if e.Outcome == "zero-known-reservation-retained" {
 			billing = "known-zero-reservation-retained"
 		}
-		if e.Outcome == "settled-positive" {
+		if e.Outcome == "settled-positive" || e.Outcome == "settled-positive-with-deficit" {
 			billing = "known-positive"
 		}
 		var cost ledger.MicroUnit
@@ -641,7 +889,7 @@ func ReplayOutcomes(inv *Inventory, state ReplayState, evidenceDir string) ([]Ou
 				knownCost = true
 			}
 		}
-		outcomes = append(outcomes, Outcome{Slot: slot, Label: e.Label, Error: errText, Billing: billing, BillingRaw: e.BillingCostRaw, CostMicrodollars: cost, KnownCost: knownCost, RequestSent: e.RequestSent, Status: e.Status, RateTolerance: e.RateTolerance, Observation: evidence})
+		outcomes = append(outcomes, Outcome{Slot: slot, Label: e.Label, Error: errText, Billing: billing, BillingRaw: e.BillingCostRaw, CostMicrodollars: cost, KnownCost: knownCost, RequestSent: e.RequestSent, Status: e.Status, RateTolerance: e.RateTolerance, ProbabilityMass: e.ProbabilityMass, ProbabilityDeficit: e.ProbabilityDeficit, ProbabilityDeficitMarked: e.ProbabilityDeficitMarked, Observation: evidence})
 	}
 	return outcomes, nil
 }

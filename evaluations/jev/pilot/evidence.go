@@ -36,6 +36,10 @@ type ObservationEvidence struct {
 	Label             string                     `json:"label,omitempty"`
 	Confidence        *float64                   `json:"confidence,omitempty"`
 	Probabilities     map[string]float64         `json:"probabilities,omitempty"`
+	// Decision-6 probability-mass recording (exact decimal strings).
+	ProbabilityMass          string `json:"probabilityMass,omitempty"`
+	ProbabilityDeficit       string `json:"probabilityDeficit,omitempty"`
+	ProbabilityDeficitMarked bool   `json:"probabilityDeficitMarked,omitempty"`
 }
 
 func evidenceFromObservation(obs adapter.AttemptObservation, raw screenedRaw) ObservationEvidence {
@@ -54,6 +58,9 @@ func evidenceFromObservation(obs adapter.AttemptObservation, raw screenedRaw) Ob
 		e.Label = obs.Decision.Choice
 		e.Confidence = obs.Decision.Confidence
 		e.Probabilities = obs.Decision.Probabilities
+		e.ProbabilityMass = obs.Decision.ProbabilityMass
+		e.ProbabilityDeficit = obs.Decision.ProbabilityDeficit
+		e.ProbabilityDeficitMarked = obs.Decision.ProbabilityDeficitMarked
 	}
 	if obs.Chat != nil {
 		if label, ok := obs.Chat.Content["label"].(string); ok {

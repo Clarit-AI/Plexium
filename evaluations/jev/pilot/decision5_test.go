@@ -292,14 +292,14 @@ func TestDecision5AuditableResumeAfterToleratedHalt(t *testing.T) {
 		t.Fatalf("session-2 calls=%d want 2 (slots 3-4 only)", calls2.Load())
 	}
 	state := s2.Journal.State()
-	if state.Supersession == nil {
+	sup, superseded := state.Supersessions[haltSeq]
+	if !superseded {
 		t.Fatal("superseding record missing")
 	}
 	// The durable halt event remains present and bound.
 	if !state.Halted || state.HaltSequence != haltSeq || state.HaltSHA256 != haltSHA {
 		t.Fatalf("halt identity drifted: %+v", state)
 	}
-	sup := state.Supersession
 	if sup.SupersededEventSequence != haltSeq || sup.SupersededEventSHA256 != haltSHA {
 		t.Fatalf("supersession does not bind the halted event: %+v", sup)
 	}

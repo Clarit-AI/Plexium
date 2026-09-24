@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 )
 
@@ -54,6 +55,10 @@ type JournalEvent struct {
 	// RateTolerance records a Decision-5 tolerated known-discrepancy
 	// classification on the outcome row (figures verbatim).
 	RateTolerance string `json:"rateTolerance,omitempty"`
+	// Decision-6 probability-mass recording (exact decimal strings).
+	ProbabilityMass          string `json:"probabilityMass,omitempty"`
+	ProbabilityDeficit       string `json:"probabilityDeficit,omitempty"`
+	ProbabilityDeficitMarked bool   `json:"probabilityDeficitMarked,omitempty"`
 	// Halt-supersession binding (append-only auditable resume).
 	DecisionSHA256          string `json:"decisionSha256,omitempty"`
 	DecisionReference       string `json:"decisionReference,omitempty"`
@@ -61,6 +66,7 @@ type JournalEvent struct {
 	SupersededEventSequence int64  `json:"supersededEventSequence,omitempty"`
 	SupersededEventSHA256   string `json:"supersededEventSha256,omitempty"`
 	TopUpNote               string `json:"topUpNote,omitempty"`
+	SettlementNote          string `json:"settlementNote,omitempty"`
 }
 
 type SlotState struct {
@@ -79,14 +85,39 @@ type ReplayState struct {
 	Sequence   int64
 	Halted     bool
 	HaltReason string
-	// HaltSequence/HaltSHA256 identify the durable halt event (the hash is
-	// over the journal line exactly as persisted).
+	// HaltSequence/HaltSHA256 identify the latest durable halt event (the
+	// hash is over the journal line exactly as persisted). Halts records
+	// every halt's identity so each supersession binds its own halted event.
 	HaltSequence int64
 	HaltSHA256   string
-	// Supersession is the Decision-5 superseding record when present.
-	Supersession *JournalEvent
-	Slots        map[int]SlotState
-	Binding      *RunBinding
+	Halts        map[int64]string
+	// Supersessions holds one superseding record per halted event
+	// (Decision 5's and Decision 6's coexist; replay fails closed on
+	// unbound or duplicate supersessions).
+	Supersessions map[int64]JournalEvent
+	Slots         map[int]SlotState
+	Binding       *RunBinding
+}
+
+// Superseded reports whether the latest halt has an authorized superseding
+// record.
+func (s ReplayState) Superseded() bool {
+	_, ok := s.Supersessions[s.HaltSequence]
+	return ok
+}
+
+// SupersessionList returns all superseding records in bound-halt order.
+func (s ReplayState) SupersessionList() []JournalEvent {
+	seqs := make([]int64, 0, len(s.Supersessions))
+	for seq := range s.Supersessions {
+		seqs = append(seqs, seq)
+	}
+	slices.Sort(seqs)
+	out := make([]JournalEvent, 0, len(seqs))
+	for _, seq := range seqs {
+		out = append(out, s.Supersessions[seq])
+	}
+	return out
 }
 
 type Journal struct {
@@ -157,6 +188,9 @@ func ReplayJournal(path string) (ReplayState, error) {
 		}
 		if e.Type == EventHalt {
 			state.HaltSHA256 = hashBytes(line)
+			if state.Halts != nil {
+				state.Halts[e.Sequence] = state.HaltSHA256
+			}
 		}
 		state.Sequence = e.Sequence
 	}
@@ -181,6 +215,10 @@ func applyEvent(s *ReplayState, e JournalEvent) error {
 		s.Halted = true
 		s.HaltReason = e.Error
 		s.HaltSequence = e.Sequence
+		if s.Halts == nil {
+			s.Halts = map[int64]string{}
+		}
+		s.Halts[e.Sequence] = "" // stamped with the persisted line hash on replay
 		return nil
 	}
 	if e.Type == EventSupersession {
@@ -190,17 +228,20 @@ func applyEvent(s *ReplayState, e JournalEvent) error {
 		if !s.Halted {
 			return errors.New("pilot: supersession without a halted event")
 		}
-		if s.Supersession != nil {
-			return errors.New("pilot: duplicate halt supersession")
+		if s.Supersessions == nil {
+			s.Supersessions = map[int64]JournalEvent{}
 		}
-		if e.SupersededEventSequence != s.HaltSequence || e.SupersededEventSHA256 == "" || e.SupersededEventSHA256 != s.HaltSHA256 {
-			return errors.New("pilot: supersession does not bind the halted event")
+		boundSHA, bound := s.Halts[e.SupersededEventSequence]
+		if !bound || e.SupersededEventSequence <= 0 || e.SupersededEventSHA256 == "" || e.SupersededEventSHA256 != boundSHA {
+			return errors.New("pilot: supersession does not bind a halted event")
+		}
+		if _, dup := s.Supersessions[e.SupersededEventSequence]; dup {
+			return errors.New("pilot: duplicate supersession for halted event")
 		}
 		if e.DecisionSHA256 == "" || e.ToleranceRule == "" {
-			return errors.New("pilot: supersession missing decision or tolerance-rule binding")
+			return errors.New("pilot: supersession missing decision or rule binding")
 		}
-		copy := e
-		s.Supersession = &copy
+		s.Supersessions[e.SupersededEventSequence] = e
 		return nil
 	}
 	if s.Binding == nil {
