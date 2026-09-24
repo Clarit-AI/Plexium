@@ -292,6 +292,11 @@ func report(args []string) error {
 		billingCounts[out.Billing]++
 	}
 	result := map[string]any{"events": s.Sequence, "scheduledSlots": len(inv.Schedule), "reconciledSlots": reconciled, "requestAttempts": sent, "operationalFailures": failures, "billingCounts": billingCounts, "actualKnownSpendMicrodollars": knownCost, "conservativeLedgerExposureMicrodollars": exposure, "halted": s.Halted, "haltReason": s.HaltReason, "outcomes": outcomes}
+	// Decision 1/2 policy statements, bound in every report: documented free
+	// Jev output is an explicit zero rate (not omitted), MaxOutputTokens is a
+	// non-cost resource bound, and rate semantics are UNRECONCILED.
+	billingBasis := jevcompare.DefaultBillingBasis()
+	result["billingBasis"] = billingBasis
 	if *fixturesPath != "" || *manifestPath != "" {
 		if *fixturesPath == "" || *manifestPath == "" {
 			return errors.New("report scoring requires both fixtures and manifest")
@@ -303,13 +308,17 @@ func report(args []string) error {
 		if err := pilot.ValidateScoringCorpus(&inv, loaded, *manifestPath); err != nil {
 			return err
 		}
-		reports := map[pilot.Arm]scoring.Report{}
+		provenance, err := jevcompare.BuildProvenance(*fixturesPath, *manifestPath, inv.InventoryHash)
+		if err != nil {
+			return err
+		}
+		reports := map[pilot.Arm]jevcompare.BoundReport{}
 		for _, arm := range []pilot.Arm{pilot.ArmJev, pilot.ArmNano} {
 			preds, err := pilot.Project(loaded.Fixtures, outcomes, arm)
 			if err != nil {
 				return err
 			}
-			reports[arm] = scoring.Score(protocol.ProtocolVersion, scoring.Source(arm), preds)
+			reports[arm] = jevcompare.BoundReport{Report: scoring.Score(protocol.ProtocolVersion, scoring.Source(arm), preds), CorpusProvenance: provenance, BillingBasis: billingBasis}
 		}
 		result["tuningOnlyScores"] = reports
 	}

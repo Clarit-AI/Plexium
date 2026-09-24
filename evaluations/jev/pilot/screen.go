@@ -30,38 +30,88 @@ func sanitizeText(value string, secrets []string) string {
 	return value
 }
 
-// sanitizeTextPreservingNumbers replaces secrets only at word boundaries
-// to avoid corrupting numeric lexemes (e.g., secret "20" in "120").
+// sanitizeTextPreservingNumbers redacts secrets in free text (error, halt,
+// and diagnostic strings) with one exact rule: a secret match is preserved
+// ONLY when it is a proper part of a longer valid numeric lexeme in the text
+// (e.g. secret "20" inside "3.20", "20.5", "2e20", "0.0000020", "120",
+// "205", "992088"). Every other occurrence is redacted — including a bare
+// numeric credential ("code 20") and alphanumeric-embedded credentials
+// ("v20beta", "gpt-20turbo", "sk-20-live").
+//
+// A "valid numeric lexeme" is a maximal run of number characters
+// ([0-9+-.eE]) that (a) parses as one JSON number token, (b) is not glued
+// into a larger alphanumeric token at either boundary, and (c) strictly
+// contains the match. Numeric FIELD values never pass through this
+// function: billing lexemes are preserved byte-identical by the
+// token-aware field screeners (screenDecimalField).
 func sanitizeTextPreservingNumbers(value string, secrets []string) string {
 	for _, secret := range secrets {
 		if secret == "" {
 			continue
 		}
-		// Simple word-boundary replacement: only replace if surrounded by
-		// non-alphanumeric characters or string boundaries.
-		// This prevents "20" from matching inside "120" or "0.0000020".
-		secretLen := len(secret)
-		var result strings.Builder
-		i := 0
-		for i <= len(value)-secretLen {
-			if value[i:i+secretLen] == secret {
-				// Check boundaries
-				leftOk := i == 0 || !isAlphaNum(value[i-1])
-				rightOk := i+secretLen == len(value) || !isAlphaNum(value[i+secretLen])
-				if leftOk && rightOk {
-					result.WriteString(redactedCredential)
-					i += secretLen
-					continue
-				}
-			}
-			result.WriteByte(value[i])
-			i++
-		}
-		// Append remaining characters
-		result.WriteString(value[i:])
-		value = result.String()
+		value = redactSecretOutsideNumericLexemes(value, secret)
 	}
 	return value
+}
+
+func redactSecretOutsideNumericLexemes(value, secret string) string {
+	secretLen := len(secret)
+	if secretLen == 0 || len(value) < secretLen {
+		return value
+	}
+	var result strings.Builder
+	i := 0
+	for i <= len(value)-secretLen {
+		if value[i:i+secretLen] != secret {
+			result.WriteByte(value[i])
+			i++
+			continue
+		}
+		if isProperPartOfNumericLexeme(value, i, secretLen) {
+			result.WriteString(secret)
+		} else {
+			result.WriteString(redactedCredential)
+		}
+		i += secretLen
+	}
+	result.WriteString(value[i:])
+	return result.String()
+}
+
+// isProperPartOfNumericLexeme reports whether value[match:match+matchLen] is
+// strictly contained in a longer valid numeric lexeme of value.
+func isProperPartOfNumericLexeme(value string, match, matchLen int) bool {
+	lo, hi := match, match+matchLen
+	for i := lo; i < hi; i++ {
+		if !isNumberChar(value[i]) {
+			return false
+		}
+	}
+	// Maximal number-character run around the match.
+	for lo > 0 && isNumberChar(value[lo-1]) {
+		lo--
+	}
+	for hi < len(value) && isNumberChar(value[hi]) {
+		hi++
+	}
+	// The lexeme must be a standalone numeric token, not a fragment glued
+	// into a larger alphanumeric word ("v20beta", "gpt-20turbo", "120x").
+	if lo > 0 && isAlphaNum(value[lo-1]) {
+		return false
+	}
+	if hi < len(value) && isAlphaNum(value[hi]) {
+		return false
+	}
+	// The match must be a proper part of a LONGER valid numeric lexeme.
+	if hi-lo <= matchLen {
+		return false
+	}
+	return isJSONNumberToken(value[lo:hi])
+}
+
+// isNumberChar reports whether c can appear inside a JSON number token.
+func isNumberChar(c byte) bool {
+	return (c >= '0' && c <= '9') || c == '.' || c == '+' || c == '-' || c == 'e' || c == 'E'
 }
 
 func isAlphaNum(c byte) bool {

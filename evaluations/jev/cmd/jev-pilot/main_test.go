@@ -47,6 +47,7 @@ func TestPrepareWritesFrozenInventoryAndCorpusReference(t *testing.T) {
 }
 
 func TestPrepareReloadRunResumeAndReportWithMockHTTP(t *testing.T) {
+	isolateAllocationRegistry(t)
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -168,6 +169,24 @@ func TestPrepareReloadRunResumeAndReportWithMockHTTP(t *testing.T) {
 	if report["scheduledSlots"] != float64(48) || report["reconciledSlots"] != float64(48) || report["requestAttempts"] != float64(48) {
 		t.Fatalf("report=%v", report)
 	}
+	// Decision-2 statements must be bound in the report.
+	basisRaw, err := json.Marshal(report["billingBasis"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"rateSemantics":"UNRECONCILED"`, `"liveContractsVerified":false`, `"jevRateOutPerMillionMicrodollars":0`} {
+		if !strings.Contains(string(basisRaw), want) {
+			t.Fatalf("report billingBasis missing %s: %s", want, basisRaw)
+		}
+	}
+	// The scored reports carry the embedded corpus provenance.
+	scoredRaw, err := json.Marshal(report["tuningOnlyScores"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(scoredRaw), `"corpusProvenance"`) || !strings.Contains(string(scoredRaw), `"fixtureIdentities"`) {
+		t.Fatalf("scored reports lack embedded provenance: %s", scoredRaw)
+	}
 	if err := os.Remove(m.JournalPath); err != nil {
 		t.Fatal(err)
 	}
@@ -232,12 +251,20 @@ func TestCompareSidecarCLIWritesVerifiableThreeArmBinding(t *testing.T) {
 	baselinePath := filepath.Join(dir, "baseline.json")
 	pilotPath := filepath.Join(dir, "pilot.json")
 	outPath := filepath.Join(dir, "comparison.json")
-	baseline := scoring.Report{Source: scoring.SourceBaseline, ProtocolVersion: "0.4.0", FixtureCount: 24}
-	jev := scoring.Report{Source: scoring.Source("jev"), ProtocolVersion: "0.4.0", FixtureCount: 24}
-	nano := scoring.Report{Source: scoring.Source("nano"), ProtocolVersion: "0.4.0", FixtureCount: 24}
+	prov, err := jevcompare.ProvenanceFromFiles("../../review-pilot/fixtures.jsonl", "../../review-pilot/fixtures.manifest.json", "../../pilot/request-inventory.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := func(src scoring.Source) jevcompare.BoundReport {
+		rep := scoring.Report{Source: src, ProtocolVersion: "0.4.0", FixtureCount: 24}
+		if src == scoring.SourceBaseline {
+			rep.BaselineVersion = "v0.4-abstaining"
+		}
+		return jevcompare.BoundReport{Report: rep, CorpusProvenance: prov, BillingBasis: jevcompare.DefaultBillingBasis()}
+	}
 	for path, value := range map[string]any{
-		baselinePath: map[string]any{"baseline": baseline},
-		pilotPath:    map[string]any{"tuningOnlyScores": map[string]any{"jev": jev, "nano": nano}},
+		baselinePath: map[string]any{"baseline": mk(scoring.SourceBaseline)},
+		pilotPath:    map[string]any{"tuningOnlyScores": map[string]any{"jev": mk(scoring.Source("jev")), "nano": mk(scoring.Source("nano"))}},
 	} {
 		b, err := json.Marshal(value)
 		if err != nil {
@@ -285,5 +312,38 @@ func TestBillingTotalsExcludeInvalidCostAndExposeKnownOverrun(t *testing.T) {
 	}
 	if exposure != 11 {
 		t.Fatalf("exposure=%d want 11 (reservation 2 + overrun 9)", exposure)
+	}
+}
+
+// TestDecision2RateOutExplicitZeroBoundInManifestAndReport: documented free
+// Jev output binds RateOut as an explicit zero — present in the execution
+// manifest JSON and in every report — never omitted, and MaxOutputTokens is
+// stated as a non-cost resource bound.
+func TestDecision2RateOutExplicitZeroBoundInManifestAndReport(t *testing.T) {
+	const manifestJSON = `{"endpoint":"https://example.test/api/alpha/decisions","requestModel":"alias","responseModel":"pin","responseProvider":"P","apiKeyEnv":"TEST_KEY","ledgerPath":"LEDGER","ratesVersion":"v","rateEvidence":"r","tokenBoundEvidence":"t","pinMappingEvidence":"p","providerEvidence":"p","outputLimitEvidence":"o","subcapMicrodollars":100,"reservationMicrodollars":1,"rateInPerMillionMicrodollars":1000000,"rateOutPerMillionMicrodollars":0,"maxBilledInputTokens":1,"maxBilledOutputTokens":1}`
+	var a armManifest
+	if err := json.Unmarshal([]byte(manifestJSON), &a); err != nil {
+		t.Fatal(err)
+	}
+	if a.RateOut == nil || *a.RateOut != 0 {
+		t.Fatalf("RateOut explicit zero not bound in manifest: %+v", a.RateOut)
+	}
+	back, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(back), `"rateOutPerMillionMicrodollars":0`) {
+		t.Fatalf("RateOut explicit zero omitted on manifest re-serialization: %s", back)
+	}
+	// The report binding states the same policy facts.
+	basis := jevcompare.DefaultBillingBasis()
+	encoded, err := json.Marshal(basis)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"rateSemantics":"UNRECONCILED"`, `"liveContractsVerified":false`, `"jevRateOutPerMillionMicrodollars":0`, "non-cost resource bound"} {
+		if !strings.Contains(string(encoded), want) {
+			t.Fatalf("report billingBasis missing %q: %s", want, encoded)
+		}
 	}
 }

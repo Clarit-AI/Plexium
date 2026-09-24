@@ -4,8 +4,8 @@
   "rubric": "Classify only the supplied question, evidence, candidates, and relationship endpoints. Use the exact allowed-label vocabulary. For document typing, classify the primary subject: document includes treaties, accords, and identifiable formal agreements; paper applies only when the publication itself is the subject; a named region's environmental characteristics are place, while climate as a general phenomenon is concept. Use insufficient-evidence when the supplied evidence cannot distinguish an allowed label. For relationships, used-by requires explicit functional use, ownership supports association but not part-of, and absence supports no-supported-relationship only when the case-specific question and evidence make that absence explicit. For claim support, contradicted requires incompatible evidence rather than assumed completeness.",
   "rubricSha256": "0a55cbf9c8dd887299024c376ae7a8abe805187917b2d073931d016c46792f22",
   "corpusReference": {
-    "fixtureFileSha256": "bd3475c422e369e1168e03e57af962c26a232c9a10ebb457d75f750a39aca9b5",
-    "manifestSha256": "0109980d581b61e05ed8b96936061367a1c3c61d1f3d1a5558db4f71692ab38e",
+    "fixtureFileSha256": "7b30aabe31b887cdf5417ad71ed682b3c687fc026b1a438c4f9407142690b7a6",
+    "manifestSha256": "30e1c11cfe966ac5985ebb521a831a743829eaa5c75117cdbc80d26b7cc04978",
     "fixtureCount": 24,
     "split": "tuning"
   },
@@ -1489,5 +1489,5 @@
       "payloadSha256": "c34b64180c87f364c4aecff34d3f73906b47c64ebd1d0bfcbc305962d179bae1"
     }
   ],
-  "inventorySha256": "0bb853aaab3ad5c072528ea9a4f3a225fafb66ea8b2c70d7c5b04cdd1b57dabd"
+  "inventorySha256": "50d3f4d5544814ffbdcb0030121d9a30175fb9830936ee265866eff1652e3431"
 }

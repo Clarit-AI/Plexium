@@ -128,8 +128,8 @@ func TestReviewPilotSchemaValidation(t *testing.T) {
 			insuf++
 		}
 	}
-	if sup != 2 || contra != 1 || insuf != 3 {
-		t.Errorf("claim verdicts: supported=%d contradicted=%d insufficient-evidence=%d (want 2/1/3)", sup, contra, insuf)
+	if sup != 2 || contra != 2 || insuf != 2 {
+		t.Errorf("claim verdicts: supported=%d contradicted=%d insufficient-evidence=%d (want 2/2/2)", sup, contra, insuf)
 	}
 
 	// 24 distinct source groups.
@@ -200,8 +200,10 @@ func TestReviewPilotManifest(t *testing.T) {
 // loader roundtrip (raw read -> Unmarshal -> Marshal -> re-read).
 // Before the fix, these fields were absent from protocol.Fixture
 // and encoding/json silently discarded them on Unmarshal.
-// TestReviewPilotLabelsByCurrentAdjudication locks the current fixture labels,
-// including the final human corrections layered on the v0.4 packet.
+// TestReviewPilotLabelsByCurrentAdjudication locks the fixture labels of the
+// final human adjudication (KHA-579, 2026-09-23): rp-et-001 plus the four
+// priority decisions rp-et-002/003/005/006 and the 19-case batch confirmed
+// as proposed per the remaining-cases review.
 func TestReviewPilotLabelsByCurrentAdjudication(t *testing.T) {
 	fxPath, mfPath := paths(t)
 	loaded, err := loader.Load(fxPath, mfPath)
@@ -209,26 +211,26 @@ func TestReviewPilotLabelsByCurrentAdjudication(t *testing.T) {
 		t.Fatalf("loader.Load: %v", err)
 	}
 	want := map[string]string{
-		"rp-et-001":  "place",                     // approved regional subject
-		"rp-et-002":  "project",                   // approved civic foundation project
+		"rp-et-001":  "place",                     // approved regional subject (ambiguity preserved)
+		"rp-et-002":  "project",                   // OVERRIDES old insufficient-evidence proposal
 		"rp-et-003":  "document",                  // approved accord-as-formal-document
 		"rp-et-004":  "insufficient-evidence",     // empty body (missing evidence)
 		"rp-et-005":  "document",                  // approved index/catalog document
-		"rp-et-006":  "place",                     // approved named-region environment
+		"rp-et-006":  "paper",                     // summary/report → paper mapping
 		"rp-ct-007":  "PERSON",                    // approved named person
 		"rp-ct-008":  "ORGANIZATION",              // approved industrial operator
 		"rp-ct-009":  "ORGANIZATION",              // approved investment firm
 		"rp-ct-010":  "insufficient-evidence",     // placeholder candidate, no context
 		"rp-ct-011":  "ORGANIZATION",              // approved renamed observatory
-		"rp-ct-012":  "insufficient-evidence",     // approved ambiguous survey referent
-		"rp-rel-013": "related-to",                // monitoring association, not functional use
-		"rp-rel-014": "related-to",                // ownership association survives reversed order
-		"rp-rel-015": "related-to",                // geographically consistent sources
-		"rp-rel-016": "related-to",                // approved supply association, not entity use
-		"rp-rel-017": "no-supported-relationship", // approved case-specific absence of holdings
+		"rp-ct-012":  "DOCUMENT",                  // published catalogue is a DOCUMENT
+		"rp-rel-013": "used-by",                   // shoal used by the buoy network
+		"rp-rel-014": "no-supported-relationship", // reversed Mill→Syndicate direction unsupported
+		"rp-rel-015": "insufficient-evidence",     // neither source establishes a direction
+		"rp-rel-016": "used-by",                   // foundry used by the steelworks
+		"rp-rel-017": "insufficient-evidence",     // distinct entities, broad question unestablished
 		"rp-rel-018": "related-to",                // approved spatial/touristic association
 		"rp-cs-019":  "supported",                 // explicit founding date
-		"rp-cs-020":  "insufficient-evidence",     // no incompatible or exhaustive endpoint evidence
+		"rp-cs-020":  "contradicted",              // Spur serves the Mine by a separate freight line
 		"rp-cs-021":  "insufficient-evidence",     // unresolved equal-authority conflict
 		"rp-cs-022":  "supported",                 // explicit vessel count survives rename
 		"rp-cs-023":  "contradicted",              // embedded instruction is not factual authority
@@ -275,21 +277,21 @@ func TestReviewPilotHumanAdjudicationMetadata(t *testing.T) {
 		"rp-et-003":  {label: "document", rationaleFragment: "identifiable formal agreements"},
 		"rp-et-004":  {label: "insufficient-evidence", rationaleFragment: "No excerpts available"},
 		"rp-et-005":  {label: "document", rationaleFragment: "index/catalog"},
-		"rp-et-006":  {label: "place", rationaleFragment: "environmental characteristics"},
+		"rp-et-006":  {label: "paper", rationaleFragment: "summary/report"},
 		"rp-ct-007":  {label: "PERSON", rationaleFragment: "personal name and a personal title"},
 		"rp-ct-008":  {label: "ORGANIZATION", rationaleFragment: "industrial operator"},
 		"rp-ct-009":  {label: "ORGANIZATION", rationaleFragment: "the firm, not the person"},
 		"rp-ct-010":  {label: "insufficient-evidence", rationaleFragment: "no semantic context"},
 		"rp-ct-011":  {label: "ORGANIZATION", rationaleFragment: "rename does not change semantic type"},
-		"rp-rel-013": {label: "related-to", rationaleFragment: "not explicit functional use"},
-		"rp-rel-014": {label: "related-to", rationaleFragment: "does not justify broadening part-of semantics"},
-		"rp-rel-015": {label: "related-to", rationaleFragment: "geographically consistent"},
-		"rp-ct-012":  {label: "insufficient-evidence", rationaleFragment: "ambiguous between a survey activity and a resulting document"},
-		"rp-rel-016": {label: "related-to", rationaleFragment: "not explicit use of the source supplier entity itself"},
-		"rp-rel-017": {label: "no-supported-relationship", rationaleFragment: "explicit absence of Club holdings"},
+		"rp-rel-013": {label: "used-by", rationaleFragment: "used by the network"},
+		"rp-rel-014": {label: "no-supported-relationship", rationaleFragment: "not supported by the evidence"},
+		"rp-rel-015": {label: "insufficient-evidence", rationaleFragment: "neither establishes a directed relationship"},
+		"rp-ct-012":  {label: "DOCUMENT", rationaleFragment: "published catalogue"},
+		"rp-rel-016": {label: "used-by", rationaleFragment: "used by the steelworks"},
+		"rp-rel-017": {label: "insufficient-evidence", rationaleFragment: "absence alone does not prove disproof"},
 		"rp-rel-018": {label: "related-to", rationaleFragment: "spatial/touristic"},
 		"rp-cs-019":  {label: "supported", rationaleFragment: "matches the body verbatim"},
-		"rp-cs-020":  {label: "insufficient-evidence", rationaleFragment: "does not declare the listed endpoints exhaustive"},
+		"rp-cs-020":  {label: "contradicted", rationaleFragment: "separate older freight line"},
 		"rp-cs-021":  {label: "insufficient-evidence", rationaleFragment: "equally authoritative"},
 		"rp-cs-022":  {label: "supported", rationaleFragment: "count of vessels = 3"},
 		"rp-cs-023":  {label: "contradicted", rationaleFragment: "embedded instruction is an injection"},
@@ -332,8 +334,8 @@ func TestReviewPilotHumanAdjudicationMetadata(t *testing.T) {
 	if fixture := approved["rp-cs-020"]; len(fixture.ChallengeCategories) != 1 || fixture.ChallengeCategories[0] != protocol.ChallengeMissingEvidence {
 		t.Fatalf("rp-cs-020 challenge categories = %v, want [missing-evidence]", fixture.ChallengeCategories)
 	}
-	if fixture := approved["rp-rel-017"]; fixture.ExpectedLabel != "no-supported-relationship" {
-		t.Fatalf("rp-rel-017 label = %q, want no-supported-relationship", fixture.ExpectedLabel)
+	if fixture := approved["rp-rel-017"]; fixture.ExpectedLabel != "insufficient-evidence" {
+		t.Fatalf("rp-rel-017 label = %q, want insufficient-evidence", fixture.ExpectedLabel)
 	}
 }
 

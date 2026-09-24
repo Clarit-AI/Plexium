@@ -230,6 +230,15 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 				return outcomes, r.halt(out.Error)
 			}
 		}
+		// Decision 2 (halt-on-discrepancy): a nonempty rate-semantics
+		// discrepancy accounts positive billing (settled exactly once above)
+		// and then halts BOTH arms. It is never a normal continue. When the
+		// billing is conservatively zero the reservation is retained.
+		if discrepancy := obs.Billing.RateSemanticsDiscrepancy; discrepancy != "" {
+			out.Error = "rate semantics unreconciled; halting both arms: " + discrepancy
+			outcomes = append(outcomes, out)
+			return outcomes, r.halt(out.Error)
+		}
 		if usageExceeded {
 			out.Error = fmt.Sprintf("observed usage exceeds bounds: input %d/%d output %d/%d", in, budget.InputBound, outTokens, budget.OutputBound)
 			outcomes = append(outcomes, out)

@@ -15,6 +15,7 @@ import (
 // the CALLER-SELECTED allocation path/ID and the state paths.
 // The frozen 50,144 µ$ prior exposure gets declared twice.
 func TestW2R1_AllocationExclusivityByAuthorizationIdentity(t *testing.T) {
+	isolateAllocationRegistry(t)
 	dir := t.TempDir()
 
 	// Same authorization reference, same cap, same frozen prior exposure, same inventory

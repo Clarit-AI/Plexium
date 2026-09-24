@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/Clarit-AI/Plexium/evaluations/jev/scoring"
 )
 
 // TestW3R4_SidecarAcceptsForeignCorpusReports reproduces W3-R4:
@@ -19,17 +17,11 @@ import (
 func TestW3R4_SidecarAcceptsForeignCorpusReports(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create a legitimate baseline and pilot report from the REAL corpus
+	// Create a legitimate baseline and pilot report from the REAL corpus,
+	// stamped with the embedded provenance an honest producer emits.
 	baselinePath := filepath.Join(dir, "baseline.json")
 	pilotPath := filepath.Join(dir, "pilot.json")
-
-	// These reports would be generated from the real corpus
-	baseline := scoring.Report{Source: scoring.SourceBaseline, ProtocolVersion: "0.4.0", FixtureCount: 24}
-	jev := scoring.Report{Source: scoring.Source("jev"), ProtocolVersion: "0.4.0", FixtureCount: 24}
-	nano := scoring.Report{Source: scoring.Source("nano"), ProtocolVersion: "0.4.0", FixtureCount: 24}
-
-	writeTestJSON(t, baselinePath, map[string]any{"baseline": baseline})
-	writeTestJSON(t, pilotPath, map[string]any{"tuningOnlyScores": map[string]any{"jev": jev, "nano": nano}})
+	writeGenuineReports(t, baselinePath, pilotPath, nil)
 
 	// Build a legitimate sidecar with REAL corpus
 	realCfg := Config{

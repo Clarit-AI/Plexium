@@ -1,66 +1,62 @@
 # Review-pilot packet (KHA-579 tuning, v0.4 protocol)
 
-**Human adjudication status (2026-09-20):** KHAEntertainment approved
-all 24 fixtures. The packet now has 24 `approved` and 0 `unreviewed`
-records. This completes human label adjudication for this tuning packet;
-it does not make the packet held-out or establish model quality.
+**Human adjudication status (2026-09-23, final):** KHAEntertainment
+human-adjudicated all 24 fixtures on 2026-09-23 (KHA-579 final record:
+rp-et-001 plus the four priority decisions rp-et-002/003/005/006 and
+the 19-case batch confirmed as proposed against the remaining-cases
+review). The packet has 24 `approved` and 0 `unreviewed` records. This
+completes human label adjudication for this tuning packet; it does not
+make the packet held-out or establish model quality. The 2026-09-23
+record supersedes the earlier partial interim log (preserved in the
+adjudication artifact for history).
 
-The packet-level primary-subject rubric is now explicit:
+Rubric clarifications in force (2026-09-23):
+
+- `used-by` reads **"source is used by target"** (target consumes or
+  serves from source).
+- Explicit typing abstention for `insufficient-evidence`: that label
+  requires information insufficient to support a decision.
+- Two plausible subjects alone are NOT `insufficient-evidence`; a
+  self-declared primary subject is a clear primary.
+
+Standing taxonomy notes:
 
 - `document` includes treaties, accords, and other identifiable
   formal agreements when that agreement is the subject.
 - Environmental characteristics of a named region describe a
   `place`; climate as a general phenomenon is a `concept`.
 - Use `document` or `paper` for a publication only when the
-  publication itself is the subject.
-- Reserve `used-by` for explicit functional use. Monitoring alone
-  establishes association, not functional use.
-- When evidence establishes an association but the precise relation
-  (`monitored-by`, `owned-by`, etc.) is absent from the closed
-  vocabulary, use the generic `related-to`; do not broaden `part-of`.
-- Reversing the named order of an ownership fact does not erase the
-  association. Omitted detail is not conflicting evidence.
-- Candidate typing must resolve the named referent. Language about
-  cataloguing or an update does not by itself distinguish a survey
-  activity from a resulting document; unresolved referents abstain.
-- Use of a supplied product is not explicit functional use of the
-  supplier entity. When `supplies-to` is unavailable, use the generic
-  `related-to` rather than stretching `used-by`.
-- `contradicted` requires incompatible evidence. Do not assume a list
-  of endpoints is exhaustive or that `connects` means direct service.
+  publication itself is the subject; `summary/report` maps to `paper`.
 - Treat equally authoritative, unresolved conflicting evidence as
   `insufficient-evidence` unless precedence is established.
 - Embedded instructions are not factual authority. Classify claims
   against the legitimate source content.
 - A named operator does not imply exclusivity unless the source says so.
-- For `rp-rel-017` specifically, the explicit absence of Club holdings
-  supports `no-supported-relationship`; do not generalize this decision
-  into a rule that every absence of evidence proves a negative relation.
 
-### Human correction log
+### Final human adjudication log (2026-09-23, applied)
 
-| Fixture | Previous label | Human-approved label | Reason |
+| Fixture | Proposal | Human-approved label | Reason |
 | --- | --- | --- | --- |
-| `rp-et-001` | `place` | `place` | Hesperian Strait and its surrounding area are the intended subject; observatory emphasis makes the case intentionally ambiguous. |
-| `rp-et-002` | `insufficient-evidence` | `project` | The civic foundation is explicitly named as a public works project; crew, equipment, dimensions, and materials support it. |
+| `rp-et-001` | `place` | `place` | Hesperian Strait and its surrounding area are the intended subject; observatory emphasis makes the case intentionally ambiguous (annotation preserved). |
+| `rp-et-002` | `insufficient-evidence` | `project` | OVERRIDES the old proposal: the civic foundation is self-declared "a public works project"; crew, equipment, dimensions, and materials support it. |
 | `rp-et-003` | `document` | `document` | The Celestine Concord itself is an identifiable formal agreement and therefore a document; the carrier pamphlet is not the basis. |
-| `rp-et-006` | `paper` | `place` | Rainfall, frost dates, soil, and trend describe the named Echofield region; the publication is not the primary subject. |
-| `rp-rel-013` | `used-by` | `related-to` | Monitoring supports an association but not explicit functional use; `monitored-by` is not in the closed vocabulary. |
-| `rp-rel-014` | `no-supported-relationship` | `related-to` | Acquisition and ownership support an association even when Mill is named before Syndicate; `owned-by` is not in the closed vocabulary. |
-| `rp-rel-015` | `insufficient-evidence` | `related-to` | Both sources place Pier north of Cove; omitting distance in one source does not conflict with the one-league detail in the other. |
-| `rp-ct-012` | `DOCUMENT` | `insufficient-evidence` | The named survey can denote an activity or resulting document; cataloguing, forms, and an update do not resolve the referent. |
-| `rp-rel-016` | `used-by` | `related-to` | The Steelworks uses supplied blooms, not explicitly the Foundry entity; `supplies-to` is absent from the vocabulary. |
-| `rp-cs-020` | `contradicted` | `insufficient-evidence` | The atlas does not make endpoints exhaustive or define `connects` as direct-only, so it does not provide incompatible evidence. |
 | `rp-et-004` | `insufficient-evidence` | `insufficient-evidence` | With no excerpts, the primary subject cannot be determined. |
-| `rp-et-005` | `document` | `document` | The index/catalog is itself the subject; its rename does not change its document type. |
+| `rp-et-005` | `document` | `document` | Index/catalog types as a document; no subject-typing to the library. |
+| `rp-et-006` | `paper` | `paper` | "summary/report → paper" is the intended mapping; the climate analysis/report is the subject. |
 | `rp-ct-007` | `PERSON` | `PERSON` | A personal name, magistrate title, and authorship identify a person. |
 | `rp-ct-008` | `ORGANIZATION` | `ORGANIZATION` | An industrial operator with facilities and a board chair is an organization. |
 | `rp-ct-009` | `ORGANIZATION` | `ORGANIZATION` | The evidence distinguishes Helvex Capital, the firm, from its founder. |
 | `rp-ct-010` | `insufficient-evidence` | `insufficient-evidence` | A placeholder and passing mention provide no semantic type evidence. |
 | `rp-ct-011` | `ORGANIZATION` | `ORGANIZATION` | The named observatory operates instruments and publishes a bulletin; renaming does not alter its type. |
-| `rp-rel-017` | `insufficient-evidence` | `no-supported-relationship` | For this case, the explicit absence of Club holdings and separate private collection support no relationship from Archive to Club; this is not a general absent-evidence rule. |
+| `rp-ct-012` | `DOCUMENT` | `DOCUMENT` | The Jordel Civic Survey is a published catalogue — a DOCUMENT; the embedded instruction block is an injection to ignore. |
+| `rp-rel-013` | `used-by` | `used-by` | The buoy network monitors currents through the shoal: the shoal is used by the network (source is used by target). |
+| `rp-rel-014` | `no-supported-relationship` | `no-supported-relationship` | Acquisition runs Syndicate→Mill; the questioned Mill→Syndicate direction is not supported. |
+| `rp-rel-015` | `insufficient-evidence` | `insufficient-evidence` | Neither source establishes a directed relationship; equal authority, no precedence. |
+| `rp-rel-016` | `used-by` | `used-by` | The Foundry supplies steel blooms to the Steelworks: the foundry is used by the steelworks (source is used by target). |
+| `rp-rel-017` | `insufficient-evidence` | `insufficient-evidence` | The entities are distinct and no directed relationship is established for the broad question. |
 | `rp-rel-018` | `related-to` | `related-to` | The coastal travel path establishes a spatial/touristic association. |
 | `rp-cs-019` | `supported` | `supported` | The founding year is stated directly. |
+| `rp-cs-020` | `contradicted` | `contradicted` | The Spur connects the Mill directly to the city while the Mine rides a separate freight line; the claim (Spur connects Mine to Mill) is contradicted. |
 | `rp-cs-021` | `insufficient-evidence` | `insufficient-evidence` | Equally authoritative sources conflict on the creek's terminus without precedence. |
 | `rp-cs-022` | `supported` | `supported` | The body explicitly lists three vessels; the rename does not affect the count. |
 | `rp-cs-023` | `contradicted` | `contradicted` | The legitimate profile gives 2114; the marked instruction asserting 2080 is not factual authority. |
