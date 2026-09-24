@@ -1,0 +1,200 @@
+{
+  "fixtureCount": 292,
+  "bySourceGroup": {
+    "cov-rel-depends": {
+      "fixtureCount": 1,
+      "entityRecall": 1,
+      "edgeRecall": 0
+    },
+    "cov-rel-derived": {
+      "fixtureCount": 1,
+      "entityRecall": 1,
+      "edgeRecall": 0
+    },
+    "cov-rel-implements": {
+      "fixtureCount": 1,
+      "entityRecall": 1,
+      "edgeRecall": 0
+    },
+    "cov-rel-insufficient": {
+      "fixtureCount": 1,
+      "entityRecall": 1,
+      "edgeRecall": 0
+    },
+    "sg-001": {
+      "fixtureCount": 9,
+      "entityRecall": 0,
+      "edgeRecall": 0
+    },
+    "sg-002": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-003": {
+      "fixtureCount": 9,
+      "entityRecall": 0.8888888888888888,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-004": {
+      "fixtureCount": 9,
+      "entityRecall": 0.8888888888888888,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-005": {
+      "fixtureCount": 9,
+      "entityRecall": 0.8888888888888888,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-006": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-007": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-008": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-009": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-010": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-011": {
+      "fixtureCount": 9,
+      "entityRecall": 0.8888888888888888,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-012": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 1
+    },
+    "sg-013": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 1
+    },
+    "sg-014": {
+      "fixtureCount": 9,
+      "entityRecall": 0.8888888888888888,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-015": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-016": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-017": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-018": {
+      "fixtureCount": 9,
+      "entityRecall": 0.8888888888888888,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-019": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-020": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 1
+    },
+    "sg-021": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-022": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 1
+    },
+    "sg-023": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 1
+    },
+    "sg-024": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 1
+    },
+    "sg-025": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-026": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-027": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-028": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-029": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 1
+    },
+    "sg-030": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 0.8888888888888888
+    },
+    "sg-031": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 1
+    },
+    "sg-032": {
+      "fixtureCount": 9,
+      "entityRecall": 1,
+      "edgeRecall": 1
+    }
+  },
+  "overall": {
+    "entityRecall": 0.9486301369863014,
+    "edgeRecall": 0.8801369863013698
+  },
+  "omittedGoldFixtures": [
+    "sg-001-claim-adversarial",
+    "sg-001-claim-base",
+    "sg-001-claim-insufficient",
+    "sg-001-claim-irrelevant",
+    "sg-001-claim-noprec",
+    "sg-001-claim-numbers",
+    "sg-001-rel-base",
+    "sg-001-rel-none",
+    "sg-001-rel-reverse"
+  ]
+}

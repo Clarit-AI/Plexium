@@ -1,0 +1,5 @@
+
+         
+
+         
+{"id":"gen-1790223758-q5H9wCSSSBb3D9920RBE","object":"chat.completion","created":1790223758,"model":"openai/gpt-4.1-nano","provider":"OpenAI","system_fingerprint":null,"service_tier":"default","choices":[{"index":0,"logprobs":null,"finish_reason":"stop","native_finish_reason":"completed","message":{"role":"assistant","content":"{\"label\":\"ORGANIZATION\"}","refusal":null,"reasoning":null}}],"usage":{"prompt_tokens":412,"completion_tokens":8,"total_tokens":420,"cost":0.000043956,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.0000444,"upstream_inference_prompt_cost":0.0000412,"upstream_inference_completions_cost":0.0000032},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0,"audio_tokens":0}}}

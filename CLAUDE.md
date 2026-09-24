@@ -10,6 +10,50 @@ Self-documenting repository system. Applies Karpathy's LLM Wiki pattern to agent
 
 ---
 
+## GitHub Account Enforcement
+
+This repo belongs to the **Clarit-AI** GitHub account. The `gh` CLI may be
+authenticated as the KHA Entertainment account (`KHAEntertainment`) during
+cross-project sessions.
+
+**Push with standard GitHub tooling under the owning account.** No third-party
+integration is involved.
+
+Preferred — scope the owning account's token to the single command, leaving
+global `gh` state untouched (this also satisfies the pre-push hook's identity
+check):
+
+```bash
+GH_TOKEN="$(gh auth token --user Clarit-AI)" git push upstream <branch>
+GH_TOKEN="$(gh auth token --user Clarit-AI)" gh pr create --base main --title "..." --body "..."
+```
+
+Alternatively, switch the active account for the duration of a task and
+restore it afterwards:
+
+```bash
+gh auth switch --user Clarit-AI
+git push upstream <branch>
+gh auth switch --user KHAEntertainment   # restore previous state
+```
+
+A GitHub MCP server, when configured for the session, is equally acceptable —
+use its `push_files` / `create_pull_request` tools against `Clarit-AI/Plexium`.
+
+Guardrails in place:
+- `.git/hooks/pre-push` — blocks pushes to the Clarit-AI remote unless the
+  effective account is `Clarit-AI`
+- `.claude/settings.json` PreToolUse hook — warns before `git push` / `gh pr`
+  commands
+
+**Do not bypass the hooks.** If the owning account is unavailable, stop and ask
+the user to push rather than working around the guard.
+
+**Deprecated:** the Core-Memory Clarit-AI integration was uninstalled in
+September 2026 and is no longer installed or available. It must not be used.
+
+---
+
 ## Build Guide
 
 **Primary build guide:** `docs/phases/OVERVIEW.md`

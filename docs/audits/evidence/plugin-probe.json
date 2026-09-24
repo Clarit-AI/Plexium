@@ -1,0 +1,47 @@
+{
+  "root": "/private/tmp/plexium-plugin-audit-p4j3t06y",
+  "manifest": [
+    [
+      "Home.md",
+      "document"
+    ]
+  ],
+  "results": {
+    "graph": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"stats\":{\"pages\":2,\"relationships\":0,\"entity_types\":[\"document\"],\"tags\":[]},\"pages\":[{\"id\":\"\",\"title\":\"Open Questions\",\"entity_type\":\"\",\"tags\":null,\"confidence\":0},{\"id\":\"raw-canary\",\"title\":\"RawCanary\",\"entity_type\":\"document\",\"tags\":null,\"confidence\":0.9}]}"
+          }
+        ]
+      }
+    },
+    "builtin_raw": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "[]"
+          }
+        ]
+      }
+    },
+    "markedup_raw": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "[{\"pagePath\":\"/private/tmp/plexium-plugin-audit-p4j3t06y/.wiki/raw/audit-private.md\",\"title\":\"RawCanary\",\"score\":6.3,\"snippet\":\"Synthetic private test material.\",\"matchType\":\"title\"}]"
+          }
+        ]
+      }
+    }
+  }
+}

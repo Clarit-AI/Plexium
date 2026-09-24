@@ -1,0 +1,222 @@
+{
+  "protocolVersion": "0.4.0",
+  "generatedAt": "2026-09-23T19:15:11.721278-07:00",
+  "fixtureFile": "review-pilot/fixtures.jsonl",
+  "fixtureCount": 24,
+  "splitCounts": {
+    "tuning": 24,
+    "heldOut": 0,
+    "total": 24
+  },
+  "taskCounts": {
+    "entityType": 6,
+    "candidateType": 6,
+    "relationship": 6,
+    "claimSupport": 6,
+    "total": 24
+  },
+  "sourceGroupCount": 24,
+  "reviewStatusCount": {
+    "approved": 24
+  },
+  "challengeCount": {
+    "adversarial-instruction": 2,
+    "competing-candidates": 3,
+    "conflicting-sources": 2,
+    "irrelevant-context": 2,
+    "missing-evidence": 5,
+    "rename": 4,
+    "reversed-direction": 1,
+    "straightforward-positive": 5
+  },
+  "sha256FixtureFile": "7b30aabe31b887cdf5417ad71ed682b3c687fc026b1a438c4f9407142690b7a6",
+  "sha256Manifest": "",
+  "fixtureHashes": [
+    {
+      "id": "rp-et-001",
+      "sha256": "f2793f6641bc42f2f9bbf5b61b35492fbf80b1db68e5ae272ed86553070b8c9b",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-et-002",
+      "sha256": "393f438872bcf10332f14e1509bfa27a10fe1884d24403d92d05f65d8c2ee860",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-et-003",
+      "sha256": "1dd5d27be99d2d679f617e3ba55264a0b1869401d0d2cac7136ce4398b9f94b3",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-et-004",
+      "sha256": "9874f46ba473bb9646fae42ab5183923e13803a96f60b1bda65a87318f379447",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-et-005",
+      "sha256": "cd12418ac3aad526d01c7cbfdb9c06cd6f8aec63b3251363b362ead07fe6820c",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-et-006",
+      "sha256": "84111556d493e6346287929399e6eeb317510dad7901f51604b783c063fae3e6",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-ct-007",
+      "sha256": "cc0f6a9b83bd46887f779019500221ffb657c7e50623071810d666023c39f1f1",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-ct-008",
+      "sha256": "7d3a9738990f3f73a01955c4191f3392fa6b2ca06015dbe765b19fe4ec0f5287",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-ct-009",
+      "sha256": "49676fc137903cdd765d731c2208b887d1bddaa8e8b39824c1037a1b06af3e97",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-ct-010",
+      "sha256": "373f899cdf806b11c46627e59093da204f33f9ba64779e13af72025b3903c9cf",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-ct-011",
+      "sha256": "1f7112d8643435c963143687d77e36108ed620f3e0a0a9a9960ed7594cb58104",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-ct-012",
+      "sha256": "1b9089bb8a7abbfc52cbeb356b64a1017d1cc5748bf2c54e3c435c5fb905ca32",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-rel-013",
+      "sha256": "494a9d2782e50d9436d012e7a936e867cd45b7858f39b78cb0276f703659f713",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-rel-014",
+      "sha256": "1c3713bf459fd60141c6b423d76a730a0464fa982ae9f35aee336bca4fb1075b",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-rel-015",
+      "sha256": "c9c424759d9b484347335e455480732036365ec546b2203a5980bc03a99e2e10",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-rel-016",
+      "sha256": "261d83f7a0756923bafb62db51406c89aba9951be3d46bd49d3808eddc615a9c",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-rel-017",
+      "sha256": "43f9e7b03ed3f9aac2e037c2072080179db9053cf09b92d1799b688b44e9a60f",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-rel-018",
+      "sha256": "24fef558b752997a333d940ce4487eedab523c43956e6b0cc99a63ecda059253",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-cs-019",
+      "sha256": "eb865dd45ed7f8e204a702dd18ede068cdba9a2e33b4a094c61296ef9f8481b6",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-cs-020",
+      "sha256": "0018a05820d5350b7d597913ecd519b0702a537cafc4552f73ec6d17a6ecd110",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-cs-021",
+      "sha256": "d055dda629d1cd6767278f64144be303ff22b7fd1b0b5431bc7e4d6f7ecdc6bc",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-cs-022",
+      "sha256": "7aeeead6089a768cea2eb4199502c85edebe75443afbb49f4e4cd5c9e6f0aaf9",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-cs-023",
+      "sha256": "dd9813f0eda32a15845cc9bf35ecb49bb715f59197739685da9aad771c7c1c81",
+      "split": "tuning"
+    },
+    {
+      "id": "rp-cs-024",
+      "sha256": "81a0d085b375a2e3bf710fe2283fd63a235951b86b2713d7fb60271ffc21df0d",
+      "split": "tuning"
+    }
+  ],
+  "splitIndependences": [
+    {
+      "split": "tuning",
+      "sourceGroupCount": 24,
+      "independent": true,
+      "entityDisjoint": true,
+      "bodyEntityDisjoint": true,
+      "crossChannelEntityDisjoint": true,
+      "templateFamilyDisjoint": true,
+      "independenceScope": "structural-only",
+      "statisticalIndependenceEstablished": false,
+      "statisticalLimitationReason": "structural disjointness does not establish statistical independence"
+    },
+    {
+      "split": "held-out",
+      "sourceGroupCount": 0,
+      "independent": true,
+      "entityDisjoint": true,
+      "bodyEntityDisjoint": true,
+      "crossChannelEntityDisjoint": true,
+      "templateFamilyDisjoint": true,
+      "independenceScope": "structural-only",
+      "statisticalIndependenceEstablished": false,
+      "statisticalLimitationReason": "structural disjointness does not establish statistical independence"
+    },
+    {
+      "split": "reserved",
+      "sourceGroupCount": 0,
+      "independent": true,
+      "entityDisjoint": true,
+      "bodyEntityDisjoint": true,
+      "crossChannelEntityDisjoint": true,
+      "templateFamilyDisjoint": true,
+      "independenceScope": "structural-only",
+      "statisticalIndependenceEstablished": false,
+      "statisticalLimitationReason": "structural disjointness does not establish statistical independence"
+    }
+  ],
+  "reviewReadiness": {
+    "fixtureCount": 24,
+    "approvedCount": 24,
+    "unreviewedCount": 0,
+    "studyGateEligible": true
+  },
+  "negativeTaskEvidence": [
+    {
+      "task": "relationship",
+      "split": "held-out",
+      "negativeRowCount": 0,
+      "sourceGroupCount": 0,
+      "constructionClusterCount": 0,
+      "statisticalIndependenceEstablished": false,
+      "independentNegativeGateEligible": false,
+      "statisticalLimitationReason": "0 template-family IDs observed for 0 negative rows; family identifiers do not establish statistical independence"
+    },
+    {
+      "task": "claim-support",
+      "split": "held-out",
+      "negativeRowCount": 0,
+      "sourceGroupCount": 0,
+      "constructionClusterCount": 0,
+      "statisticalIndependenceEstablished": false,
+      "independentNegativeGateEligible": false,
+      "statisticalLimitationReason": "0 template-family IDs observed for 0 negative rows; family identifiers do not establish statistical independence"
+    }
+  ]
+}
