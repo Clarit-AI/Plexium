@@ -30,6 +30,44 @@ func sanitizeText(value string, secrets []string) string {
 	return value
 }
 
+// sanitizeTextPreservingNumbers replaces secrets only at word boundaries
+// to avoid corrupting numeric lexemes (e.g., secret "20" in "120").
+func sanitizeTextPreservingNumbers(value string, secrets []string) string {
+	for _, secret := range secrets {
+		if secret == "" {
+			continue
+		}
+		// Simple word-boundary replacement: only replace if surrounded by
+		// non-alphanumeric characters or string boundaries.
+		// This prevents "20" from matching inside "120" or "0.0000020".
+		secretLen := len(secret)
+		var result strings.Builder
+		i := 0
+		for i <= len(value)-secretLen {
+			if value[i:i+secretLen] == secret {
+				// Check boundaries
+				leftOk := i == 0 || !isAlphaNum(value[i-1])
+				rightOk := i+secretLen == len(value) || !isAlphaNum(value[i+secretLen])
+				if leftOk && rightOk {
+					result.WriteString(redactedCredential)
+					i += secretLen
+					continue
+				}
+			}
+			result.WriteByte(value[i])
+			i++
+		}
+		// Append remaining characters
+		result.WriteString(value[i:])
+		value = result.String()
+	}
+	return value
+}
+
+func isAlphaNum(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
 func containsSecret(value string, secrets []string) bool {
 	for _, secret := range secrets {
 		if secret != "" && strings.Contains(value, secret) {
@@ -56,6 +94,9 @@ func screenRawJSON(value []byte, secrets []string) screenedRaw {
 			if err == nil {
 				err = errors.New("multiple top-level JSON values")
 			}
+		} else {
+			// Valid JSON with no trailing content - clear the EOF error
+			err = nil
 		}
 	}
 	if err != nil {

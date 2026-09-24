@@ -56,6 +56,37 @@ func Build(cfg Config) (*Sidecar, error) {
 	if cfg.FixturesPath == "" || cfg.ManifestPath == "" || cfg.InventoryPath == "" || cfg.BaselineReport == "" || cfg.LivePilotReport == "" {
 		return nil, errors.New("compare: fixtures, manifest, inventory, baseline report, and live pilot report are required")
 	}
+
+	// Read and hash the actual corpus files to bind the sidecar to the
+	// producer's file artifacts, not just the inventory's claimed hashes.
+	fixturesBytes, err := os.ReadFile(cfg.FixturesPath)
+	if err != nil {
+		return nil, fmt.Errorf("compare: read fixtures: %w", err)
+	}
+	fixtureFileSHA := hashBytes(fixturesBytes)
+
+	manifestBytes, err := os.ReadFile(cfg.ManifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("compare: read manifest: %w", err)
+	}
+	manifestSHA := hashBytes(manifestBytes)
+
+	inventoryBytes, err := os.ReadFile(cfg.InventoryPath)
+	if err != nil {
+		return nil, fmt.Errorf("compare: read inventory: %w", err)
+	}
+	// Compute inventory hash the same way as pilot package: canonical JSON without InventoryHash field
+	var invForHash pilot.Inventory
+	if err := json.Unmarshal(inventoryBytes, &invForHash); err != nil {
+		return nil, fmt.Errorf("compare: parse inventory for hashing: %w", err)
+	}
+	invForHash.InventoryHash = ""
+	canonicalInventory, err := json.Marshal(invForHash)
+	if err != nil {
+		return nil, fmt.Errorf("compare: marshal canonical inventory: %w", err)
+	}
+	inventorySHA := hashBytes(canonicalInventory)
+
 	loaded, err := loader.Load(cfg.FixturesPath, cfg.ManifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("compare: load corpus: %w", err)
@@ -73,6 +104,19 @@ func Build(cfg Config) (*Sidecar, error) {
 	if err := pilot.ValidateScoringCorpus(&inv, loaded, cfg.ManifestPath); err != nil {
 		return nil, fmt.Errorf("compare: corpus/inventory mismatch: %w", err)
 	}
+
+	// Verify that the inventory's claimed corpus hashes match the actual files.
+	// This ensures the inventory is consistent with the corpus files.
+	if inv.Corpus.FixtureFileSHA != fixtureFileSHA {
+		return nil, fmt.Errorf("compare: inventory fixtureFileSHA %s does not match actual fixtures file %s", inv.Corpus.FixtureFileSHA, fixtureFileSHA)
+	}
+	if inv.Corpus.ManifestSHA != manifestSHA {
+		return nil, fmt.Errorf("compare: inventory manifestSHA %s does not match actual manifest file %s", inv.Corpus.ManifestSHA, manifestSHA)
+	}
+	if inv.InventoryHash != inventorySHA {
+		return nil, fmt.Errorf("compare: inventory hash %s does not match actual inventory file %s", inv.InventoryHash, inventorySHA)
+	}
+
 	baselineBytes, err := os.ReadFile(cfg.BaselineReport)
 	if err != nil {
 		return nil, err
@@ -110,7 +154,13 @@ func Build(cfg Config) (*Sidecar, error) {
 	}
 	sidecar := &Sidecar{
 		Version: Version,
-		Corpus:  CorpusIdentity{ProtocolVersion: inv.Protocol, FixtureFileSHA: inv.Corpus.FixtureFileSHA, ManifestSHA: inv.Corpus.ManifestSHA, FixtureCount: inv.Corpus.FixtureCount, InventorySHA: inv.InventoryHash},
+		Corpus: CorpusIdentity{
+			ProtocolVersion: inv.Protocol,
+			FixtureFileSHA:  fixtureFileSHA,
+			ManifestSHA:     manifestSHA,
+			FixtureCount:    inv.Corpus.FixtureCount,
+			InventorySHA:    inventorySHA,
+		},
 		Reports: reports,
 	}
 	sidecar.ComparisonID, err = digestWithoutID(sidecar)
@@ -124,6 +174,45 @@ func Verify(sidecar *Sidecar, cfg Config) error {
 	if sidecar == nil || sidecar.Version != Version || sidecar.ComparisonID == "" {
 		return errors.New("compare: invalid sidecar identity")
 	}
+
+	// Recompute corpus hashes from the actual files and verify they match
+	// the sidecar's recorded CorpusIdentity. This prevents a caller from
+	// presenting a sidecar built from one corpus as if it were built from another.
+	fixturesBytes, err := os.ReadFile(cfg.FixturesPath)
+	if err != nil {
+		return fmt.Errorf("compare: read fixtures for verification: %w", err)
+	}
+	if hashBytes(fixturesBytes) != sidecar.Corpus.FixtureFileSHA {
+		return errors.New("compare: fixtures file hash does not match sidecar corpus identity")
+	}
+
+	manifestBytes, err := os.ReadFile(cfg.ManifestPath)
+	if err != nil {
+		return fmt.Errorf("compare: read manifest for verification: %w", err)
+	}
+	if hashBytes(manifestBytes) != sidecar.Corpus.ManifestSHA {
+		return errors.New("compare: manifest file hash does not match sidecar corpus identity")
+	}
+
+	inventoryBytes, err := os.ReadFile(cfg.InventoryPath)
+	if err != nil {
+		return fmt.Errorf("compare: read inventory for verification: %w", err)
+	}
+	// Compute inventory hash the same way as pilot package
+	var invForHash pilot.Inventory
+	if err := json.Unmarshal(inventoryBytes, &invForHash); err != nil {
+		return fmt.Errorf("compare: parse inventory for verification: %w", err)
+	}
+	invForHash.InventoryHash = ""
+	canonicalInventory, err := json.Marshal(invForHash)
+	if err != nil {
+		return fmt.Errorf("compare: marshal canonical inventory for verification: %w", err)
+	}
+	if hashBytes(canonicalInventory) != sidecar.Corpus.InventorySHA {
+		return errors.New("compare: inventory file hash does not match sidecar corpus identity")
+	}
+
+	// Also verify the full sidecar matches a rebuild
 	expected, err := Build(cfg)
 	if err != nil {
 		return err
@@ -183,5 +272,10 @@ func readJSON(path string, dst any) error {
 
 func hash(value []byte) string {
 	sum := sha256.Sum256(value)
+	return hex.EncodeToString(sum[:])
+}
+
+func hashBytes(data []byte) string {
+	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }

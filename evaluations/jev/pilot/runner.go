@@ -196,7 +196,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		oe.ObservationSHA = observationSHA
 		oe.BillingCostRaw = obs.Billing.Cost.Raw
 		if attemptErr != nil {
-			oe.Error = sanitizeText(attemptErr.Error(), r.Config.ScreeningSecrets)
+			oe.Error = sanitizeTextPreservingNumbers(attemptErr.Error(), r.Config.ScreeningSecrets)
 		}
 		if err := r.appendSlotEvent(slot, oe); err != nil {
 			return outcomes, err
@@ -236,7 +236,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 			return outcomes, r.halt(out.Error)
 		}
 		if attemptErr != nil {
-			out.Error = sanitizeText(attemptErr.Error(), r.Config.ScreeningSecrets)
+			out.Error = sanitizeTextPreservingNumbers(attemptErr.Error(), r.Config.ScreeningSecrets)
 		} else if obs.Decision != nil {
 			out.Label = obs.Decision.Choice
 		} else if obs.Chat != nil {
@@ -273,7 +273,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 }
 
 func (r *Runner) halt(reason string) error {
-	reason = sanitizeText(reason, r.Config.ScreeningSecrets)
+	reason = sanitizeTextPreservingNumbers(reason, r.Config.ScreeningSecrets)
 	_ = r.Journal.Append(JournalEvent{Type: EventHalt, Error: reason})
 	return errors.New(reason)
 }
@@ -306,9 +306,9 @@ func (r *Runner) appendSlotEvent(slot Slot, event JournalEvent) error {
 	if event.SlotOrdinal != slot.Ordinal || event.FixtureID != slot.FixtureID || event.Arm != slot.Arm || event.PayloadSHA != slot.PayloadSHA {
 		return fmt.Errorf("pilot: journal event does not match inventory slot %d", slot.Ordinal)
 	}
-	event.BillingCostRaw = sanitizeText(event.BillingCostRaw, r.Config.ScreeningSecrets)
+	// BillingCostRaw is a numeric lexeme (decimal string); never sanitize numeric fields
 	event.Label = sanitizeText(event.Label, r.Config.ScreeningSecrets)
-	event.Error = sanitizeText(event.Error, r.Config.ScreeningSecrets)
+	event.Error = sanitizeTextPreservingNumbers(event.Error, r.Config.ScreeningSecrets)
 	if err := r.Journal.Append(event); err != nil {
 		return err
 	}
