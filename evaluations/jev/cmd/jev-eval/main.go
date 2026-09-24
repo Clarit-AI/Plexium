@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Clarit-AI/Plexium/evaluations/jev/baseline"
+	jevcompare "github.com/Clarit-AI/Plexium/evaluations/jev/compare"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/discovery"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/loader"
 	"github.com/Clarit-AI/Plexium/evaluations/jev/protocol"
@@ -28,14 +29,15 @@ import (
 
 func main() {
 	var (
-		fixturesPath = flag.String("fixtures", "evaluations/jev/fixtures.jsonl", "path to the JSONL fixture file")
-		manifestPath = flag.String("manifest", "evaluations/jev/fixtures.manifest.json", "path to the manifest JSON")
-		replayPath   = flag.String("replay", "", "optional JSONL file of replay entries (offline model results)")
-		replayPolicy = flag.String("replay-policy", "strict", "replay coverage policy: strict|allow-unknown|first-wins")
-		outPath      = flag.String("out", "-", "report output path; - for stdout")
-		rawPredsPath = flag.String("raw-predictions", "", "optional JSONL file for raw per-case predictions (offline replay only)")
-		strict       = flag.Bool("strict", true, "exit non-zero if manifest drift or split independence fail")
-		baselineName = flag.String("baseline", string(baseline.BaselineV2), "deterministic baseline version: "+string(baseline.BaselineV2)+" (v0.4 abstaining, default) | "+string(baseline.BaselineLegacy)+" (v0.3 default-fallback)")
+		fixturesPath  = flag.String("fixtures", "evaluations/jev/fixtures.jsonl", "path to the JSONL fixture file")
+		manifestPath  = flag.String("manifest", "evaluations/jev/fixtures.manifest.json", "path to the manifest JSON")
+		replayPath    = flag.String("replay", "", "optional JSONL file of replay entries (offline model results)")
+		replayPolicy  = flag.String("replay-policy", "strict", "replay coverage policy: strict|allow-unknown|first-wins")
+		outPath       = flag.String("out", "-", "report output path; - for stdout")
+		rawPredsPath  = flag.String("raw-predictions", "", "optional JSONL file for raw per-case predictions (offline replay only)")
+		strict        = flag.Bool("strict", true, "exit non-zero if manifest drift or split independence fail")
+		baselineName  = flag.String("baseline", string(baseline.BaselineV2), "deterministic baseline version: "+string(baseline.BaselineV2)+" (v0.4 abstaining, default) | "+string(baseline.BaselineLegacy)+" (v0.3 default-fallback)")
+		inventoryPath = flag.String("inventory", "", "optional frozen request inventory; when set, the baseline report embeds its corpus provenance and the decision-2 billing basis exactly as the pilot arms do")
 	)
 	flag.Parse()
 
@@ -64,6 +66,18 @@ func main() {
 	baselineReport := scoring.Score(loaded.Manifest.ProtocolVersion, scoring.SourceBaseline, baselinePreds)
 	baselineReport.BaselineVersion = string(baselineVersion)
 	applyStudyReadiness(&baselineReport, loaded.Manifest)
+
+	// Real baseline reports for the three-arm comparison carry the embedded
+	// corpus provenance + decision-2 billing basis exactly as the pilot-arm
+	// reports do (compare admits only reports with this binding).
+	var baselineSection any = baselineReport
+	if *inventoryPath != "" {
+		provenance, err := jevcompare.ProvenanceFromFiles(*fixturesPath, *manifestPath, *inventoryPath)
+		if err != nil {
+			die("provenance: %v", err)
+		}
+		baselineSection = jevcompare.BoundReport{Report: baselineReport, CorpusProvenance: provenance, BillingBasis: jevcompare.DefaultBillingBasis()}
+	}
 	if *rawPredsPath != "" {
 		if err := writeRawPredictions(*rawPredsPath, baselinePreds); err != nil {
 			die("raw baseline predictions: %v", err)
@@ -77,11 +91,11 @@ func main() {
 	envelope := struct {
 		ManifestSummary ManifestSummary        `json:"manifestSummary"`
 		Drift           *loader.DriftReport    `json:"drift"`
-		Baseline        scoring.Report         `json:"baseline"`
+		Baseline        any                    `json:"baseline"`
 		Discovery       *discovery.Report      `json:"discovery,omitempty"`
 		Replay          *scoring.Report        `json:"replay,omitempty"`
 		ReplayCoverage  *runner.CoverageReport `json:"replayCoverage,omitempty"`
-	}{ManifestSummary: summarizeManifest(loaded.Manifest), Drift: loaded.Drift, Baseline: baselineReport, Discovery: discoveryReport}
+	}{ManifestSummary: summarizeManifest(loaded.Manifest), Drift: loaded.Drift, Baseline: baselineSection, Discovery: discoveryReport}
 
 	if *replayPath != "" {
 		entries, err := readReplay(*replayPath)

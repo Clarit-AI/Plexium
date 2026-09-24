@@ -9,10 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/Clarit-AI/Plexium/evaluations/jev/baseline"
+	jevcompare "github.com/Clarit-AI/Plexium/evaluations/jev/compare"
 )
 
 const (
@@ -284,4 +286,76 @@ func taskInSet(task string, names ...string) bool {
 		}
 	}
 	return false
+}
+
+// TestJevEvalBaselineCarriesEmbeddedProvenance is the residual-#6 regression:
+// with -inventory, the real baseline report embeds the corpus provenance
+// block and the decision-2 billing basis exactly as the pilot-arm reports do,
+// so compare admission can bind it to the frozen corpus.
+func TestJevEvalBaselineCarriesEmbeddedProvenance(t *testing.T) {
+	wd, _ := os.Getwd()
+	repoRoot := filepath.Clean(filepath.Join(wd, "..", ".."))
+	fx := filepath.Join(repoRoot, reviewPilotRelDir, "fixtures.jsonl")
+	mf := filepath.Join(repoRoot, reviewPilotRelDir, "fixtures.manifest.json")
+	inv := filepath.Join(repoRoot, "pilot", "request-inventory.json")
+
+	binDir := t.TempDir()
+	bin := filepath.Join(binDir, "jev-eval")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = wd
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build failed: %v\n%s", err, out)
+	}
+
+	outPath := filepath.Join(binDir, "report.json")
+	cmd := exec.Command(bin, "-fixtures", fx, "-manifest", mf, "-inventory", inv, "-out", outPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("jev-eval failed: %v\nstderr=%s", err, stderr.String())
+	}
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	var report map[string]any
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatalf("unmarshal report: %v\n%s", err, data)
+	}
+	baselineSection, _ := report["baseline"].(map[string]any)
+	if baselineSection == nil {
+		t.Fatalf("report missing baseline section: %s", data)
+	}
+	want, err := jevcompare.ProvenanceFromFiles(fx, mf, inv)
+	if err != nil {
+		t.Fatalf("expected provenance: %v", err)
+	}
+	provRaw, err := json.Marshal(baselineSection["corpusProvenance"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prov jevcompare.CorpusProvenance
+	if err := json.Unmarshal(provRaw, &prov); err != nil {
+		t.Fatalf("corpusProvenance undecodable: %v", err)
+	}
+	if !reflect.DeepEqual(prov, want) {
+		// Structs with slices: compare field by field.
+		if prov.FixtureFileSHA != want.FixtureFileSHA || prov.ManifestSHA != want.ManifestSHA || prov.InventorySHA != want.InventorySHA || prov.FixtureIdentitySHA != want.FixtureIdentitySHA || len(prov.FixtureIdentities) != len(want.FixtureIdentities) {
+			t.Fatalf("embedded provenance mismatch:\n got %+v\nwant %+v", prov, want)
+		}
+		for i := range prov.FixtureIdentities {
+			if prov.FixtureIdentities[i] != want.FixtureIdentities[i] {
+				t.Fatalf("embedded fixture identity set mismatch at %d", i)
+			}
+		}
+	}
+	basisRaw, err := json.Marshal(baselineSection["billingBasis"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, wantField := range []string{`"rateSemantics":"UNRECONCILED"`, `"liveContractsVerified":false`, `"jevRateOutPerMillionMicrodollars":0`} {
+		if !strings.Contains(string(basisRaw), wantField) {
+			t.Fatalf("billingBasis missing %s: %s", wantField, basisRaw)
+		}
+	}
 }
