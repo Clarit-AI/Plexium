@@ -1,0 +1,18 @@
+{
+  "version": "jev-pilot-allocation-v1",
+  "allocationId": "kha-579-tuning-pilot-allocation-20260923-v1",
+  "authorizationReference": "KHA-579 jev-spend-authorization 2026-09-22 ($1.00 bounded pilot)",
+  "authorizationCapMicrodollars": 1000000,
+  "frozenPriorExposureMicrodollars": 50144,
+  "allocatedCapMicrodollars": 949856,
+  "inventoryHash": "50d3f4d5544814ffbdcb0030121d9a30175fb9830936ee265866eff1652e3431",
+  "runId": "kha-579-tuning-pilot-20260923-run",
+  "executionManifestSha256": "00f96da4c10fd5fc65f908bd2f62fdabbafafceed6ad5767facc3d47468d595b",
+  "allocationRecordPath": "run/kha579-tuning-pilot-20260923/allocation.json",
+  "journalPath": "run/kha579-tuning-pilot-20260923/journal.jsonl",
+  "jevLedgerPath": "run/kha579-tuning-pilot-20260923/jev.ledger.jsonl",
+  "nanoLedgerPath": "run/kha579-tuning-pilot-20260923/nano.ledger.jsonl",
+  "evidenceDir": "run/kha579-tuning-pilot-20260923/evidence",
+  "runLockPath": "run/kha579-tuning-pilot-20260923/run.lock",
+  "probeReconciliationPrecondition": "freeze-execution-and-re-review-allocation-before-any-further-send"
+}

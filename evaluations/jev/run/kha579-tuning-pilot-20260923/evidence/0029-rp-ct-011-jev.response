@@ -1,0 +1,1 @@
+{"model":"typesafe/jev-1.13-20260917","answers":{"verdict":{"type":"choice","choice":"ORGANIZATION","probabilities":{"TOOL":0,"PERSON":0,"CONCEPT":0,"LOCATION":0,"insufficient-evidence":0,"DOCUMENT":0,"EVENT":0,"ORGANIZATION":1},"confidence":1}},"usage":{"input_tokens":1235,"output_tokens":91,"cost":0.00005187},"id":"gen-dec-1790225352-4LLauv3HF2rz6wYO3vuV","provider":"TypeSafe"}
