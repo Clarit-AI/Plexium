@@ -13,14 +13,15 @@ import (
 type EventType string
 
 const (
-	EventInit       EventType = "run-init"
-	EventIntent     EventType = "attempt-intent"
-	EventReserved   EventType = "reserved"
-	EventSend       EventType = "send-started"
-	EventObserved   EventType = "observed"
-	EventReconciled EventType = "reconciled"
-	EventSkipped    EventType = "not-run"
-	EventHalt       EventType = "halt"
+	EventInit         EventType = "run-init"
+	EventIntent       EventType = "attempt-intent"
+	EventReserved     EventType = "reserved"
+	EventSend         EventType = "send-started"
+	EventObserved     EventType = "observed"
+	EventReconciled   EventType = "reconciled"
+	EventSkipped      EventType = "not-run"
+	EventHalt         EventType = "halt"
+	EventSupersession EventType = "halt-supersession"
 )
 
 type JournalEvent struct {
@@ -50,6 +51,16 @@ type JournalEvent struct {
 	Outcome          string    `json:"outcome,omitempty"`
 	Label            string    `json:"label,omitempty"`
 	Error            string    `json:"error,omitempty"`
+	// RateTolerance records a Decision-5 tolerated known-discrepancy
+	// classification on the outcome row (figures verbatim).
+	RateTolerance string `json:"rateTolerance,omitempty"`
+	// Halt-supersession binding (append-only auditable resume).
+	DecisionSHA256          string `json:"decisionSha256,omitempty"`
+	DecisionReference       string `json:"decisionReference,omitempty"`
+	ToleranceRule           string `json:"toleranceRule,omitempty"`
+	SupersededEventSequence int64  `json:"supersededEventSequence,omitempty"`
+	SupersededEventSHA256   string `json:"supersededEventSha256,omitempty"`
+	TopUpNote               string `json:"topUpNote,omitempty"`
 }
 
 type SlotState struct {
@@ -68,8 +79,14 @@ type ReplayState struct {
 	Sequence   int64
 	Halted     bool
 	HaltReason string
-	Slots      map[int]SlotState
-	Binding    *RunBinding
+	// HaltSequence/HaltSHA256 identify the durable halt event (the hash is
+	// over the journal line exactly as persisted).
+	HaltSequence int64
+	HaltSHA256   string
+	// Supersession is the Decision-5 superseding record when present.
+	Supersession *JournalEvent
+	Slots        map[int]SlotState
+	Binding      *RunBinding
 }
 
 type Journal struct {
@@ -127,8 +144,9 @@ func ReplayJournal(path string) (ReplayState, error) {
 	s := bufio.NewScanner(f)
 	s.Buffer(make([]byte, 64<<10), 4<<20)
 	for s.Scan() {
+		line := append([]byte(nil), s.Bytes()...)
 		var e JournalEvent
-		if err := json.Unmarshal(s.Bytes(), &e); err != nil {
+		if err := json.Unmarshal(line, &e); err != nil {
 			return state, fmt.Errorf("pilot: torn/invalid journal at sequence %d: %w", state.Sequence+1, err)
 		}
 		if e.Sequence != state.Sequence+1 {
@@ -136,6 +154,9 @@ func ReplayJournal(path string) (ReplayState, error) {
 		}
 		if err := applyEvent(&state, e); err != nil {
 			return state, err
+		}
+		if e.Type == EventHalt {
+			state.HaltSHA256 = hashBytes(line)
 		}
 		state.Sequence = e.Sequence
 	}
@@ -159,6 +180,27 @@ func applyEvent(s *ReplayState, e JournalEvent) error {
 		}
 		s.Halted = true
 		s.HaltReason = e.Error
+		s.HaltSequence = e.Sequence
+		return nil
+	}
+	if e.Type == EventSupersession {
+		if s.Binding == nil {
+			return errors.New("pilot: supersession before run-init")
+		}
+		if !s.Halted {
+			return errors.New("pilot: supersession without a halted event")
+		}
+		if s.Supersession != nil {
+			return errors.New("pilot: duplicate halt supersession")
+		}
+		if e.SupersededEventSequence != s.HaltSequence || e.SupersededEventSHA256 == "" || e.SupersededEventSHA256 != s.HaltSHA256 {
+			return errors.New("pilot: supersession does not bind the halted event")
+		}
+		if e.DecisionSHA256 == "" || e.ToleranceRule == "" {
+			return errors.New("pilot: supersession missing decision or tolerance-rule binding")
+		}
+		copy := e
+		s.Supersession = &copy
 		return nil
 	}
 	if s.Binding == nil {

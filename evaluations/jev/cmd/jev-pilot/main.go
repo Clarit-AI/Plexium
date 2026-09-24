@@ -151,6 +151,7 @@ func prepare(args []string) error {
 func execute(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	path := fs.String("execution-manifest", "", "reviewed execution manifest")
+	resumeDecision5 := fs.Bool("resume-superseded-halt-under-decision5", false, "auditable Decision-5 resume: reconcile the tolerated halted attempt and supersede the durable halt (binding the verbatim Decision-5 text digest and the pinned tolerance rule) before continuing the remaining slots; settled attempts are never resent")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -230,7 +231,7 @@ func execute(args []string) error {
 	if err != nil {
 		return err
 	}
-	r := pilot.Runner{Inventory: &inv, Journal: j, Config: pilot.ExecutionConfig{InventoryHash: m.InventoryHash, AuthorizationRef: m.AuthorizationReference, CombinedCap: m.CombinedCap, LiveContractsVerified: m.LiveContractsVerified, RunLockPath: m.RunLockPath, EvidenceDir: m.EvidenceDir, ContractSHA: contractSHA, AllocationID: m.AllocationID, AllocationSHA: allocationSHA, ScreeningSecrets: credentials, Jev: jb, Nano: nb}, Attempts: map[pilot.Arm]pilot.AttemptFunc{pilot.ArmJev: jc.SubmitDecisionsOnce, pilot.ArmNano: nc.CompleteOnce}}
+	r := pilot.Runner{Inventory: &inv, Journal: j, Config: pilot.ExecutionConfig{InventoryHash: m.InventoryHash, AuthorizationRef: m.AuthorizationReference, CombinedCap: m.CombinedCap, LiveContractsVerified: m.LiveContractsVerified, RunLockPath: m.RunLockPath, EvidenceDir: m.EvidenceDir, ContractSHA: contractSHA, AllocationID: m.AllocationID, AllocationSHA: allocationSHA, ScreeningSecrets: credentials, SupersedeHaltUnderDecision5: *resumeDecision5, Jev: jb, Nano: nb}, Attempts: map[pilot.Arm]pilot.AttemptFunc{pilot.ArmJev: jc.SubmitDecisionsOnce, pilot.ArmNano: nc.CompleteOnce}}
 	_, err = r.Run(context.Background())
 	return err
 }
@@ -292,10 +293,18 @@ func report(args []string) error {
 		billingCounts[out.Billing]++
 	}
 	result := map[string]any{"events": s.Sequence, "scheduledSlots": len(inv.Schedule), "reconciledSlots": reconciled, "requestAttempts": sent, "operationalFailures": failures, "billingCounts": billingCounts, "actualKnownSpendMicrodollars": knownCost, "conservativeLedgerExposureMicrodollars": exposure, "halted": s.Halted, "haltReason": s.HaltReason, "outcomes": outcomes}
-	// Decision 1/2 policy statements, bound in every report: documented free
+	if s.Supersession != nil {
+		result["haltSupersession"] = s.Supersession
+	}
+	// Decision 1/2/5 policy statements, bound in every report: documented free
 	// Jev output is an explicit zero rate (not omitted), MaxOutputTokens is a
-	// non-cost resource bound, and rate semantics are UNRECONCILED.
-	billingBasis := jevcompare.DefaultBillingBasis()
+	// non-cost resource bound, rate semantics are UNRECONCILED, and the
+	// Decision-5 known-discrepancy tolerance rule is stated explicitly with
+	// its pinned bounds.
+	billingBasis, err := reportBillingBasis()
+	if err != nil {
+		return err
+	}
 	result["billingBasis"] = billingBasis
 	if *fixturesPath != "" || *manifestPath != "" {
 		if *fixturesPath == "" || *manifestPath == "" {
@@ -318,11 +327,30 @@ func report(args []string) error {
 			if err != nil {
 				return err
 			}
-			reports[arm] = jevcompare.BoundReport{Report: scoring.Score(protocol.ProtocolVersion, scoring.Source(arm), preds), CorpusProvenance: provenance, BillingBasis: billingBasis}
+			reports[arm] = jevcompare.BoundReport{Report: scoring.Score(protocol.ProtocolVersion, scoring.Source(arm), preds), CorpusProvenance: provenance, BillingBasis: jevcompare.DefaultBillingBasis()}
 		}
 		result["tuningOnlyScores"] = reports
 	}
 	return json.NewEncoder(os.Stdout).Encode(result)
+}
+
+// reportBillingBasis is the report basis: the accepted accounting basis
+// (decision 1/2) plus the Decision-5 known-discrepancy tolerance rule with
+// its pinned bounds, stated explicitly in every report.
+func reportBillingBasis() (map[string]any, error) {
+	encoded, err := json.Marshal(jevcompare.DefaultBillingBasis())
+	if err != nil {
+		return nil, err
+	}
+	basis := map[string]any{}
+	if err := json.Unmarshal(encoded, &basis); err != nil {
+		return nil, err
+	}
+	rule := pilot.Decision5Tolerance()
+	basis["rateToleranceRule"] = rule.Description
+	basis["rateToleranceDecisionSha256"] = rule.DecisionSHA256
+	basis["rateToleranceRatioBounds"] = []string{rule.RatioMin, rule.RatioMax}
+	return basis, nil
 }
 
 func billingTotals(outcomes []pilot.Outcome, state pilot.ReplayState) (ledger.MicroUnit, ledger.MicroUnit) {

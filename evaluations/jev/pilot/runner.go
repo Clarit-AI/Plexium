@@ -36,7 +36,14 @@ type ExecutionConfig struct {
 	AllocationID          string
 	AllocationSHA         string
 	ScreeningSecrets      []string
-	Jev, Nano             ArmBudget
+	// RateTolerance is the pinned known-discrepancy tolerance rule; nil
+	// means the Decision-5 default (Decision5Tolerance).
+	RateTolerance *RateSemanticsTolerance
+	// SupersedeHaltUnderDecision5 authorizes ONE auditable halt
+	// supersession (Decision 5) so a halted run resumes its remaining
+	// slots without resending settled attempts.
+	SupersedeHaltUnderDecision5 bool
+	Jev, Nano                   ArmBudget
 }
 
 type Outcome struct {
@@ -49,6 +56,7 @@ type Outcome struct {
 	KnownCost        bool
 	RequestSent      bool
 	Status           int
+	RateTolerance    string
 	Observation      *ObservationEvidence
 }
 
@@ -102,8 +110,16 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		return nil, err
 	}
 	state := r.Journal.State()
-	if state.Halted {
-		return nil, fmt.Errorf("pilot: journal halted: %s", state.HaltReason)
+	if state.Halted && state.Supersession == nil {
+		if !r.Config.SupersedeHaltUnderDecision5 {
+			return nil, fmt.Errorf("pilot: journal halted: %s", state.HaltReason)
+		}
+		// Decision 5: one auditable, append-only supersession reconciles the
+		// tolerated halted attempt and resumes the remaining slots.
+		if err := r.supersedeHaltUnderDecision5(state); err != nil {
+			return nil, err
+		}
+		state = r.Journal.State()
 	}
 	if err := r.validateReplayState(state, 0); err != nil {
 		return nil, r.halt(err.Error())
@@ -216,6 +232,14 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		}
 		out.Billing = billing
 		out.BillingRaw = obs.Billing.Cost.Raw
+		// Decision 5: the KNOWN B1 discrepancy class is tolerated with
+		// conservative max-figure accounting (never halting); everything
+		// outside it keeps the Decision-2 halt-both-arms net unchanged.
+		tolerance := rateToleranceVerdict(obs.Billing, budget.Reservation, r.rateTolerance())
+		if tolerance.Tolerated {
+			cost = tolerance.Conservative
+			out.RateTolerance = tolerance.Detail
+		}
 		out.CostMicrodollars = cost
 		out.KnownCost = true
 		usageExceeded := in > budget.InputBound || outTokens > budget.OutputBound
@@ -230,11 +254,11 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 				return outcomes, r.halt(out.Error)
 			}
 		}
-		// Decision 2 (halt-on-discrepancy): a nonempty rate-semantics
-		// discrepancy accounts positive billing (settled exactly once above)
-		// and then halts BOTH arms. It is never a normal continue. When the
-		// billing is conservatively zero the reservation is retained.
-		if discrepancy := obs.Billing.RateSemanticsDiscrepancy; discrepancy != "" {
+		// Decision 2 (halt-on-discrepancy), narrowed by Decision 5: a
+		// nonempty rate-semantics discrepancy outside the tolerated known
+		// class accounts positive billing (settled exactly once above) and
+		// then halts BOTH arms. It is never a normal continue.
+		if discrepancy := obs.Billing.RateSemanticsDiscrepancy; discrepancy != "" && !tolerance.Tolerated {
 			out.Error = "rate semantics unreconciled; halting both arms: " + discrepancy
 			outcomes = append(outcomes, out)
 			return outcomes, r.halt(out.Error)
@@ -262,6 +286,7 @@ func (r *Runner) Run(ctx context.Context) ([]Outcome, error) {
 		final.BillingCostRaw = obs.Billing.Cost.Raw
 		final.Label = out.Label
 		final.Error = out.Error
+		final.RateTolerance = out.RateTolerance
 		final.RequestSent = obs.RequestSent
 		final.ResponseSeen = obs.ResponseReceived
 		final.Status = obs.Status
@@ -285,6 +310,98 @@ func (r *Runner) halt(reason string) error {
 	reason = sanitizeTextPreservingNumbers(reason, r.Config.ScreeningSecrets)
 	_ = r.Journal.Append(JournalEvent{Type: EventHalt, Error: reason})
 	return errors.New(reason)
+}
+
+func (r *Runner) rateTolerance() RateSemanticsTolerance {
+	if r.Config.RateTolerance != nil {
+		return *r.Config.RateTolerance
+	}
+	return Decision5Tolerance()
+}
+
+// supersedeHaltUnderDecision5 performs the Decision-5 auditable resume:
+// reconcile the single tolerated halted attempt (never re-sending it), then
+// append the explicit superseding record binding the verbatim Decision-5
+// text digest, the pinned tolerance rule with its bounds, and the durable
+// halted event identity. The halt event itself is never deleted or rewritten.
+func (r *Runner) supersedeHaltUnderDecision5(state ReplayState) error {
+	rule := Decision5Tolerance()
+	if state.HaltSequence <= 0 || state.HaltSHA256 == "" {
+		return errors.New("pilot: no durable halt event to supersede")
+	}
+	var pending []int
+	for ordinal, st := range state.Slots {
+		if st.Intent && !st.Reconciled {
+			pending = append(pending, ordinal)
+		}
+	}
+	if len(pending) != 1 {
+		return fmt.Errorf("pilot: decision-5 supersession requires exactly one pending attempt, found %d", len(pending))
+	}
+	st := state.Slots[pending[0]]
+	if st.Observation == nil {
+		return errors.New("pilot: pending attempt has no observation evidence")
+	}
+	var slot Slot
+	var found bool
+	for _, s := range r.Inventory.Schedule {
+		if s.Ordinal == pending[0] {
+			slot, found = s, true
+			break
+		}
+	}
+	if !found {
+		return errors.New("pilot: pending attempt absent from frozen inventory")
+	}
+	evidence, err := loadAttemptEvidence(r.Config.EvidenceDir, *st.Observation)
+	if err != nil {
+		return fmt.Errorf("pilot: pending attempt evidence invalid: %w", err)
+	}
+	verdict := rateToleranceVerdict(evidence.Billing, ledger.MicroUnit(st.ReservedAmount), rule)
+	if !verdict.Tolerated {
+		return errors.New("pilot: decision-5 supersession refused: the halted attempt is outside the tolerated known-discrepancy class")
+	}
+	topUp := decision5TopUpNote(evidence.Billing, verdict)
+	base := JournalEvent{SlotOrdinal: slot.Ordinal, FixtureID: slot.FixtureID, Arm: slot.Arm, PayloadSHA: slot.PayloadSHA}
+	final := withType(base, EventReconciled)
+	final.ReservationID = st.ReservationID
+	final.BillingCostRaw = evidence.Billing.Cost.Raw
+	final.Label = evidence.Label
+	final.Outcome = "settled-positive"
+	final.RateTolerance = verdict.Detail
+	final.RequestSent = evidence.RequestSent
+	final.ResponseSeen = evidence.ResponseReceived
+	final.Status = evidence.Status
+	if err := r.appendSlotEvent(slot, final); err != nil {
+		return fmt.Errorf("pilot: reconcile tolerated halted attempt: %w", err)
+	}
+	sup := JournalEvent{
+		Type:                    EventSupersession,
+		Error:                   sanitizeTextPreservingNumbers("halt superseded under decision 5; resume continues the remaining slots", r.Config.ScreeningSecrets),
+		DecisionSHA256:          rule.DecisionSHA256,
+		DecisionReference:       rule.DecisionReference,
+		ToleranceRule:           sanitizeTextPreservingNumbers(rule.Description, r.Config.ScreeningSecrets),
+		SupersededEventSequence: state.HaltSequence,
+		SupersededEventSHA256:   state.HaltSHA256,
+		TopUpNote:               sanitizeTextPreservingNumbers(topUp, r.Config.ScreeningSecrets),
+	}
+	return r.Journal.Append(sup)
+}
+
+// decision5TopUpNote documents the conservative top-up treatment of the
+// halted attempt: the pre-halt code settled the REPORTED figure, while
+// Decision 5 accounts max(reported, upstream). A top-up would need a
+// post-settlement ledger adjustment, which the accepted ledger cannot
+// express (Settle rejects terminal reservations under the G2
+// duplicate-settlement invariant; EntryAdjustment is produced only by
+// Settle's overrun path; a new adjustment API is a ledger-core change, out
+// of scope). The difference is therefore disclosed, never rewritten.
+func decision5TopUpNote(b adapter.BillingObservation, verdict RateToleranceVerdict) string {
+	reported, err := decimalMicrodollars(b.Cost.Raw)
+	if err != nil || verdict.Conservative <= reported {
+		return "no conservative top-up required: the settled figure is already the conservative max"
+	}
+	return fmt.Sprintf("conservative top-up +%d microdollars (reported %s settled pre-halt at %d microdollars; conservative max %s = %d microdollars) NOT applied: the accepted ledger has no post-settlement adjustment (Settle rejects terminal reservations under the G2 duplicate-settlement invariant; EntryAdjustment is produced only by Settle's overrun path; a new adjustment API is a ledger-core change, out of scope). The difference is disclosed in conservative reporting.", verdict.Conservative-reported, b.Cost.Raw, reported, verdict.ConservativeRaw, verdict.Conservative)
 }
 func (r *Runner) budget(a Arm) *ArmBudget {
 	if a == ArmJev {
@@ -318,6 +435,7 @@ func (r *Runner) appendSlotEvent(slot Slot, event JournalEvent) error {
 	// BillingCostRaw is a numeric lexeme (decimal string); never sanitize numeric fields
 	event.Label = sanitizeText(event.Label, r.Config.ScreeningSecrets)
 	event.Error = sanitizeTextPreservingNumbers(event.Error, r.Config.ScreeningSecrets)
+	event.RateTolerance = sanitizeTextPreservingNumbers(event.RateTolerance, r.Config.ScreeningSecrets)
 	if err := r.Journal.Append(event); err != nil {
 		return err
 	}
@@ -516,10 +634,14 @@ func ReplayOutcomes(inv *Inventory, state ReplayState, evidenceDir string) ([]Ou
 			evidence = loaded
 			if parsedCost, _, _, _, billingErr := validatedBilling(loaded.Billing); billingErr == nil {
 				cost = parsedCost
+				if e.RateTolerance != "" {
+					// Decision-5 tolerated row: account the conservative max.
+					cost = conservativeMaxMicrodollars(loaded.Billing)
+				}
 				knownCost = true
 			}
 		}
-		outcomes = append(outcomes, Outcome{Slot: slot, Label: e.Label, Error: errText, Billing: billing, BillingRaw: e.BillingCostRaw, CostMicrodollars: cost, KnownCost: knownCost, RequestSent: e.RequestSent, Status: e.Status, Observation: evidence})
+		outcomes = append(outcomes, Outcome{Slot: slot, Label: e.Label, Error: errText, Billing: billing, BillingRaw: e.BillingCostRaw, CostMicrodollars: cost, KnownCost: knownCost, RequestSent: e.RequestSent, Status: e.Status, RateTolerance: e.RateTolerance, Observation: evidence})
 	}
 	return outcomes, nil
 }

@@ -347,3 +347,42 @@ func TestDecision2RateOutExplicitZeroBoundInManifestAndReport(t *testing.T) {
 		}
 	}
 }
+
+// TestReportBasisStatesDecision5ToleranceRule: the report basis binds the
+// accepted accounting basis plus the Decision-5 tolerance rule with its
+// pinned bounds and decision-text digest (Decision 5: "binds the definition
+// into the report basis"; reports keep every truthful statement).
+func TestReportBasisStatesDecision5ToleranceRule(t *testing.T) {
+	basis, err := reportBillingBasis()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := pilot.Decision5Tolerance()
+	if got := basis["rateToleranceRule"]; got != rule.Description {
+		t.Fatalf("rateToleranceRule = %v", got)
+	}
+	if got := basis["rateToleranceDecisionSha256"]; got != rule.DecisionSHA256 || got == "" {
+		t.Fatalf("rateToleranceDecisionSha256 = %v", got)
+	}
+	if got := basis["rateToleranceRatioBounds"]; len(got.([]string)) != 2 || got.([]string)[0] != "0.985" || got.([]string)[1] != "0.995" {
+		t.Fatalf("rateToleranceRatioBounds = %v", got)
+	}
+	desc, _ := basis["rateToleranceRule"].(string)
+	for _, want := range []string{"[0.985, 0.995]", "max(reported, upstream)", "magnitude shock"} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("tolerance rule missing %q: %s", want, desc)
+		}
+	}
+	// Decision-2 statements stay truthful alongside the tolerance rule.
+	for _, want := range []string{"UNRECONCILED"} {
+		if got := basis["rateSemantics"]; got != want {
+			t.Fatalf("rateSemantics = %v want %s", got, want)
+		}
+	}
+	if got := basis["liveContractsVerified"]; got != false {
+		t.Fatalf("liveContractsVerified = %v, want false", got)
+	}
+	if got := basis["jevRateOutPerMillionMicrodollars"]; got != float64(0) && got != 0 {
+		t.Fatalf("jevRateOutPerMillionMicrodollars = %v", got)
+	}
+}
