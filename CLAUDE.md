@@ -8,6 +8,15 @@ Self-documenting repository system. Applies Karpathy's LLM Wiki pattern to agent
 
 **Current state:** Greenfield. Specs finalized and decomposed into executable phase documents. Build begins at Phase 0 (Project Setup).
 
+## Current Traycer Epic and Handoff
+
+- **Epic:** Plexium MarkedUp Solo Restart (`1088c958-cb42-463c-8c23-d9e728f7a0aa`)
+- **Epic artifacts:** `/Users/bbrenner/.traycer/epics/1088c958-cb42-463c-8c23-d9e728f7a0aa/artifacts/`
+- **Most recent handoff (2026-09-26):** `artifacts/markedup-handoff-to-jev-orchestrator/index.md` under that epic
+- **Repo copy for recovery:** [docs/handoffs/2026-09-26-jev-orchestrator.md](docs/handoffs/2026-09-26-jev-orchestrator.md)
+
+The handoff covers the Jev follow-on work and the MarkedUp/Plexium Linear backlog. Read the repo copy when reopening this work; the Traycer handoff was previously swept out of the live artifacts directory and restored from quarantine.
+
 ---
 
 ## GitHub Account Enforcement
