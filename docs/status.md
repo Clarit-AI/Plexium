@@ -1,119 +1,33 @@
 # Plexium Implementation Status
 
-> Last updated: 2026-04-06 | Validated against commit `e642d22`
+> Reviewed 2026-09-28 against the `traycer/plexium-chipper-turtle` code at `1d91b39`. This is an implementation inventory, not a claim that every path has passed a live customer workflow or an end-to-end release gate.
 
-This document is the single source of truth for what works, what is incomplete, and what is planned. Every other Plexium doc references stability tiers defined here.
+The tiers below describe what is present in this checkout. **Implemented** means the code path exists and has targeted tests; it does not promise production reliability. **Limited** means usable code exists with a known contract or validation gap. **Experimental** means the path is incomplete or has not been validated as an operational workflow. **Stub** means the command has no substantive behavior. **Proposed** means the behavior is documented but not shipped.
 
----
+| Capability | Tier | Current behavior and boundary |
+| --- | --- | --- |
+| Wiki foundation (`init`, `convert`, `compile`, `lint`, `doctor`, `migrate`, `publish`, `gh-wiki-sync`, `ci check`) | Implemented | Go CLI, manifest, conversion, deterministic navigation, structural lint, and publishing paths exist with package tests. Structural checks do not establish that generated explanations are factually correct. GitHub Wiki publication and Obsidian use need validation in a real installation. |
+| Source sync and regeneration | Limited | `sync` detects changed source hashes; `--regenerate` can call the configured provider cascade. Ordinary sync still advances stored source hashes without updating wiki content, so a later clean sync is **not** evidence that knowledge was reviewed. See [the September probe](audits/2026-09-19-resync-and-product-assessment.md#f1--sync-can-erase-evidence-of-stale-knowledge) and [`sync.go`](../internal/sync/sync.go). |
+| Built-in CLI retrieval (`retrieve`) | Limited | Runs Plexium's in-tree wiki index and falls back to `_index.md`/content scanning when loading fails or the index has no hit. The normal index scores title, section, first-paragraph summary, and wiki links; it is not full-body BM25 or upstream PageIndex. CLI retrieval currently calls this implementation directly rather than selecting a retrieval plugin. |
+| Built-in MCP (`pageindex serve`) and agent connection | Limited | Plexium's own stdio server exposes `pageindex_search`, `pageindex_get_page`, and `pageindex_list_pages`; `pageindex connect` and `setup` prepare Claude/Codex registration. Search loads the index at server start, so edits during a session are not refreshed. The handwritten server has a known notification-handling gap; see [KHA-570](https://linear.app/khaentertainment/issue/KHA-570/keep-retrieval-fresh-and-consistent-across-cli-and-mcp) and [KHA-572](https://linear.app/khaentertainment/issue/KHA-572/fix-mcp-notification-handling-and-verify-client-interoperability). |
+| MarkedUp plugin | Limited | Compiled-in enrichment and optional search/graph MCP tools exist. Default manifest enrichment and retrieval from wiki files have a source-of-truth/identity mismatch, and provider raw-content exclusions differ. See [KHA-576](https://linear.app/khaentertainment/issue/KHA-576/make-enriched-graph-identity-stable-and-retrieval-read-only) and [KHA-571](https://linear.app/khaentertainment/issue/KHA-571/apply-one-raw-content-exclusion-policy-to-every-retrieval-provider). |
+| Beads task-to-page links | Implemented, optional | `plexium beads` links task IDs and wiki pages; `init --with-beads` is optional. Beads is not required for Plexium development. |
+| Memento transcript ingestion | Experimental | Ingestor and provenance components exist, but the dedicated nested transcript ingestion path is not wired into the default daemon workflow and a sanitization/review gate is missing. See [KHA-266](https://linear.app/khaentertainment/issue/KHA-266/wire-memento-transcript-ingestion-into-wiki-workflow-with-secret). |
+| Agent setup, provider cascade, and local status commands | Limited | Setup, connectivity checks, spending reports, and configurable providers are implemented. A package test or CLI path does not validate a paid provider or current external client version. |
+| Background daemon and `orchestrate` | Experimental | Polling, workspace management, and runner plumbing exist. The daemon's Linear tracker still returns `ErrNotImplemented`; the orchestration default runner is noop. This is not a completed autonomous task workflow. |
+| Obsidian output and role definitions | Limited | Init can generate Obsidian configuration/templates; roles have capability maps. End-to-end vault behavior and active role enforcement are not established. |
+| `bootstrap` | Stub | The command prints a placeholder and creates no wiki pages. |
+| Upstream PageIndex engine, tree plugin, external retrieval plugin lifecycle | Proposed | No upstream PageIndex engine is embedded or invoked by the current built-in MCP server. The May 31 [migration assessment](plans/pageindex-plugin-migration-roadmap.md) is a dated exploration, not an implementation plan already completed. [KHA-254](https://linear.app/khaentertainment/issue/KHA-254/evaluate-upstream-pageindex-dependency-or-adapter-boundary-for-plexium) closed the evaluation; any implementation requires separate prioritization. |
+| Hosted or multi-tenant service | Proposed | No production tenant, authentication, shared job/storage, or hosted deployment layer is present in this checkout. |
 
-## Stability Tiers
+## Evidence and interpretation
 
-| Tier | Meaning |
-|------|---------|
-| **Stable** | Tested in the validation suite, safe for daily use. Behavior is covered by safety invariants and determinism guarantees. |
-| **Experimental** | Functional scaffolding exists. Core logic runs, but integration points are incomplete or use placeholder implementations. |
-| **Stub** | The CLI command exists and accepts flags, but prints a placeholder message and performs no real work. |
-| **Partial** | Some subcommands or modes work; others are stubs or incomplete. Check the notes column for specifics. |
+The CLI command registration is in [`cmd/plexium/main.go`](../cmd/plexium/main.go). The in-tree search and server are in [`internal/integrations/pageindex/`](../internal/integrations/pageindex/). The [September 19 assessment](audits/2026-09-19-resync-and-product-assessment.md) includes code inspection, a full Go test run, and disposable CLI/MCP probes; it also names gaps that package tests missed. This review checked those findings against the current source and ran focused tests, but did not repeat paid-model, live GitHub Wiki, or external-client interoperability tests. Treat external integration claims accordingly.
 
----
+The original status page was dated April 6 and described every implemented command as “Stable.” Its test-count and invariant totals were a historical snapshot, not a current quality certificate. The known fresh-scaffold lint findings remain in the [validation report](validation/AUDIT-REPORT.md); they should be tested as an integrated workflow rather than inferred from individual checks.
 
-## Command Status
+## Decisions and follow-up
 
-| Command | Tier | Notes |
-|---------|------|-------|
-| `plexium init` | Stable | Scaffolds `.wiki/`, `.plexium/`, config, schema. Flags: `--github-wiki`, `--obsidian`, `--dry-run`, `--strictness`, `--with-memento`, `--with-beads`, `--with-pageindex` |
-| `plexium sync` | Stable | Detects stale pages via hash comparison, updates manifest, recompiles navigation. Flags: `--dry-run` |
-| `plexium convert` | Stable | Brownfield ingestion: scour, filter, ingest, link, lint. Page quality depends on heuristic-based content extraction. Flags: `--depth`, `--dry-run`, `--agent` |
-| `plexium lint` | Stable | Six deterministic checks (links, orphans, staleness, manifest, sidebar, frontmatter) plus optional LLM-augmented checks. Flags: `--deterministic`, `--full`, `--ci`, `--fail-on` |
-| `plexium compile` | Stable | Regenerates `_index.md` and `_Sidebar.md` from manifest. Deterministic, idempotent. Flags: `--dry-run` |
-| `plexium publish` | Stable | Pushes wiki files to GitHub Wiki remote. Respects publish/exclude filters and sensitivity rules. Flags: `--dry-run` |
-| `plexium gh-wiki-sync` | Stable | Selective sync to GitHub Wiki with manifest-aware filtering. Flags: `--dry-run`, `--push` |
-| `plexium doctor` | Stable | Validates config, wiki structure, manifest integrity, and integration health. |
-| `plexium migrate` | Stable | Applies schema migrations from `.plexium/migrations/`. Flags: `--dry-run`, `--version` |
-| `plexium retrieve` | Stable | Queries wiki via PageIndex with fallback to index scan. Flags: `--format` |
-| `plexium hook pre-commit` | Stable | Blocks commits when source files changed but wiki not updated. Respects strictness levels. |
-| `plexium hook post-commit` | Stable | Tracks WIKI-DEBT when commits bypass the pre-commit hook via `--no-verify`. |
-| `plexium ci check` | Stable | Diff-aware wiki validation for CI pipelines. Flags: `--base` (required), `--head` (required), `--output` |
-| `plexium plugin add` | Stable | Installs a plugin from `.plexium/plugins/`. Validates manifest, copies files, runs setup. Flags: `--path` |
-| `plexium plugin list` | Stable | Lists installed plugins with descriptions. |
-| `plexium beads link` | Stable | Links a task ID to a wiki page via frontmatter. Bidirectional, idempotent. |
-| `plexium beads unlink` | Stable | Removes a task-to-page link. |
-| `plexium beads pages` | Stable | Lists wiki pages linked to a task ID. |
-| `plexium beads tasks` | Stable | Lists task IDs linked to a wiki page. |
-| `plexium beads scan` | Stable | Scans all wiki pages and builds the complete task-page mapping. |
-| `plexium pageindex serve` | Stable | Starts a PageIndex MCP server (stdio mode) for agent-accessible wiki search. |
-| `plexium agent status` | Stable | Shows provider cascade health, daily spend, request counts, and rate limit state. |
-| `plexium agent test` | Stable | Tests provider connectivity via the cascade. Reports latency, tokens, and cost. Flags: `--provider` |
-| `plexium agent spend` | Stable | Shows daily spend per provider against budget limits. |
-| `plexium agent benchmark` | Stable | Benchmarks provider latency over 3 rounds. |
-| `plexium bootstrap` | Stub | Prints placeholder. No page generation logic implemented. |
-| `plexium agent start` | Experimental | Starts the background daemon, writes `.plexium/daemon.pid`, and uses the configured daemon runner/watches. |
-| `plexium agent stop` | Experimental | Stops the background daemon referenced by `.plexium/daemon.pid`. |
-| `plexium daemon` | Experimental | Poll loop and workspace management work. The LinearTracker returns `ErrNotImplemented` for all operations. Runner dispatches to external CLI tools (untested integration). Flags: `--poll-interval`, `--max-concurrent` |
-| `plexium orchestrate` | Experimental | Creates isolated worktree and runs retriever/documenter roles. Default runner is noop. Flags: `--issue` (required) |
-
----
-
-## Integration Status
-
-| Integration | Tier | What Works | What Does Not |
-|-------------|------|------------|---------------|
-| **Beads** (task linking) | Stable | Bidirectional task-to-page linking via frontmatter. Link, unlink, scan, query all functional. | - |
-| **PageIndex** (wiki search) | Stable | In-memory BM25 index with title/content/link/section scoring. MCP server for agent access. Fallback to index scan when PageIndex unavailable. | - |
-| **Memento** (session provenance) | Stable | Transcript ingestion from `.wiki/raw/memento-transcripts/`. Decision extraction via pattern matching. CI gate verifies git-notes on HEAD. | - |
-| **Obsidian** | Partial | Plexium generates `.obsidian/` config and dataview templates when `--obsidian` flag is used. | No end-to-end Obsidian workflow testing. Users should verify vault behavior independently. |
-| **Roles** (agent capabilities) | Partial | Four role definitions (coder, retriever, documenter, ingestor) with read/write capability maps. | Roles are data definitions only. No active enforcement or assignment. Used by orchestrate (experimental). |
-| **Linear** (issue tracking) | Stub | LinearTracker interface defined in daemon. | All methods return `ErrNotImplemented`. No Linear API calls. |
-
----
-
-## Known Limitations
-
-These are documented findings from the [post-build audit](validation/AUDIT-REPORT.md):
-
-1. **`_schema.md` lint false positives.** The generated schema contains `[[wiki-links]]` as documentation examples of syntax. The link crawler correctly identifies these as broken links because no `wiki-links.md` page exists. This produces lint errors on a freshly initialized repo. Workaround: ignore these specific findings, or exclude `_schema.md` from link checks.
-
-2. **Freshly scaffolded pages trigger frontmatter lint.** Scaffolded pages have minimal frontmatter (title, ownership, last-updated) but the schema prescribes additional fields (updated-by, related-modules, source-files, confidence, review-status, tags). This is expected behavior: agents fill in full frontmatter as they work on pages.
-
-3. **UnmanagedPages protection gap.** Human-authored page protection in `UpsertPage` only checks the `Pages` list. A page tracked only in `UnmanagedPages` can be added to `Pages` as managed. This is low risk because unmanaged pages are files found in `.wiki/` that are not tracked in the manifest.
-
----
-
-## Validation Summary
-
-The validation suite covers 540+ test functions across 25 packages.
-
-### Safety Invariants (7 proven)
-
-| ID | Invariant | Proven By |
-|----|-----------|-----------|
-| S1 | Source files unchanged after init, compile, and lint | 3 dedicated tests |
-| S2 | Dry-run produces no live file writes | 2 tests (init, compile) |
-| S3 | Human-authored pages cannot be overwritten by managed pages | 2 tests |
-| S4 | Init is non-destructive on re-run | 1 test |
-| S5 | Compile only writes `_index.md` and `_Sidebar.md` | 1 test |
-| S6 | Manifest upsert/remove preserves unrelated entries | 2 tests |
-
-### Determinism Guarantees (6 proven)
-
-| ID | Guarantee | Method |
-|----|-----------|--------|
-| D1 | Manifest pages sorted by WikiPath on every save | Verified across 5 runs |
-| D2 | Hash of same content produces same result | Verified across 10 runs |
-| D3 | Compile output identical across consecutive runs | Verified across 5 runs |
-| D4 | Lint results stable across consecutive runs | Verified across 3 runs |
-| D5 | Empty manifest compile produces stable minimal output | Single verification |
-| D6 | Manifest JSON shape is stable | Schema contract test |
-
-### Cross-Phase Contracts (10 verified)
-
-- PageEntry struct: 10 fields locked
-- SourceFile struct: 3 fields locked
-- UnmanagedEntry struct: 3 fields locked
-- Manifest top-level: 5 fields locked
-- Config struct: 16 top-level fields locked
-- Wiki config: 7 fields verified
-- Ownership values: `managed`, `human-authored`, `co-maintained`
-- Lint report JSON shape: stable
-- Lint exit codes: 0 (clean), 1 (errors), 2 (warnings)
-- Config validation catches missing required fields
+- The preserved May 26 [MarkedUp release strategy decision](decisions/KHA-299-markedup-release-strategy.md) records the pinned-dependency approach. Its compatibility-test and release-contract follow-ups remain [KHA-574](https://linear.app/khaentertainment/issue/KHA-574/gate-markedup-dependency-bumps-with-integration-contract-tests) and [KHA-578](https://linear.app/khaentertainment/issue/KHA-578/establish-reproducible-markedup-test-and-release-contracts); the decision is not evidence that those gates already run.
+- The preserved May 31 [PageIndex migration assessment](plans/pageindex-plugin-migration-roadmap.md) compares possible provider boundaries. It explicitly made no implementation changes. KHA-254 records the evaluation outcome: keep in-tree retrieval for Solo Developer v1 and repair its contract through KHA-570 before considering a distinct tree prototype or upstream adapter.
+- The [Beads retirement audit](audits/2026-09-27-beads-retirement-audit.md) explains why these two historical documents were recovered and why task tracking moved to Linear while the optional `plexium beads` product commands remain.
