@@ -109,7 +109,7 @@ git memento commit <session-id> -m "commit message"
 |------|---------|
 | `docs/phases/OVERVIEW.md` | **Primary build guide.** Orchestration spine with dependency graph, status tracker, prerequisite decisions. |
 | `docs/architecture/core-architecture.md` | **Architecture reference.** Extracted invariant context: layers, vault, schema, ownership, manifest, config, invariants. |
-| `docs/phases/phase-0-project-setup.md` | Project bootstrap. Toolchain choice, bd init, memento init, CI skeleton. |
+| `docs/phases/phase-0-project-setup.md` | Historical project bootstrap: toolchain, task-tracker setup, memento, CI skeleton. |
 | `docs/phases/phase-1-cli-foundation.md` | Milestone 1. CLI skeleton, config loader, scanner, normalizer, templates. |
 | `docs/phases/phase-2-page-generation.md` | Milestone 2. Taxonomy, generators, nav files. |
 | `docs/phases/phase-3-state-publishing.md` | Milestone 3. Manifest, publish, init, dry-run. |
@@ -158,7 +158,7 @@ Execution Plane (opt-in)      → WORKFLOW.md, daemon, workspace mgr, runner/tra
 
 | Phase | Milestone | Focus |
 |-------|-----------|-------|
-| 0 | Project Setup | Repo init, toolchain, bd, memento, CI skeleton |
+| 0 | Project Setup | Repo init, toolchain, historical task-tracker setup, memento, CI skeleton |
 | 1 | CLI Foundation | Command routing, config loader, scanner, normalizer, templates |
 | 2 | Page Generation | Taxonomy classifier, generators, nav files |
 | 3 | State & Publishing | Manifest, hash computation, publish, init, dry-run |
