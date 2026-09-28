@@ -85,21 +85,7 @@ September 2026 and is no longer installed or available. It must not be used.
 
 ## Build Tooling
 
-This project uses **bd (beads)** and **memento** as build tools from day 1.
-
-### bd (Beads) — Task Management
-
-Track all milestone work as bd epics:
-
-```bash
-bd stats           # See all milestone epics and status
-bd ready           # See next actionable tasks
-bd dolt push       # Push beads data to remote (REQUIRED before git push)
-```
-
-**Important:** Run `bd dolt push` BEFORE `git push` to sync issue data to remote.
-
-**Epics:** `plexium-p0` (Phase 0) through `plexium-m10` (Milestone 10)
+Task tracking follows the owner's current workflow; `bd` is not required for development. The historical Beads epics (`plexium-p0` through `plexium-m10`) remain useful as context. Plexium's optional `plexium beads` commands link task IDs to wiki pages for users who choose Beads.
 
 ### memento — Session Provenance
 

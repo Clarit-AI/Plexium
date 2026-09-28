@@ -14,31 +14,15 @@ The codebase is the raw source layer. The `.wiki/` vault is the synthesized know
 
 **The pitch:** *Give it your repo, and it builds, maintains, and enforces a living wiki that makes every agent session smarter than the last.*
 
-**Build tooling:** This project uses **bd (beads)** for task graph management and **memento** for session provenance. Both are configured from day 1 — not as Plexium features to build, but as build tools to use during development.
+**Build tooling:** Early development used **bd (beads)** for task tracking and **memento** for session provenance. Current task tracking follows the owner's workflow. Beads remains an optional Plexium product integration for linking task IDs to wiki pages.
 
 ---
 
 ## Build Tooling
 
-### bd (Beads) — Task Graph Management
+### Task Tracking
 
-All phases are tracked as bd epics. Use `bd` to navigate work across sessions.
-
-```bash
-# Initialize (Phase 0 creates this)
-bd init
-
-# See all milestone epics and their status
-bd stats
-
-# See next actionable tasks
-bd ready
-
-# Create a task in a phase epic
-bd task add epic:<phase-id> "Implement config loader" --priority high
-```
-
-**Epic naming convention:** `plexium-m1` through `plexium-m10` for milestones, `plexium-p0` for project setup.
+Use the active project workflow to coordinate new work. The original phase plan was tracked in Beads epics `plexium-p0` and `plexium-m1` through `plexium-m10`; those IDs are historical references, not a requirement to use `bd` for new tasks.
 
 ### memento — Session Provenance
 
@@ -264,7 +248,7 @@ For detailed architectural context, see `docs/architecture/core-architecture.md`
 ## Build Norms
 
 1. **Every commit is memento-captured.** Run `git memento doctor` before pushing. If it fails, fix before pushing.
-2. **Use `bd` for task tracking.** Don't just start working — log the task first so progress is visible across sessions.
+2. **Make work visible across sessions.** Record and update tasks in the active project workflow.
 3. **Reference architecture docs, don't duplicate.** When implementing, link to relevant sections of `core-architecture.md` rather than copying context into your implementation notes.
 4. **Phase docs are the living spec.** The archived original (`docs/reference/plexium-spec-full.md`) is reference only. Implementation decisions live in the phase docs.
 5. **Resolve open design questions before the blocking phase.** Check the prerequisite table above before starting a new phase.

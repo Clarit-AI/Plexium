@@ -87,15 +87,9 @@ One logical change per PR. If a PR touches multiple unrelated areas, split it.
 
 ---
 
-## Task Tracking with bd (Beads)
+## Task Tracking
 
-Plexium uses [bd (beads)](https://github.com/mandel-macaque/beads) for task management.
-
-```bash
-bd stats           # See all milestone epics and status
-bd ready           # See next actionable tasks
-bd dolt push       # Push beads data to remote (run before git push)
-```
+Coordinate work using the issue tracker or development workflow agreed with the maintainers. Beads is not required to contribute. If you use Beads, Plexium's optional [`plexium beads` commands](docs/user-guide.md#beads-integration-stable) can link task IDs to wiki pages.
 
 ---
 

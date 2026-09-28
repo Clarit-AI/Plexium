@@ -1,6 +1,6 @@
 # Agent Instructions
 
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
+Use the task-tracking workflow specified by the owner for the current work. Beads is not required for Plexium development. Historical Beads issues can provide context; Plexium's optional `plexium beads` commands remain available to users who link task IDs to wiki pages.
 
 ## Current Traycer Epic and Handoff
 
@@ -10,16 +10,6 @@ This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get sta
 - **Repo copy for recovery:** [docs/handoffs/2026-09-26-jev-orchestrator.md](docs/handoffs/2026-09-26-jev-orchestrator.md)
 
 The handoff covers the Jev follow-on work and the MarkedUp/Plexium Linear backlog. Read the repo copy when reopening this work; the Traycer handoff was previously swept out of the live artifacts directory and restored from quarantine.
-
-## Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work atomically
-bd close <id>         # Complete work
-bd dolt push          # Push beads data to remote
-```
 
 ## Non-Interactive Shell Commands
 
@@ -45,49 +35,9 @@ cp -rf source dest          # NOT: cp -r source dest
 - `apt-get` - use `-y` flag
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
-## Beads Issue Tracker
-
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
-
-### Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
-```
-
-### Rules
-
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
 ## Session Completion
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd dolt push
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-<!-- END BEADS INTEGRATION -->
+1. Record remaining work and update status in the workflow chosen for the task.
+2. Run quality gates appropriate to the changes.
+3. Commit only task-owned changes, preserve unrelated working-tree edits, and safely sync and push the branch. Work with committed changes is not complete until the push succeeds.
+4. Verify the branch is up to date with its remote and provide a handoff for the next session.
