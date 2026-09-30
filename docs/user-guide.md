@@ -14,7 +14,7 @@ Use this guide for day-to-day operation. For the higher-level product map and su
 - [Memento Integration](memento-integration.md)
 - [Inspirations](inspirations.md)
 
-For command-level detail, see [CLI Reference](cli-reference.md). For stability information, see [Status](status.md).
+For command-level detail, see [CLI Reference](cli-reference.md). For the current implementation tiers and limitations, see [Status](status.md).
 
 ---
 
@@ -291,11 +291,11 @@ plexium retrieve "authentication flow"
 plexium retrieve "database schema" --format json
 ```
 
-The search engine uses BM25-style scoring across five dimensions: page titles, section headings, summaries, content bodies, and `[[wiki-links]]`. Results are ranked by relevance. When the PageIndex returns no results, it falls back to `_index.md` parsing combined with content grep to ensure queries always return something useful.
+Plexium's in-tree index ranks substring matches in page titles, path sections, first-paragraph summaries, and `[[wiki-links]]`. It is not upstream PageIndex or full-body BM25. When the index has no hit, the CLI falls back to `_index.md` parsing and a content scan; a fallback can still return no matches.
 
 ### MCP Server (Optional)
 
-The MCP server exposes the same PageIndex search engine over JSON-RPC 2.0 stdio, making the wiki queryable by any agent that supports the [Model Context Protocol](https://modelcontextprotocol.io). This is not a separate system -- it is the same engine that powers `plexium retrieve`, accessed through a different interface.
+The MCP server exposes Plexium's in-tree index over JSON-RPC 2.0 stdio for agents that support the [Model Context Protocol](https://modelcontextprotocol.io). The CLI shares that index but adds a fallback content scan; MCP search does not use the fallback and its index is loaded when the server starts.
 
 ```bash
 plexium pageindex serve
@@ -357,7 +357,7 @@ Once configured, your agent can call `pageindex_search`, `pageindex_get_page`, a
 
 ---
 
-## Beads Integration [Stable]
+## Beads Integration [Implemented, optional]
 
 Link task tracking (bd/beads) entries to wiki pages:
 
@@ -382,7 +382,7 @@ Links are stored in wiki page frontmatter as `beads-ids: [BD-42, BD-43]`. Linkin
 
 ---
 
-## Plugin Adapters [Stable]
+## Plugin Adapters [Implemented]
 
 Plexium generates agent-specific instruction files via plugins. Most users should prefer the higher-level onboarding command:
 
@@ -421,7 +421,7 @@ Each plugin runs a `plugin.sh` script that generates an instruction file (e.g., 
 
 ---
 
-## Schema Migrations [Stable]
+## Schema Migrations [Implemented]
 
 When the `_schema.md` format changes between Plexium versions:
 
@@ -733,7 +733,7 @@ Without the assistive agent, `--full` falls back to deterministic checks only.
 
 ## Experimental Features
 
-The following features have functional scaffolding but limited real-world testing. See [Status](status.md) for details.
+The following workflows are incomplete or need real-world validation. See [Status](status.md) for the current implementation tiers and limitations.
 
 ### Orchestrate [Experimental]
 

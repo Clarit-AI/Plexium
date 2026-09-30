@@ -379,4 +379,4 @@ Init is non-destructive: it skips files that already exist and only creates the 
 
 - [User Guide](user-guide.md): workflows for greenfield, brownfield, and incremental wiki maintenance
 - [CLI Reference](cli-reference.md): every command, flag, and environment variable
-- [Status](status.md): what is stable, experimental, and planned
+- [Status](status.md): what is implemented, limited, experimental, and proposed

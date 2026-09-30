@@ -38,12 +38,12 @@ To verify the installed binary directly without changing `PATH`:
 
 **Symptom:** `git commit` fails with a message about wiki not being updated.
 
-**Cause:** The pre-commit hook detected that source files changed but the wiki was not updated to reflect those changes.
+**Cause:** Staged source changes have no relevant staged wiki page. The hook checks manifest mappings and matching filename stems for staged wiki and source files; it does not read the sync freshness ledger.
 
 **Fix depends on your strictness level** (set in `.plexium/config.yml` under `enforcement.strictness`):
 
-- **strict**: the commit is blocked. Run `plexium sync` to update the wiki, then commit again.
-- **moderate**: the commit is allowed with a warning. The wiki update can happen later.
+- **strict**: the commit is blocked. Review the affected wiki page, stage a relevant wiki update alongside the source change, and commit. This staged wiki update is what satisfies the hook. After manual verification, you may separately run `plexium sync --mark-reviewed` to advance the freshness ledger; that command does not unblock the hook.
+- **moderate**: the commit is also blocked when no relevant wiki update is staged. The hook suggests `git commit --no-verify` as a bypass.
 - **advisory**: a notice is logged, no blocking.
 
 **To bypass once:**
@@ -52,7 +52,7 @@ To verify the installed binary directly without changing `PATH`:
 git commit --no-verify -m "your message"
 ```
 
-The post-commit hook records this as WIKI-DEBT. Run `plexium sync` later to clear the debt.
+The post-commit hook records this as WIKI-DEBT. Review and update the wiki afterward; `plexium sync` alone does not clear the debt-log entry.
 
 **To change the default strictness:**
 
