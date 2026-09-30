@@ -5,7 +5,6 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8.svg" alt="Go 1.25+" /></a>
-  <a href="docs/status.md"><img src="https://img.shields.io/badge/Tests-540%2B_passing-brightgreen.svg" alt="Tests: 540+" /></a>
   <a href="https://deepwiki.com/Clarit-AI/Plexium"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" /></a>
   <img src="https://img.shields.io/coderabbit/prs/github/Clarit-AI/Plexium?logo=CodeRabbit&logoColor=%23FFFFFF&color=%23FF570A" alt="CodeRabbit Pull Request Reviews" />
 </p>
@@ -32,7 +31,7 @@ When you run Plexium in a repository, it creates two project-local surfaces:
 From there, Plexium gives you three ways to use that memory:
 
 - read and maintain it as a browsable wiki in GitHub Wiki or Obsidian
-- retrieve answers from it with `plexium retrieve` or PageIndex over MCP
+- retrieve pages from it with `plexium retrieve` or Plexium's PageIndex-inspired MCP tools
 - keep it in sync with your code through hooks, CI, and optional background automation
 
 Plexium is also deliberately **per repository**. You install the `plexium` binary once on your machine, but you run `plexium init` or `plexium setup <agent>` inside each repository you want Plexium to manage. It does not silently apply itself to every repo on your machine.
@@ -59,7 +58,7 @@ Plexium stores durable project understanding in `.wiki/`: architecture pages, mo
 
 ### Retrieval Layer
 
-Plexium includes a built-in retrieval engine over the wiki. You can query it directly from the CLI with `plexium retrieve "query"`, or expose the same engine over MCP with `plexium pageindex serve` so Claude, Codex, or other agents can pull relevant wiki context inside their own sessions. The marketplace/plugin bundles wrap that same retrieval surface instead of inventing a second system.
+Plexium includes an in-tree wiki index. You can query it from the CLI with `plexium retrieve "query"`, or expose it over MCP with `plexium pageindex serve` so Claude, Codex, or other agents can pull wiki context inside their own sessions. The CLI also has a fallback content scan when its index has no hit. The marketplace/plugin bundles wrap that same retrieval surface instead of inventing a second system.
 
 If you want the raw MCP setup path, use:
 

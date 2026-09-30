@@ -42,7 +42,7 @@ To verify the installed binary directly without changing `PATH`:
 
 **Fix depends on your strictness level** (set in `.plexium/config.yml` under `enforcement.strictness`):
 
-- **strict**: the commit is blocked. Run `plexium sync` to update the wiki, then commit again.
+- **strict**: the commit is blocked. Review and update the affected wiki page, then run `plexium sync --mark-reviewed` if you have manually verified it against the changed source. Commit the reviewed wiki change.
 - **moderate**: the commit is allowed with a warning. The wiki update can happen later.
 - **advisory**: a notice is logged, no blocking.
 

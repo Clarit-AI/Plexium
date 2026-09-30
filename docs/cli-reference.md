@@ -2,7 +2,7 @@
 
 > Plexium v0.1.0
 
-Stability tiers are defined in [status.md](status.md). Commands marked **[Stub]** or **[Experimental]** have limited or no functionality.
+Implementation tiers are defined in [status.md](status.md). **Implemented** records a tested code path, not a production reliability guarantee; **Limited** flags a known contract or validation gap. **Experimental** and **Stub** identify incomplete workflows and placeholders.
 
 ---
 
@@ -19,7 +19,7 @@ These flags apply to every command.
 
 ## Commands
 
-### `plexium init` [Stable]
+### `plexium init` [Implemented]
 
 Scaffold a Plexium wiki in the current repository.
 
@@ -56,7 +56,7 @@ Non-destructive on re-run: skips files that already exist.
 
 ---
 
-### `plexium sync` [Stable]
+### `plexium sync` [Limited]
 
 Detect stale wiki pages and update the manifest after source changes.
 
@@ -64,11 +64,14 @@ Detect stale wiki pages and update the manifest after source changes.
 plexium sync [flags]
 ```
 
-Loads the manifest, compares stored source hashes against current file contents, updates hashes for stale pages, detects new source files not yet tracked, and recompiles navigation files.
+Loads the manifest, compares current source content with the last validated revision, records observed hashes, detects new source files, and recompiles navigation. Plain sync keeps changed pages stale until successful regeneration or an explicit manual review mark.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--dry-run` | boolean | `false` | Preview stale pages without writing changes |
+| `--ci` | boolean | `false` | Exit non-zero while stale pages remain |
+| `--regenerate` | boolean | `false` | Regenerate stale pages with a configured provider |
+| `--mark-reviewed` | boolean | `false` | Explicitly advance validated freshness after manual review |
 
 **Examples:**
 
@@ -78,13 +81,19 @@ plexium sync
 
 # Preview what sync would detect
 plexium sync --dry-run
+
+# Keep CI red while a changed page remains unreviewed
+plexium sync --ci
+
+# After checking the page against its source
+plexium sync --mark-reviewed
 ```
 
-Idempotent: running sync twice after a source change produces 0 stale pages on the second run.
+A second plain sync continues to report stale content. `--mark-reviewed` is an operator assertion, not an automatic content check. See [Status: source sync](status.md) for the current boundary.
 
 ---
 
-### `plexium convert` [Stable]
+### `plexium convert` [Implemented]
 
 Bootstrap a wiki from an existing repository (brownfield ingestion).
 
@@ -115,7 +124,7 @@ plexium convert --agent claude
 
 ---
 
-### `plexium lint` [Stable]
+### `plexium lint` [Implemented]
 
 Check wiki health using deterministic structural checks and optional LLM-augmented semantic analysis.
 
@@ -155,7 +164,7 @@ plexium lint --full
 
 ---
 
-### `plexium compile` [Stable]
+### `plexium compile` [Implemented]
 
 Regenerate shared navigation files from the current manifest state.
 
@@ -178,7 +187,7 @@ plexium compile --dry-run
 
 ---
 
-### `plexium publish` [Stable]
+### `plexium publish` [Implemented]
 
 Push wiki files to the GitHub Wiki remote.
 
@@ -201,7 +210,7 @@ plexium publish
 
 ---
 
-### `plexium gh-wiki-sync` [Stable]
+### `plexium gh-wiki-sync` [Implemented]
 
 Sync wiki to GitHub Wiki with manifest-aware filtering.
 
@@ -228,17 +237,17 @@ plexium gh-wiki-sync --push
 
 ---
 
-### `plexium retrieve` [Stable]
+### `plexium retrieve` [Limited]
 
-Query the wiki for information using PageIndex search with fallback.
+Query the wiki through Plexium's in-tree lexical index with fallback.
 
 ```bash
 plexium retrieve "<query>" [flags]
 ```
 
-Searches the wiki using the built-in PageIndex engine with BM25-scored matching across titles, section headings, summaries, content, and wiki-links. Falls back to `_index.md` parsing and content grep when PageIndex returns no results. This command works immediately after `plexium init` with no additional setup.
+The in-tree index uses substring weights over titles, path sections, first-paragraph summaries, and wiki-links. It does not use upstream PageIndex or full-body BM25. If loading fails or no indexed hit exists, the CLI falls back to `_index.md` parsing and a content scan. This command needs no external PageIndex installation.
 
-The same search engine is available over MCP via [`plexium pageindex serve`](#plexium-pageindex-serve-stable). See [User Guide: Wiki Retrieval](user-guide.md#wiki-retrieval) for details on both interfaces.
+The in-tree index is also available over MCP via [`plexium pageindex serve`](#plexium-pageindex-serve-limited); the CLI adds the fallback scan. See [User Guide: Wiki Retrieval](user-guide.md#wiki-retrieval) for details on both interfaces.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
@@ -253,7 +262,7 @@ plexium retrieve "database schema" --format json
 
 ---
 
-### `plexium doctor` [Stable]
+### `plexium doctor` [Implemented]
 
 Validate Plexium configuration and setup.
 
@@ -267,7 +276,7 @@ No flags.
 
 ---
 
-### `plexium setup` [Stable]
+### `plexium setup` [Limited]
 
 Canonical repo onboarding for Claude Code or Codex.
 
@@ -297,7 +306,7 @@ plexium setup codex --write-config --with-memento
 
 ---
 
-### `plexium verify` [Stable]
+### `plexium verify` [Limited]
 
 Agent-specific readiness verification for Plexium repositories.
 
@@ -318,7 +327,7 @@ plexium verify codex
 
 ---
 
-### `plexium migrate` [Stable]
+### `plexium migrate` [Implemented]
 
 Apply schema migrations to the wiki.
 
@@ -342,7 +351,7 @@ plexium migrate --version 3
 
 ---
 
-### `plexium hook pre-commit` [Stable]
+### `plexium hook pre-commit` [Limited]
 
 Pre-commit hook entry point. Checks whether source file changes are accompanied by wiki updates.
 
@@ -359,7 +368,7 @@ No flags.
 
 ---
 
-### `plexium hook post-commit` [Stable]
+### `plexium hook post-commit` [Limited]
 
 Post-commit hook entry point. Tracks documentation debt when commits bypass the pre-commit hook.
 
@@ -373,7 +382,7 @@ No flags.
 
 ---
 
-### `plexium ci check` [Stable]
+### `plexium ci check` [Limited]
 
 Diff-aware wiki validation for CI pipelines.
 
@@ -398,7 +407,7 @@ plexium ci check --base abc1234 --head def5678 --output results.json
 
 ---
 
-### `plexium plugin add` [Stable]
+### `plexium plugin add` [Implemented]
 
 Install a Plexium plugin adapter.
 
@@ -406,7 +415,7 @@ Install a Plexium plugin adapter.
 plexium plugin add <name> [flags]
 ```
 
-Installs a bundled Plexium adapter by name, or installs a custom adapter from `--path`. Plexium validates `manifest.json`, copies the adapter into `.plexium/plugins/<name>/`, and runs `plugin.sh` to generate the target instruction file. Most users should prefer [`plexium setup`](#plexium-setup-stable), which wraps this command into the full onboarding flow.
+Installs a bundled Plexium adapter by name, or installs a custom adapter from `--path`. Plexium validates `manifest.json`, copies the adapter into `.plexium/plugins/<name>/`, and runs `plugin.sh` to generate the target instruction file. Most users should prefer [`plexium setup`](#plexium-setup-limited), which wraps this command into the full onboarding flow.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
@@ -421,7 +430,7 @@ plexium plugin add custom-adapter --path /path/to/plugin
 
 ---
 
-### `plexium plugin list` [Stable]
+### `plexium plugin list` [Implemented]
 
 List available Plexium plugins.
 
@@ -435,7 +444,7 @@ No flags.
 
 ---
 
-### `plexium beads link` [Stable]
+### `plexium beads link` [Implemented]
 
 Link a task ID to a wiki page.
 
@@ -447,7 +456,7 @@ Adds the task ID to the page's YAML frontmatter (`beads-ids` field). Idempotent:
 
 ---
 
-### `plexium beads unlink` [Stable]
+### `plexium beads unlink` [Implemented]
 
 Remove a task-to-page link.
 
@@ -457,7 +466,7 @@ plexium beads unlink <task-id> <wiki-path>
 
 ---
 
-### `plexium beads pages` [Stable]
+### `plexium beads pages` [Implemented]
 
 List wiki pages linked to a task.
 
@@ -469,7 +478,7 @@ Scans all wiki pages for the given task ID in frontmatter.
 
 ---
 
-### `plexium beads tasks` [Stable]
+### `plexium beads tasks` [Implemented]
 
 List task IDs linked to a wiki page.
 
@@ -481,7 +490,7 @@ Reads the page's frontmatter `beads-ids` field.
 
 ---
 
-### `plexium beads scan` [Stable]
+### `plexium beads scan` [Implemented]
 
 Build the complete task-page mapping.
 
@@ -493,23 +502,23 @@ Scans all wiki pages and returns every task-to-page link found.
 
 ---
 
-### `plexium pageindex serve` [Stable]
+### `plexium pageindex serve` [Limited]
 
-Start a PageIndex MCP server for agent-accessible wiki search.
+Start Plexium's in-tree MCP server for wiki search.
 
 ```bash
 plexium pageindex serve
 ```
 
-Runs in stdio mode using JSON-RPC 2.0. Exposes the same search engine used by [`plexium retrieve`](#plexium-retrieve-stable) over the Model Context Protocol. Agents connect via MCP and gain access to three tools: `pageindex_search`, `pageindex_get_page`, and `pageindex_list_pages`.
+Runs in stdio mode using JSON-RPC 2.0. Exposes the in-tree index used by [`plexium retrieve`](#plexium-retrieve-limited) over the Model Context Protocol; the CLI fallback scan is not used by MCP. Agents connect via MCP and gain access to three tools: `pageindex_search`, `pageindex_get_page`, and `pageindex_list_pages`.
 
-Use [`plexium pageindex connect`](#plexium-pageindex-connect-stable) for agent-specific setup guidance.
+Use [`plexium pageindex connect`](#plexium-pageindex-connect-limited) for agent-specific setup guidance.
 
 No flags.
 
 ---
 
-### `plexium pageindex connect` [Stable]
+### `plexium pageindex connect` [Limited]
 
 Show or apply the native MCP setup command for Claude Code or Codex.
 
@@ -519,7 +528,7 @@ plexium pageindex connect <agent> [flags]
 
 Supports `claude` and `codex`.
 
-For the canonical onboarding flow, prefer [`plexium setup`](#plexium-setup-stable). Use `pageindex connect` when you only want the native MCP command without the rest of the setup steps.
+For the canonical onboarding flow, prefer [`plexium setup`](#plexium-setup-limited). Use `pageindex connect` when you only want the native MCP command without the rest of the setup steps.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
@@ -536,7 +545,7 @@ plexium pageindex connect codex --write-config
 
 ---
 
-### `plexium agent status` [Stable]
+### `plexium agent status` [Limited]
 
 Show daemon activity, provider health, and cost tracking.
 
@@ -548,7 +557,7 @@ Displays the daemon runner, watches, recent activity, worktree counts, and each 
 
 ---
 
-### `plexium agent test` [Stable]
+### `plexium agent test` [Limited]
 
 Test provider connectivity.
 
@@ -564,7 +573,7 @@ Sends "Respond with: OK" to each provider (or a specific one) and reports latenc
 
 ---
 
-### `plexium agent spend` [Stable]
+### `plexium agent spend` [Limited]
 
 Show daily spend per provider.
 
@@ -576,7 +585,7 @@ Loads state from `.plexium/agent-state.json` and compares spend against the conf
 
 ---
 
-### `plexium agent benchmark` [Stable]
+### `plexium agent benchmark` [Limited]
 
 Benchmark provider latency.
 

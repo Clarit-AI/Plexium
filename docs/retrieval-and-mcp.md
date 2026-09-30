@@ -6,7 +6,7 @@ Plexium is not only a wiki generator. It also exposes the wiki as a queryable me
 
 ## The Retrieval Engine
 
-Plexium indexes the wiki and lets you search it by meaningfully weighted text signals such as page title, section headings, summaries, content, and wiki-links. In practice, that means you can ask a question like:
+Plexium indexes the wiki with its own PageIndex-inspired implementation. It scores substring matches in page titles, path sections, first-paragraph summaries, and wiki-links. In practice, that means you can ask a question like:
 
 ```bash
 plexium retrieve "how authentication works"
@@ -14,7 +14,7 @@ plexium retrieve "how authentication works"
 
 and get the most relevant wiki pages back without manually opening the entire vault.
 
-This is the same retrieval capability whether you call it from the CLI, from an MCP client, or through the repo-shipped plugin surfaces.
+The CLI and MCP server share this in-tree index. The CLI also falls back to `_index.md` and a content scan when the index has no hit; MCP search does not. The repo-shipped Claude and Codex bundles call these existing surfaces.
 
 ---
 
@@ -39,7 +39,7 @@ Use the CLI when:
 
 ## MCP Retrieval
 
-When you want an agent to access the wiki natively inside its own session, Plexium exposes the same retrieval engine through PageIndex over MCP:
+When you want an agent to access the wiki natively inside its own session, Plexium exposes its in-tree index through the PageIndex-named MCP command:
 
 ```bash
 plexium pageindex serve
