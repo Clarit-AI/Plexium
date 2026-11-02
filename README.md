@@ -7,6 +7,7 @@
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8.svg" alt="Go 1.25+" /></a>
   <a href="https://deepwiki.com/Clarit-AI/Plexium"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" /></a>
   <img src="https://img.shields.io/coderabbit/prs/github/Clarit-AI/Plexium?logo=CodeRabbit&logoColor=%23FFFFFF&color=%23FF570A" alt="CodeRabbit Pull Request Reviews" />
+  <a href="https://svg.khaentertainment.com/go?project=Clarit-AI/Plexium"><img src="https://svg.khaentertainment.com/badge.svg?gold=0&amp;project=Clarit-AI/Plexium" alt="Built with Showrunner" /></a>
 </p>
 
 <p align="center">
